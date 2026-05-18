@@ -1,0 +1,4 @@
+project_name = "mini-rust-project"
+project_root = "."
+source_roots = ["src"]
+output_dir = "target/analysis"

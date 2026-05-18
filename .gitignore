@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+target/
+rust_helpers/target/
+tests/fixtures/*/target/
