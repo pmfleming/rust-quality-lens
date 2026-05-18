@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import http.server
 import os
 from pathlib import Path
 import runpy
-import socketserver
 import sys
 from typing import Sequence
 
@@ -23,6 +21,13 @@ QUALITY_TOOLS = {
     "leverage": ("leverage_metrics", "leverage_metrics.json"),
 }
 
+MEASURE_TOOLS = {
+    **QUALITY_TOOLS,
+    "correctness": ("test_catalog", "correctness_review.json"),
+    "correctness-run": ("test_catalog", "correctness_review.json"),
+    "map": ("map", "map.json"),
+}
+
 
 def run_tool(module_name: str, argv: Sequence[str], config: LensConfig) -> None:
     old_argv = sys.argv[:]
@@ -32,6 +37,7 @@ def run_tool(module_name: str, argv: Sequence[str], config: LensConfig) -> None:
         "RQLENS_OUTPUT_DIR": os.environ.get("RQLENS_OUTPUT_DIR"),
         "RQLENS_HELPER_MANIFEST": os.environ.get("RQLENS_HELPER_MANIFEST"),
         "RQLENS_PROJECT_NAME": os.environ.get("RQLENS_PROJECT_NAME"),
+        "RQLENS_SOURCE_ROOTS": os.environ.get("RQLENS_SOURCE_ROOTS"),
     }
     try:
         os.chdir(config.project_root)
@@ -39,6 +45,7 @@ def run_tool(module_name: str, argv: Sequence[str], config: LensConfig) -> None:
         os.environ["RQLENS_OUTPUT_DIR"] = str(config.output_dir)
         os.environ["RQLENS_HELPER_MANIFEST"] = str(config.helper_manifest)
         os.environ["RQLENS_PROJECT_NAME"] = config.project_name
+        os.environ["RQLENS_SOURCE_ROOTS"] = os.pathsep.join(config.source_roots)
         sys.argv = [module_name, *argv]
         runpy.run_module(module_name, run_name="__main__")
     finally:
@@ -54,17 +61,19 @@ def run_tool(module_name: str, argv: Sequence[str], config: LensConfig) -> None:
 
 def measure(args: argparse.Namespace) -> None:
     config = LensConfig.load(args.config)
-    selected = list(QUALITY_TOOLS) if args.tool == "all" else [args.tool]
+    selected = list(MEASURE_TOOLS) if args.tool == "all" else [args.tool]
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
     for tool in selected:
-        module_name, file_name = QUALITY_TOOLS[tool]
+        module_name, file_name = MEASURE_TOOLS[tool]
         output_path = config.output_dir / file_name
         argv = ["--mode", "visibility", "--output", str(output_path)]
         if tool in {"hotspots", "clones", "escape-hatches", "type-health", "locality", "leverage"}:
             argv.extend(["--paths", *config.source_roots])
         if tool == "hotspots":
             argv.extend(["--scope", "all"])
+        if tool == "correctness-run":
+            argv.append("--run")
         run_tool(module_name, argv, config)
 
 
@@ -80,25 +89,39 @@ def catalog(args: argparse.Namespace) -> None:
                 "output_artifacts": [str(config.output_dir / file_name)],
             }
         )
+    tasks.extend(
+        [
+            {
+                "id": "correctness.catalog",
+                "category": "correctness",
+                "title": "Correctness Catalog",
+                "output_artifacts": [
+                    str(config.output_dir / "correctness_review.json"),
+                    str(config.output_dir / "test_catalog.json"),
+                ],
+            },
+            {
+                "id": "correctness.all",
+                "category": "correctness",
+                "title": "All Tests",
+                "output_artifacts": [str(config.output_dir / "correctness_review.json")],
+            },
+            {
+                "id": "map.architecture",
+                "category": "map",
+                "title": "Architecture Map",
+                "output_artifacts": [str(config.output_dir / "map.json")],
+            },
+        ]
+    )
     payload = {"version": 1, "project_name": config.project_name, "tasks": tasks}
     import json
 
     print(json.dumps(payload, indent=2))
 
 
-def serve(args: argparse.Namespace) -> None:
-    config = LensConfig.load(args.config)
-    root = Path(__file__).resolve().parents[2]
-    os.environ["RQLENS_OUTPUT_DIR"] = str(config.output_dir)
-    os.chdir(root)
-    handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("127.0.0.1", args.port), handler) as httpd:
-        print(f"rust-quality-lens viewer listening on http://127.0.0.1:{args.port}/viewer/")
-        httpd.serve_forever()
-
-
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Reusable Rust quality measurement tools")
+    parser = argparse.ArgumentParser(description="Reusable Rust measurement JSON producers")
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     measure_parser = subcommands.add_parser("measure", help="Run quality measurements")
@@ -106,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
         "tool",
         nargs="?",
         default="all",
-        choices=["all", *QUALITY_TOOLS.keys()],
+        choices=["all", *MEASURE_TOOLS.keys()],
         help="Quality measurement to run",
     )
     measure_parser.add_argument("--config", type=Path, default=None)
@@ -115,11 +138,6 @@ def build_parser() -> argparse.ArgumentParser:
     catalog_parser = subcommands.add_parser("catalog", help="Print the quality task catalog")
     catalog_parser.add_argument("--config", type=Path, default=None)
     catalog_parser.set_defaults(func=catalog)
-
-    serve_parser = subcommands.add_parser("serve", help="Serve the bundled viewer")
-    serve_parser.add_argument("--config", type=Path, default=None)
-    serve_parser.add_argument("--port", type=int, default=8765)
-    serve_parser.set_defaults(func=serve)
 
     return parser
 

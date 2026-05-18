@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -9,11 +10,11 @@ from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Sequence, S
 
 from report_modes import add_mode_argument, emit_report
 
-HOTSPOT_CMD = [".venv/Scripts/python.exe", "scripts/hotspots.py"]
 SLOWSPOT_CMD = [".venv/Scripts/python.exe", "scripts/slowspots.py", "--skip-bench"]
 DEFAULT_OUTPUT = Path("map.json")
 VISIBILITY_OUTPUT = Path("target/analysis/map.json")
 CORRECTNESS_PATH = Path("target/analysis/correctness_review.json")
+HOTSPOTS_PATH = Path("target/analysis/hotspots.json")
 
 AREA_COLORS = {
     "chrome": "#569cd6",
@@ -155,18 +156,17 @@ class ArchitectureMapper:
         )
 
     def gather_metrics(self) -> None:
-        from hotspots import HotspotAnalyzer
-        from dataclasses import asdict
         try:
-            analyzer = HotspotAnalyzer(top=None, scope="all", include_anonymous=False)
-            results = analyzer.run(["src"])
-            for metric in results:
-                item = asdict(metric)
+            payload = json.loads(HOTSPOTS_PATH.read_text(encoding="utf-8"))
+            results = payload if isinstance(payload, list) else payload.get("items", [])
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
                 mod_name = self._metric_module_name(item["name"])
                 if mod_name:
                     self.metrics[mod_name] = item
         except Exception as exc:
-            print(f"Warning: Could not gather complexity metrics: {exc}", file=sys.stderr)
+            print(f"Warning: Could not load hotspot metrics: {exc}", file=sys.stderr)
 
     def _metric_module_name(self, metric_name: str) -> Optional[str]:
         normalized_name = str(Path(metric_name).resolve())
@@ -944,8 +944,13 @@ def main() -> None:
     if args.refresh:
         refresh_analysis_inputs()
 
+    source_roots = [
+        root
+        for root in os.environ.get("RQLENS_SOURCE_ROOTS", "src").split(os.pathsep)
+        if root
+    ]
     mapper = ArchitectureMapper()
-    mapper.extract_dependencies("src")
+    mapper.extract_dependencies(source_roots[0] if source_roots else "src")
     mapper.gather_metrics()
     mapper.gather_performance()
     mapper.gather_test_support()

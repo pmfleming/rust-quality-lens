@@ -1,10 +1,11 @@
 # rust-quality-lens
 
-Reusable quality measurement tools for Rust projects.
+Reusable measurement JSON producers for Rust projects.
 
 This repository was extracted from Scratchpad's local measurement system. The
-first goal is to make the quality measurements portable across Rust projects
-without requiring each project to vendor a pile of scripts.
+first goal is to make quality, correctness, and architecture-map measurements
+portable across Rust projects without requiring each project to vendor a pile of
+scripts.
 
 ## What It Measures
 
@@ -14,6 +15,8 @@ without requiring each project to vendor a pile of scripts.
 - type health for broad structs, large enums, and wide impl surfaces
 - code locality and hidden coupling
 - architecture leverage and style pressure
+- correctness catalog coverage
+- architecture risk map data
 
 ## Quick Start
 
@@ -26,7 +29,7 @@ source_roots = ["src"]
 output_dir = "target/analysis"
 ```
 
-Run all quality producers:
+Run all JSON producers:
 
 ```powershell
 python -m rust_quality_lens.cli measure --config rqlens.toml
@@ -37,6 +40,8 @@ Run one producer:
 ```powershell
 python -m rust_quality_lens.cli measure escape-hatches --config rqlens.toml
 python -m rust_quality_lens.cli measure type-health --config rqlens.toml
+python -m rust_quality_lens.cli measure correctness --config rqlens.toml
+python -m rust_quality_lens.cli measure map --config rqlens.toml
 ```
 
 Print the task catalog:
@@ -45,11 +50,8 @@ Print the task catalog:
 python -m rust_quality_lens.cli catalog --config rqlens.toml
 ```
 
-Serve the bundled dashboard assets:
-
-```powershell
-python -m rust_quality_lens.cli serve --config rqlens.toml --port 8765
-```
+`rust-quality-lens` only writes JSON artifacts. Dashboards, hosted reports, and
+other interfaces should live in separate tools that consume those artifacts.
 
 ## External Tools
 
@@ -61,5 +63,6 @@ available.
 
 ## Current Extraction Status
 
-This is a copy-first extraction. Scratchpad can keep its existing script names as
-compatibility wrappers while the reusable package stabilizes.
+This is a copy-first extraction. Scratchpad keeps its existing dashboard and uses
+`scripts/rqlens.py` as a compatibility wrapper while the reusable JSON producers
+stabilize.
