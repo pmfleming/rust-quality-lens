@@ -2,10 +2,10 @@
 
 Reusable measurement JSON producers for Rust projects.
 
-This repository was extracted from Scratchpad's local measurement system. The
-first goal is to make quality, correctness, and architecture-map measurements
-portable across Rust projects without requiring each project to vendor a pile of
-scripts.
+This repository was extracted from Scratchpad's former local measurement
+system. The goal is to make quality, correctness, and architecture-map
+measurements portable across Rust projects without requiring each project to
+vendor dashboard code or project-specific scripts.
 
 ## What It Measures
 
@@ -50,8 +50,15 @@ Print the task catalog:
 python -m rust_quality_lens.cli catalog --config rqlens.toml
 ```
 
-`rust-quality-lens` only writes JSON artifacts. Dashboards, hosted reports, and
-other interfaces should live in separate tools that consume those artifacts.
+`rust-quality-lens` only writes JSON artifacts. It does not own a dashboard,
+local web server, or project UI. The current dashboard and local runner live in
+the sibling `project-management-board` repository, which consumes this lens'
+catalog and JSON outputs.
+
+For Scratchpad specifically, Scratchpad is now only the Rust editor project
+being measured. The Scratchpad checkout provides the source tree, Cargo targets,
+Rust probe binaries, benches, and `target/analysis` output directory. Dashboard
+orchestration belongs to `project-management-board`.
 
 ## External Tools
 
@@ -61,8 +68,13 @@ The AST clone and leverage analyses use helper binaries from
 `rust_helpers/Cargo.toml`. They run through Cargo automatically when `cargo` is
 available.
 
-## Current Extraction Status
+## Repository Boundaries
 
-This is a copy-first extraction. Scratchpad keeps its existing dashboard and uses
-`scripts/rqlens.py` as a compatibility wrapper while the reusable JSON producers
-stabilize.
+- `rust-quality-lens`: reusable Rust quality, correctness, and map JSON
+  producers.
+- `scratchpad-performance-lens`: Scratchpad-specific performance, telemetry,
+  and overview JSON producers.
+- `project-management-board`: React/TypeScript dashboard, task catalog, and
+  local run API for invoking the lenses.
+- `scratchpad`: the Rust editor application under measurement, not the owner of
+  measurement scripts or dashboard UI.
