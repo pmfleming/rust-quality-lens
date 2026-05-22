@@ -195,6 +195,14 @@ def run_helper_json(binary: str, files: Sequence[str], warning_label: str) -> Li
 
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        print(
+            f"Warning: {warning_label} failed with exit {exc.returncode}: {' '.join(cmd)}",
+            file=sys.stderr,
+        )
+        _print_process_tail("stderr", exc.stderr)
+        _print_process_tail("stdout", exc.stdout)
+        return []
     except Exception as exc:
         print(f"Warning: {warning_label} failed: {exc}", file=sys.stderr)
         return []
@@ -210,6 +218,15 @@ def run_helper_json(binary: str, files: Sequence[str], warning_label: str) -> Li
         print(f"Warning: {warning_label} output was malformed: {exc}", file=sys.stderr)
         return []
     return records if isinstance(records, list) else []
+
+
+def _print_process_tail(label: str, text: str | None, *, limit: int = 4000) -> None:
+    if not text:
+        return
+    trimmed = text.strip()
+    if len(trimmed) > limit:
+        trimmed = f"...{trimmed[-limit:]}"
+    print(f"{label}:\n{trimmed}", file=sys.stderr)
 
 
 def _write_lines_temp(lines: Sequence[str]) -> str:
