@@ -5,6 +5,7 @@ use proc_macro2::Span;
 use serde::Serialize;
 use std::collections::hash_map::DefaultHasher;
 use std::env;
+use std::error::Error;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use syn::{
@@ -61,20 +62,26 @@ impl<'ast> Visit<'ast> for AstNormalizer {
 }
 
 fn main() {
+    if let Err(error) = run() {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: ast_hasher <paths_file>");
-        return;
+    if args.iter().any(|arg| arg == "-h" || arg == "--help") {
+        print_usage();
+        return Ok(());
+    }
+    if args.len() != 2 {
+        print_usage();
+        return Err("expected exactly one paths file argument".into());
     }
 
     let paths_file = &args[1];
-    let paths_content = match fs::read_to_string(paths_file) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error reading paths file '{}': {}", paths_file, e);
-            return;
-        }
-    };
+    let paths_content = fs::read_to_string(paths_file)
+        .map_err(|error| format!("error reading paths file '{paths_file}': {error}"))?;
 
     let mut results = Vec::new();
 
@@ -85,7 +92,7 @@ fn main() {
         }
 
         let content = match fs::read_to_string(path) {
-            Ok(c) => c,
+            Ok(content) => content,
             Err(e) => {
                 eprintln!("Error reading file '{}': {}", path, e);
                 continue;
@@ -93,7 +100,7 @@ fn main() {
         };
 
         let file = match syn::parse_file(&content) {
-            Ok(f) => f,
+            Ok(file) => file,
             Err(e) => {
                 eprintln!("Error parsing file '{}': {}", path, e);
                 continue;
@@ -122,7 +129,13 @@ fn main() {
         }
     }
 
-    println!("{}", serde_json::to_string_pretty(&results).unwrap());
+    let json = serde_json::to_string_pretty(&results)?;
+    println!("{json}");
+    Ok(())
+}
+
+fn print_usage() {
+    eprintln!("Usage: ast_hasher <paths_file>");
 }
 
 fn span_start_line(span: Span) -> usize {

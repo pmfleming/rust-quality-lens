@@ -1,12 +1,16 @@
 import argparse
-import platform
 import re
-import sys
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+from common import (
+    iter_rust_files,
+    matching_brace,
+    module_key_for_path,
+    provenance,
+    strip_comments_and_strings,
+)
 from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("type_health.json")
@@ -69,11 +73,7 @@ class TypeHealthAnalyzer:
                 stats.impl_files.add(rel_path)
 
         rows: List[Dict] = []
-        provenance = {
-            "measured_at": datetime.now(timezone.utc).isoformat(),
-            "command": " ".join(sys.argv),
-            "host": platform.node(),
-        }
+        run_provenance = provenance()
 
         for record in declarations:
             stats = impls.get(record.type_name, ImplStats())
@@ -83,9 +83,9 @@ class TypeHealthAnalyzer:
             record.impl_file_count = len(record.impl_files)
             record.structural_risk, record.signals = self._risk(record)
             record.structural_score = round(max(0.0, 100.0 - record.structural_risk), 2)
-            record.measured_at = provenance["measured_at"]
-            record.command = provenance["command"]
-            record.host = provenance["host"]
+            record.measured_at = run_provenance["measured_at"]
+            record.command = run_provenance["command"]
+            record.host = run_provenance["host"]
             rows.append(asdict(record))
 
         rows.sort(
@@ -101,21 +101,7 @@ class TypeHealthAnalyzer:
         return rows
 
     def _iter_rust_files(self, paths: Sequence[str]) -> Iterable[Path]:
-        seen: Set[Path] = set()
-        for raw_path in paths:
-            path = Path(raw_path)
-            if path.is_file() and path.suffix == ".rs":
-                candidates = [path]
-            elif path.is_dir():
-                candidates = path.rglob("*.rs")
-            else:
-                candidates = []
-            for candidate in candidates:
-                resolved = candidate.resolve()
-                if resolved in seen:
-                    continue
-                seen.add(resolved)
-                yield candidate
+        yield from iter_rust_files(paths)
 
     def _type_declarations(
         self, source: str, module_key: str, path: str
@@ -224,110 +210,6 @@ class TypeHealthAnalyzer:
         if record.declaration_span >= 45:
             signals.append(f"large declaration {record.declaration_span} lines")
         return round(risk, 2), signals or ["stable"]
-
-
-def matching_brace(source: str, open_index: int) -> Optional[int]:
-    if open_index < 0 or open_index >= len(source) or source[open_index] != "{":
-        return None
-    depth = 0
-    for index in range(open_index, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return index
-    return None
-
-
-def strip_comments_and_strings(source: str) -> str:
-    result: List[str] = []
-    index = 0
-    state = "code"
-    raw_hashes = 0
-    while index < len(source):
-        ch = source[index]
-        nxt = source[index + 1] if index + 1 < len(source) else ""
-
-        if state == "code":
-            raw_match = re.match(r"r(#+)?\"", source[index:])
-            if ch == "/" and nxt == "/":
-                result.extend("  ")
-                index += 2
-                state = "line_comment"
-            elif ch == "/" and nxt == "*":
-                result.extend("  ")
-                index += 2
-                state = "block_comment"
-            elif raw_match:
-                hashes = raw_match.group(1) or ""
-                raw_hashes = len(hashes)
-                result.extend(" " * (2 + raw_hashes))
-                index += 2 + raw_hashes
-                state = "raw_string"
-            elif ch == '"':
-                result.append(" ")
-                index += 1
-                state = "string"
-            elif ch == "'" and re.match(r"'(?:\\.|[^'\\\n])'", source[index:]):
-                result.append(" ")
-                index += 1
-                state = "char"
-            else:
-                result.append(ch)
-                index += 1
-        elif state == "line_comment":
-            result.append("\n" if ch == "\n" else " ")
-            index += 1
-            if ch == "\n":
-                state = "code"
-        elif state == "block_comment":
-            if ch == "*" and nxt == "/":
-                result.extend("  ")
-                index += 2
-                state = "code"
-            else:
-                result.append("\n" if ch == "\n" else " ")
-                index += 1
-        elif state == "string":
-            if ch == "\\":
-                result.extend("  ")
-                index += 2
-            else:
-                result.append("\n" if ch == "\n" else " ")
-                index += 1
-                if ch == '"':
-                    state = "code"
-        elif state == "char":
-            if ch == "\\":
-                result.extend("  ")
-                index += 2
-            else:
-                result.append("\n" if ch == "\n" else " ")
-                index += 1
-                if ch == "'":
-                    state = "code"
-        elif state == "raw_string":
-            terminator = '"' + ("#" * raw_hashes)
-            if source.startswith(terminator, index):
-                result.extend(" " * len(terminator))
-                index += len(terminator)
-                state = "code"
-            else:
-                result.append("\n" if ch == "\n" else " ")
-                index += 1
-    return "".join(result)
-
-
-def module_key_for_path(path: Path) -> str:
-    try:
-        rel = path.relative_to("src")
-    except ValueError:
-        rel = path
-    parts = list(rel.with_suffix("").parts)
-    if parts and parts[-1] == "mod":
-        parts = parts[:-1]
-    return "::".join(parts)
 
 
 def render_cli(payload: object) -> str:

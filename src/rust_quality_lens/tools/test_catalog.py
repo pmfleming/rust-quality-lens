@@ -1,14 +1,13 @@
 import argparse
 import json
-import os
 import re
 import subprocess
-import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
-from report_modes import add_mode_argument, emit_report
+from common import iter_rust_files
+from report_modes import add_mode_argument, analysis_path, emit_report
 
 DEFAULT_OUTPUT = Path("correctness_review.json")
 VISIBILITY_OUTPUT = Path("target/analysis/correctness_review.json")
@@ -18,10 +17,7 @@ MANIFEST_PATH = Path("Cargo.toml")
 
 
 def output_path(path: Path) -> Path:
-    output_dir = os.environ.get("RQLENS_OUTPUT_DIR")
-    if output_dir and not path.is_absolute() and "target/analysis" in path.as_posix():
-        return Path(output_dir) / path.name
-    return path
+    return analysis_path(path)
 
 LAYER_RULES = [
     ("App Shell and State", ("app_state", "app_tests.rs")),
@@ -104,24 +100,6 @@ def description_for(path: Path, name: str, overrides: Dict[str, str]) -> str:
     if path.name in FILE_DESCRIPTIONS:
         return FILE_DESCRIPTIONS[path.name]
     return title_from_name(name)
-
-
-def iter_rust_files(paths: Iterable[Path]) -> Iterable[Path]:
-    seen = set()
-    for root in paths:
-        if not root.exists():
-            continue
-        if root.is_file() and root.suffix == ".rs":
-            normalized = root.as_posix()
-            if normalized not in seen:
-                seen.add(normalized)
-                yield root
-        else:
-            for path in root.rglob("*.rs"):
-                normalized = path.as_posix()
-                if normalized not in seen:
-                    seen.add(normalized)
-                    yield path
 
 
 def cargo_manifest_rust_targets() -> List[Path]:

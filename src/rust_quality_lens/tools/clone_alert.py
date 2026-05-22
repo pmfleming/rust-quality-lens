@@ -1,16 +1,15 @@
 import argparse
 import bisect
 import hashlib
-import json
 import re
 import shutil
-import subprocess
 import sys
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import DefaultDict, Dict, Iterable, List, Sequence, Set, Tuple
 
+from common import iter_rust_files, run_helper_json
 from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("clones.json")
@@ -146,13 +145,7 @@ class CloneAnalyzer:
         return tokens
 
     def _iter_rust_files(self, paths: Sequence[str]) -> Iterable[Path]:
-        for raw_path in paths:
-            path = Path(raw_path)
-            if path.is_file() and path.suffix == ".rs":
-                yield path
-                continue
-            if path.is_dir():
-                yield from path.rglob("*.rs")
+        yield from iter_rust_files(paths)
 
     def _read_rust_inputs(
         self,
@@ -245,42 +238,6 @@ class CloneAnalyzer:
         )
 
     @staticmethod
-    def _write_file_list(files: Sequence[str]) -> str:
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as handle:
-            for file_path in files:
-                handle.write(f"{file_path}\n")
-            return handle.name
-
-    @staticmethod
-    def _run_ast_hasher(temp_path: str) -> List[Dict[str, object]]:
-        import os
-
-        cmd = ["cargo", "run", "--quiet"]
-        helper_manifest = os.environ.get("RQLENS_HELPER_MANIFEST")
-        if helper_manifest:
-            cmd.extend(["--manifest-path", helper_manifest])
-        cmd.extend(["--bin", "ast_hasher", "--", temp_path])
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        except Exception as exc:
-            print(f"Warning: AST clone analysis failed: {exc}", file=sys.stderr)
-            return []
-        finally:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-
-        try:
-            records = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            print(f"Warning: AST clone output was malformed: {exc}", file=sys.stderr)
-            return []
-        return records if isinstance(records, list) else []
-
-    @staticmethod
     def _ast_instances_by_hash(records: Sequence[Dict[str, object]]) -> DefaultDict[str, List[CloneInstance]]:
         groups_by_hash: DefaultDict[str, List[CloneInstance]] = defaultdict(list)
         for record in records:
@@ -363,7 +320,7 @@ class CloneAnalyzer:
             print("Warning: cargo not found; skipping AST clone analysis.", file=sys.stderr)
             return []
 
-        records = self._run_ast_hasher(self._write_file_list(all_files))
+        records = run_helper_json("ast_hasher", all_files, "AST clone analysis")
         groups_by_hash = self._ast_instances_by_hash(records)
 
         groups: List[CloneGroup] = []

@@ -1,16 +1,11 @@
 import argparse
-import json
-import os
-import platform
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set
 
+from common import iter_rust_files, provenance, run_helper_json
 from map import ArchitectureMapper
 from report_modes import add_mode_argument, emit_report
 
@@ -23,13 +18,7 @@ class LeverageAnalyzer:
         self.top = top
 
     def _iter_rust_files(self, paths: Sequence[str]) -> Iterable[Path]:
-        for raw_path in paths:
-            path = Path(raw_path)
-            if path.is_file() and path.suffix == ".rs":
-                yield path
-                continue
-            if path.is_dir():
-                yield from path.rglob("*.rs")
+        yield from iter_rust_files(paths)
 
     def run(self, paths: Sequence[str]) -> List[Dict]:
         mapper = ArchitectureMapper()
@@ -63,38 +52,7 @@ class LeverageAnalyzer:
             print("Warning: cargo not found; skipping leverage AST style analysis.", file=sys.stderr)
             return []
 
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as f:
-            for file_path in all_files:
-                f.write(f"{file_path}\n")
-            temp_path = f.name
-
-        cmd = ["cargo", "run", "--quiet"]
-        helper_manifest = os.environ.get("RQLENS_HELPER_MANIFEST")
-        if helper_manifest:
-            cmd.extend(["--manifest-path", helper_manifest])
-        cmd.extend(["--bin", "leverage_ast", "--", temp_path])
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except Exception as exc:
-            print(f"Warning: Leverage AST style analysis failed: {exc}", file=sys.stderr)
-            return []
-        finally:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-
-        try:
-            records = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            print(f"Warning: Leverage AST output was malformed: {exc}", file=sys.stderr)
-            return []
-        return records if isinstance(records, list) else []
+        return run_helper_json("leverage_ast", all_files, "Leverage AST style analysis")
 
     def _module_record(
         self, mapper: ArchitectureMapper, module_key: str, style: Dict
@@ -110,6 +68,7 @@ class LeverageAnalyzer:
         avg_cochanged = float(git.get("avg_cochanged_modules", 0.0))
         cochanged_count = int(git.get("cochanged_module_count", 0))
         unsafe_blocks = int(style.get("unsafe_blocks", 0))
+        run_provenance = provenance()
 
         reach = len(inbound)
         pressure_scale = 0.35 + min(0.65, reach / 6.0 * 0.65)
@@ -189,9 +148,9 @@ class LeverageAnalyzer:
             "parse_status": style.get("parse_status", "not_measured"),
             "signals": signals,
             "source": "architecture_static_git",
-            "measured_at": datetime.now(timezone.utc).isoformat(),
-            "command": " ".join(sys.argv),
-            "host": platform.node(),
+            "measured_at": run_provenance["measured_at"],
+            "command": run_provenance["command"],
+            "host": run_provenance["host"],
             "mock": False,
         }
         return record

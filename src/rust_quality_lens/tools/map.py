@@ -8,13 +8,14 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-from report_modes import add_mode_argument, emit_report
+from report_modes import add_mode_argument, analysis_path, emit_report
 
-SLOWSPOT_CMD = [".venv/Scripts/python.exe", "scripts/slowspots.py", "--skip-bench"]
+HOTSPOT_CMD = [sys.executable, str(Path(__file__).with_name("hotspots.py"))]
 DEFAULT_OUTPUT = Path("map.json")
 VISIBILITY_OUTPUT = Path("target/analysis/map.json")
 CORRECTNESS_PATH = Path("target/analysis/correctness_review.json")
 HOTSPOTS_PATH = Path("target/analysis/hotspots.json")
+SLOWSPOTS_PATH = Path("target/analysis/slowspots.json")
 
 AREA_COLORS = {
     "chrome": "#569cd6",
@@ -50,7 +51,9 @@ def group_id(mod_name: Optional[str]) -> Optional[str]:
 
 
 class ArchitectureMapper:
-    def __init__(self) -> None:
+    def __init__(self, *, project_name: str, source_roots: Sequence[str]) -> None:
+        self.project_name = project_name
+        self.source_roots = tuple(source_roots)
         self.dependencies: Dict[str, Set[str]] = {}
         self.reverse_dependencies: DefaultDict[str, Set[str]] = defaultdict(set)
         self.metrics: Dict[str, Dict] = {}
@@ -68,9 +71,11 @@ class ArchitectureMapper:
         self.cycle_members: Set[str] = set()
         self.risk_breakdown: Dict[str, Dict[str, object]] = {}
 
-    def extract_dependencies(self, root_dir: str) -> None:
-        root = Path(root_dir)
-        self._discover_modules(root)
+    def extract_dependencies(self) -> None:
+        for source_root in self.source_roots:
+            root = Path(source_root)
+            if root.exists():
+                self._discover_modules(root)
         for file_path, mod_name in self.file_to_mod.items():
             content = Path(file_path).read_text(encoding="utf-8")
             self.module_sources[mod_name] = content
@@ -157,7 +162,7 @@ class ArchitectureMapper:
 
     def gather_metrics(self) -> None:
         try:
-            payload = json.loads(HOTSPOTS_PATH.read_text(encoding="utf-8"))
+            payload = json.loads(analysis_path(HOTSPOTS_PATH).read_text(encoding="utf-8"))
             results = payload if isinstance(payload, list) else payload.get("items", [])
             for item in results:
                 if not isinstance(item, dict):
@@ -174,24 +179,33 @@ class ArchitectureMapper:
             return self.file_to_mod[normalized_name]
 
         metric_path = Path(metric_name)
-        try:
-            rel_path = metric_path.relative_to("src")
-        except ValueError:
+        rel_path = None
+        for source_root in self.source_roots:
+            try:
+                rel_path = metric_path.relative_to(source_root)
+                break
+            except ValueError:
+                continue
+        if rel_path is None:
             return None
 
         mod_name = rel_path.as_posix().replace("/", "::").replace(".rs", "")
         if mod_name.endswith("::mod"):
             mod_name = mod_name[:-5]
-        if mod_name == "lib":
-            return "scratchpad"
         return mod_name
 
     def gather_performance(self) -> None:
+        slowspots_path = analysis_path(SLOWSPOTS_PATH)
+        if not slowspots_path.exists():
+            return
         try:
-            result = subprocess.run(
-                SLOWSPOT_CMD, capture_output=True, text=True, check=True
-            )
-            for item in json.loads(result.stdout):
+            payload = json.loads(slowspots_path.read_text(encoding="utf-8"))
+            rows = payload if isinstance(payload, list) else payload.get("items", [])
+            if not isinstance(rows, list):
+                return
+            for item in rows:
+                if not isinstance(item, dict):
+                    continue
                 for mod_name in item.get("targets", []):
                     perf_entry = self.performance.setdefault(
                         mod_name,
@@ -211,8 +225,8 @@ class ArchitectureMapper:
                         perf_entry["variance"], self._benchmark_variance(item)
                     )
                     perf_entry["items"].append(item)
-        except Exception as exc:
-            print(f"Warning: Could not gather performance metrics: {exc}", file=sys.stderr)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"Warning: Could not load performance metrics: {exc}", file=sys.stderr)
 
     def _benchmark_score(self, item: Dict) -> float:
         return float(item["mean_ns"]) / 100_000.0
@@ -255,10 +269,11 @@ class ArchitectureMapper:
             }
 
     def gather_correctness(self) -> None:
-        if not CORRECTNESS_PATH.exists():
+        correctness_path = analysis_path(CORRECTNESS_PATH)
+        if not correctness_path.exists():
             return
         try:
-            payload = json.loads(CORRECTNESS_PATH.read_text(encoding="utf-8"))
+            payload = json.loads(correctness_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
 
@@ -408,8 +423,7 @@ class ArchitectureMapper:
             "--format=commit%x09%H%x09%an%x09%s",
             "--numstat",
             "--",
-            "src",
-            "tests",
+            *self.source_roots,
         ]
         try:
             result = subprocess.run(
@@ -466,6 +480,7 @@ class ArchitectureMapper:
         )
 
     def _load_module_metric_artifact(self, path: Path) -> Dict[str, Dict[str, object]]:
+        path = analysis_path(path)
         if not path.exists():
             return {}
         try:
@@ -633,45 +648,49 @@ class ArchitectureMapper:
 
     def _risk_signals(self, values: Dict[str, Any]) -> Dict[str, List[str]]:
         signals: Dict[str, List[str]] = {category: [] for category in RISK_CATEGORIES}
-        self._add_signal(
-            signals,
-            "maintainability",
-            values["complexity"] >= 300,
-            f"high internal complexity {values['complexity']:.0f}",
-        )
-        self._add_signal(
-            signals,
-            "maintainability",
-            values["sloc"] >= 150,
-            f"large module {int(values['sloc'])} sloc",
-        )
-        self._add_signal(
-            signals,
-            "maintainability",
-            values["public_api"] >= 10,
-            f"broad interface {values['public_api']} public items",
-        )
-        self._add_signal(
-            signals,
-            "maintainability",
-            values["outbound"] >= 10 or values["inbound"] >= 20,
-            f"high coupling in={values['inbound']} out={values['outbound']}",
-        )
-        self._add_signal(signals, "change", not values["has_correctness_tests"], "low test evidence")
-        self._add_signal(signals, "change", values["churn"] >= 200, f"high churn {int(values['churn'])} lines")
-        self._add_signal(signals, "change", values["contributors"] >= 3, f"many contributors {values['contributors']}")
-        self._add_signal(signals, "change", values["defect_commits"] >= 1, f"defect history {values['defect_commits']} fix commits")
-        self._add_signal(signals, "performance", values["perf_mean_ms"] > 0, f"runtime cost {values['perf_mean_ms']:.2f} ms")
-        self._add_signal(signals, "performance", values["perf_variance"] >= 0.15, f"instability variance {values['perf_variance']:.2f}")
-        self._add_signal(signals, "performance", not values["perf"].get("items"), "no benchmark mapping")
-        self._add_signal(signals, "correctness", bool(values["failed_tests"]), f"failing tests {values['failed_tests']}")
-        self._add_signal(signals, "correctness", bool(values["unknown_tests"]), f"unknown tests {values['unknown_tests']}")
-        self._add_signal(signals, "correctness", bool(values["skipped_tests"]), f"skipped tests {values['skipped_tests']}")
-        self._add_signal(signals, "correctness", not values["has_correctness_tests"], "no direct tests")
-        self._add_signal(signals, "architectural", values["layer_violations"] >= 1, f"layer violations {values['layer_violations']}")
-        self._add_signal(signals, "architectural", values["cycle_member"], "circular dependency")
-        self._add_signal(signals, "architectural", values["inbound"] >= 6, f"oversized hub inbound {values['inbound']}")
-        self._add_signal(signals, "architectural", values["sloc"] >= 250, "oversized module")
+        rules = {
+            "maintainability": [
+                (values["complexity"] >= 300, f"high internal complexity {values['complexity']:.0f}"),
+                (values["sloc"] >= 150, f"large module {int(values['sloc'])} sloc"),
+                (values["public_api"] >= 10, f"broad interface {values['public_api']} public items"),
+                (
+                    values["outbound"] >= 10 or values["inbound"] >= 20,
+                    f"high coupling in={values['inbound']} out={values['outbound']}",
+                ),
+            ],
+            "change": [
+                (not values["has_correctness_tests"], "low test evidence"),
+                (values["churn"] >= 200, f"high churn {int(values['churn'])} lines"),
+                (values["contributors"] >= 3, f"many contributors {values['contributors']}"),
+                (
+                    values["defect_commits"] >= 1,
+                    f"defect history {values['defect_commits']} fix commits",
+                ),
+            ],
+            "performance": [
+                (values["perf_mean_ms"] > 0, f"runtime cost {values['perf_mean_ms']:.2f} ms"),
+                (
+                    values["perf_variance"] >= 0.15,
+                    f"instability variance {values['perf_variance']:.2f}",
+                ),
+                (not values["perf"].get("items"), "no benchmark mapping"),
+            ],
+            "correctness": [
+                (bool(values["failed_tests"]), f"failing tests {values['failed_tests']}"),
+                (bool(values["unknown_tests"]), f"unknown tests {values['unknown_tests']}"),
+                (bool(values["skipped_tests"]), f"skipped tests {values['skipped_tests']}"),
+                (not values["has_correctness_tests"], "no direct tests"),
+            ],
+            "architectural": [
+                (values["layer_violations"] >= 1, f"layer violations {values['layer_violations']}"),
+                (values["cycle_member"], "circular dependency"),
+                (values["inbound"] >= 6, f"oversized hub inbound {values['inbound']}"),
+                (values["sloc"] >= 250, "oversized module"),
+            ],
+        }
+        for category, category_rules in rules.items():
+            for condition, message in category_rules:
+                self._add_signal(signals, category, condition, message)
         return {key: value or ["stable"] for key, value in signals.items()}
 
     @staticmethod
@@ -883,9 +902,10 @@ class ArchitectureMapper:
         graph = self.build_graph_payload()
         return {
             "meta": {
-                "title": "Scratchpad Architecture Risk Map",
-                "generated_from": "scripts/map.py",
-                "source_root": "src",
+                "title": f"{self.project_name} Architecture Risk Map",
+                "generated_from": "rust_quality_lens.tools.map",
+                "project_name": self.project_name,
+                "source_roots": list(self.source_roots),
                 "node_count": len(graph["nodes"]),
                 "edge_count": len(graph["edges"]),
                 "risk_model": list(RISK_CATEGORIES),
@@ -897,8 +917,17 @@ class ArchitectureMapper:
 
 def refresh_analysis_inputs() -> None:
     commands = [
-        HOTSPOT_CMD + ["--mode", "analysis", "--paths", "src"],
-        SLOWSPOT_CMD + ["--mode", "analysis"],
+        HOTSPOT_CMD
+        + [
+            "--mode",
+            "analysis",
+            "--paths",
+            *[
+                root
+                for root in os.environ.get("RQLENS_SOURCE_ROOTS", "src").split(os.pathsep)
+                if root
+            ],
+        ],
     ]
     for command in commands:
         subprocess.run(command, check=True, capture_output=True, text=True)
@@ -949,8 +978,11 @@ def main() -> None:
         for root in os.environ.get("RQLENS_SOURCE_ROOTS", "src").split(os.pathsep)
         if root
     ]
-    mapper = ArchitectureMapper()
-    mapper.extract_dependencies(source_roots[0] if source_roots else "src")
+    mapper = ArchitectureMapper(
+        project_name=os.environ.get("RQLENS_PROJECT_NAME", "Rust Project"),
+        source_roots=source_roots or ["src"],
+    )
+    mapper.extract_dependencies()
     mapper.gather_metrics()
     mapper.gather_performance()
     mapper.gather_test_support()

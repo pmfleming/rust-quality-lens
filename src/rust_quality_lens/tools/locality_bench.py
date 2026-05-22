@@ -1,12 +1,10 @@
 import argparse
-import platform
 import re
-import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set
 
+from common import provenance
 from map import ArchitectureMapper
 from report_modes import add_mode_argument, emit_report
 
@@ -84,13 +82,7 @@ class CodeLocalityAnalyzer:
         external_refs = tests.get("external_refs", [])
         external_test_refs = len(external_refs) if isinstance(external_refs, list) else 0
         has_tests = has_inline_tests or external_test_refs > 0
-        test_locality = (
-            "inline"
-            if has_inline_tests
-            else "external"
-            if external_test_refs > 0
-            else "none"
-        )
+        test_locality = self._test_locality(has_inline_tests, external_test_refs)
         churn = int(git.get("churn", 0))
         commit_count = int(git.get("commits", 0))
         contributor_count = int(git.get("contributor_count", 0))
@@ -294,12 +286,16 @@ class CodeLocalityAnalyzer:
         except ValueError:
             return Path(path).as_posix()
 
+    @staticmethod
+    def _test_locality(has_inline_tests: bool, external_test_refs: int) -> str:
+        if has_inline_tests:
+            return "inline"
+        if external_test_refs:
+            return "external"
+        return "none"
+
     def _provenance(self) -> Dict[str, str]:
-        return {
-            "measured_at": datetime.now(timezone.utc).isoformat(),
-            "command": " ".join(sys.argv),
-            "host": platform.node(),
-        }
+        return provenance()
 
 
 def render_cli(payload: object) -> str:

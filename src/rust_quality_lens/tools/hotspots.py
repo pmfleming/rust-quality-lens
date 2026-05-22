@@ -87,7 +87,7 @@ class HotspotAnalyzer:
         metrics.cyclomatic_score = components["cyclomatic_score"]
         metrics.maintainability_score = components["maintainability_score"]
         metrics.effort_score = components["effort_score"]
-        metrics.quality_score = self.calculate_quality_score(metrics)
+        metrics.quality_score = self.calculate_quality_score(components)
         metrics.size_score = self.calculate_size_score(metrics)
         metrics.score = metrics.quality_score
         metrics.signals = self.generate_signals(metrics)
@@ -98,8 +98,7 @@ class HotspotAnalyzer:
 
         return metrics
 
-    def calculate_quality_score(self, m: CodeMetrics) -> float:
-        components = self.calculate_quality_components(m)
+    def calculate_quality_score(self, components: Dict[str, float]) -> float:
         score = sum(components.values()) * 1.12
         return round(score, 2)
 

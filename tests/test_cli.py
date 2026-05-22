@@ -37,9 +37,34 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["project_name"], "mini-rust-project")
-        self.assertIn("quality.escape-hatches", {task["id"] for task in payload["tasks"]})
+        self.assertIn("quality.escape_hatches", {task["id"] for task in payload["tasks"]})
+        escape_task = next(task for task in payload["tasks"] if task["id"] == "quality.escape_hatches")
+        self.assertIn("quality.escape-hatches", escape_task["aliases"])
+        self.assertEqual(escape_task["commands"], [["rqlens", "measure", "escape-hatches"]])
         self.assertIn("correctness.catalog", {task["id"] for task in payload["tasks"]})
         self.assertIn("map.architecture", {task["id"] for task in payload["tasks"]})
+
+    def test_config_paths_are_relative_to_config_file(self) -> None:
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(ROOT / "src")
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "rust_quality_lens.cli",
+                "catalog",
+                "--config",
+                str(FIXTURE / "rqlens.toml"),
+            ],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["analysis_root"], str(FIXTURE / "target" / "analysis"))
 
     def test_escape_hatches_runs_on_fixture_project(self) -> None:
         result = self.run_lens("measure", "escape-hatches")
@@ -69,7 +94,8 @@ class CliTests(unittest.TestCase):
         output = FIXTURE / "target" / "analysis" / "map.json"
         self.assertTrue(output.exists())
         payload = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(payload["meta"]["source_root"], "src")
+        self.assertEqual(payload["meta"]["project_name"], "mini-rust-project")
+        self.assertEqual(payload["meta"]["source_roots"], ["src"])
 
     def test_type_health_runs_on_fixture_project(self) -> None:
         result = self.run_lens("measure", "type-health")

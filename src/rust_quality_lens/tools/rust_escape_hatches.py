@@ -1,13 +1,15 @@
 import argparse
-import json
-import platform
 import re
-import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence
 
+from common import (
+    iter_rust_files,
+    module_key_for_path,
+    provenance,
+    strip_comments_and_strings,
+)
 from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("rust_escape_hatches.json")
@@ -119,25 +121,13 @@ class RustEscapeHatchAnalyzer:
         return rows
 
     def _iter_rust_files(self, paths: Sequence[str]) -> Iterable[Path]:
-        seen = set()
-        for raw_path in paths:
-            path = Path(raw_path)
-            candidates: Iterable[Path]
-            if path.is_file() and path.suffix == ".rs":
-                candidates = [path]
-            elif path.is_dir():
-                candidates = path.rglob("*.rs")
-            else:
-                candidates = []
-            for candidate in candidates:
-                resolved = candidate.resolve()
-                if resolved not in seen:
-                    seen.add(resolved)
-                    yield candidate
+        yield from iter_rust_files(paths)
 
     def _record_for_file(self, path: Path) -> EscapeHatchRecord:
         source = path.read_text(encoding="utf-8")
         searchable = strip_comments_and_strings(source)
+        module_key = module_key_for_path(path)
+        run_provenance = provenance()
         counts: Dict[str, int] = {}
         locations: List[Dict[str, object]] = []
         score = 0.0
@@ -204,8 +194,8 @@ class RustEscapeHatchAnalyzer:
             signals = ["stable"]
 
         return EscapeHatchRecord(
-            module_name=module_key_for_path(path),
-            module_key=module_key_for_path(path),
+            module_name=module_key,
+            module_key=module_key,
             path=path.as_posix(),
             escape_hatch_score=round(score, 2),
             total_count=sum(counts.values()),
@@ -225,118 +215,10 @@ class RustEscapeHatchAnalyzer:
             locations=sorted(locations, key=lambda item: (int(item["line"]), str(item["kind"]))),
             allow_locations=allow_locations,
             signals=signals,
-            measured_at=datetime.now(timezone.utc).isoformat(),
-            command=" ".join(sys.argv),
-            host=platform.node(),
+            measured_at=run_provenance["measured_at"],
+            command=run_provenance["command"],
+            host=run_provenance["host"],
         )
-
-
-def mask_char(result: List[str], ch: str) -> None:
-    result.append("\n" if ch == "\n" else " ")
-
-
-def consume_code(source: str, index: int, result: List[str]) -> Tuple[int, str, int]:
-    ch = source[index]
-    nxt = source[index + 1] if index + 1 < len(source) else ""
-    if ch == "/" and nxt == "/":
-        result.extend("  ")
-        return index + 2, "line_comment", 0
-    if ch == "/" and nxt == "*":
-        result.extend("  ")
-        return index + 2, "block_comment", 0
-
-    raw_match = re.match(r"r(#+)\"", source[index:])
-    if raw_match:
-        raw_hashes = len(raw_match.group(1))
-        result.extend(" " * (raw_hashes + 2))
-        return index + raw_hashes + 2, "raw_string", raw_hashes
-    if ch == '"':
-        result.append(" ")
-        return index + 1, "string", 0
-    if ch == "'":
-        result.append(" ")
-        return index + 1, "char", 0
-
-    result.append(ch)
-    return index + 1, "code", 0
-
-
-def consume_line_comment(source: str, index: int, result: List[str]) -> Tuple[int, str, int]:
-    ch = source[index]
-    if ch == "\n":
-        result.append("\n")
-        return index + 1, "code", 0
-    result.append(" ")
-    return index + 1, "line_comment", 0
-
-
-def consume_block_comment(source: str, index: int, result: List[str]) -> Tuple[int, str, int]:
-    ch = source[index]
-    nxt = source[index + 1] if index + 1 < len(source) else ""
-    if ch == "*" and nxt == "/":
-        result.extend("  ")
-        return index + 2, "code", 0
-    mask_char(result, ch)
-    return index + 1, "block_comment", 0
-
-
-def consume_quoted(source: str, index: int, result: List[str], quote: str) -> Tuple[int, str, int]:
-    ch = source[index]
-    if ch == "\\":
-        result.extend("  ")
-        return index + 2, quote, 0
-    mask_char(result, ch)
-    terminator = '"' if quote == "string" else "'"
-    return index + 1, "code" if ch == terminator else quote, 0
-
-
-def consume_raw_string(
-    source: str,
-    index: int,
-    result: List[str],
-    raw_hashes: int,
-) -> Tuple[int, str, int]:
-    terminator = '"' + ("#" * raw_hashes)
-    if source.startswith(terminator, index):
-        result.extend(" " * len(terminator))
-        return index + len(terminator), "code", 0
-    mask_char(result, source[index])
-    return index + 1, "raw_string", raw_hashes
-
-
-def strip_comments_and_strings(source: str) -> str:
-    result: List[str] = []
-    index = 0
-    state = "code"
-    raw_hashes = 0
-    while index < len(source):
-        if state == "code":
-            index, state, raw_hashes = consume_code(source, index, result)
-        elif state == "line_comment":
-            index, state, raw_hashes = consume_line_comment(source, index, result)
-        elif state == "block_comment":
-            index, state, raw_hashes = consume_block_comment(source, index, result)
-        elif state in {"string", "char"}:
-            index, state, raw_hashes = consume_quoted(source, index, result, state)
-        else:
-            index, state, raw_hashes = consume_raw_string(
-                source,
-                index,
-                result,
-                raw_hashes,
-            )
-    return "".join(result)
-
-
-def module_key_for_path(path: Path) -> str:
-    try:
-        rel_path = path.relative_to("src")
-    except ValueError:
-        rel_path = path
-    module = rel_path.as_posix().replace("/", "::").removesuffix(".rs")
-    if module.endswith("::mod"):
-        module = module[:-5]
-    return module
 
 
 def render_cli(payload: object) -> str:
