@@ -1,5 +1,5 @@
 project_name = "scratchpad"
-project_root = "../scratchpad"
+project_root = "../../scratchpad"
 source_roots = ["src"]
 output_dir = "target/analysis"
 

@@ -1,4 +1,5 @@
 import argparse
+import os
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -52,8 +53,12 @@ class CodeLocalityAnalyzer:
         self.top = top
 
     def run(self, paths: Sequence[str]) -> List[Dict]:
-        mapper = ArchitectureMapper()
-        mapper.extract_dependencies(paths[0] if paths else "src")
+        source_roots = list(paths) if paths else ["src"]
+        mapper = ArchitectureMapper(
+            project_name=os.environ.get("RQLENS_PROJECT_NAME", "Rust Project"),
+            source_roots=source_roots,
+        )
+        mapper.extract_dependencies()
         mapper.gather_test_support()
         mapper.gather_git_history()
 
