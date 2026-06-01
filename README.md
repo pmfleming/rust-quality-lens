@@ -37,22 +37,22 @@ output_dir = "target/analysis"
 Run all JSON producers:
 
 ```powershell
-python -m rust_quality_lens.cli measure --config rqlens.toml
+cargo run --bin rqlens -- measure --config rqlens.toml
 ```
 
 Run one producer:
 
 ```powershell
-python -m rust_quality_lens.cli measure escape-hatches --config rqlens.toml
-python -m rust_quality_lens.cli measure type-health --config rqlens.toml
-python -m rust_quality_lens.cli measure correctness --config rqlens.toml
-python -m rust_quality_lens.cli measure map --config rqlens.toml
+cargo run --bin rqlens -- measure escape-hatches --config rqlens.toml
+cargo run --bin rqlens -- measure type-health --config rqlens.toml
+cargo run --bin rqlens -- measure correctness --config rqlens.toml
+cargo run --bin rqlens -- measure map --config rqlens.toml
 ```
 
 Print the task catalog:
 
 ```powershell
-python -m rust_quality_lens.cli catalog --config rqlens.toml
+cargo run --bin rqlens -- catalog --config rqlens.toml
 ```
 
 `rust-quality-lens` only writes JSON artifacts. It does not own a dashboard,
@@ -67,11 +67,8 @@ orchestration belongs to `project-management-board`.
 
 ## External Tools
 
-`hotspots` requires `rust-code-analysis-cli` on `PATH`.
-
-The AST clone and leverage analyses use helper binaries from
-`rust_helpers/Cargo.toml`. They run through Cargo automatically when `cargo` is
-available.
+The CLI is Rust. Syntax-aware facts come from helper binaries in
+`rust_helpers/Cargo.toml`, and they run through Cargo automatically.
 
 ## Repository Boundaries
 

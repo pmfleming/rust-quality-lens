@@ -42,7 +42,7 @@ Derived risk scores are model outputs. They are not raw facts:
 ## Weights
 
 The canonical machine-readable weights and tool calibrations live in
-`src/rust_quality_lens/tools/risk_model.py`. Architecture category weights are
+`src/main.rs`. Architecture category weights are
 emitted into map metadata as `meta.risk_model_weights`; producer calibration
 tables are emitted as `meta.risk_model_tool_scores`.
 

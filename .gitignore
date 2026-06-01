@@ -5,3 +5,4 @@ __pycache__/
 target/
 rust_helpers/target/
 tests/fixtures/*/target/
+tests/fixtures/*/Cargo.lock

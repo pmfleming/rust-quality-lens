@@ -43,7 +43,7 @@ counts and artifact status.
 ## Risk Calibration
 
 Raw facts and derived risk are separated. The versioned model lives in
-`src/rust_quality_lens/tools/risk_model.py`, is documented in
+`src/main.rs`, is documented in
 `docs/risk-model-v1.md`, and is emitted into `map.json` metadata.
 
 Architecture map scoring now calls the shared `architecture_risk_scores(...)`
@@ -99,7 +99,7 @@ measurement confidence instead of pretending the requested signal was complete.
 ## Generic Lens Rules
 
 Correctness and architecture map layer classification now use generic lens
-rules in `lens_rules.py`. Scratchpad-specific taxonomy has been removed from
+rules in the Rust layer classifier. Scratchpad-specific taxonomy has been removed from
 the reusable correctness and map logic.
 
 ## Golden Fixtures

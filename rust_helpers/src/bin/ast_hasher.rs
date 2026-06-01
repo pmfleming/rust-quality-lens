@@ -1,5 +1,5 @@
 // Experimental helper for AST-based clone research.
-// Wired through clone_alert.py when the experimental engine is requested.
+// Reserved for AST clone analysis in the Rust CLI.
 
 use proc_macro2::Span;
 use serde::Serialize;
