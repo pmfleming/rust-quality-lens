@@ -1,0 +1,4 @@
+project_name = "golden-rust-project"
+project_root = "."
+source_roots = ["src", "tests"]
+output_dir = "target/analysis"

@@ -9,7 +9,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from common import source_confidence
 from report_modes import add_mode_argument, emit_report
+from risk_model import tool_calibration, tool_score_metadata
 
 DEFAULT_OUTPUT = Path("hotspots.json")
 VISIBILITY_OUTPUT = Path("target/analysis/hotspots.json")
@@ -42,6 +44,9 @@ class CodeMetrics:
     signals: str = ""
     abc_density: float = 0.0
     complexity_density: float = 0.0
+    risk_model_id: str = ""
+    risk_model_version: int = 0
+    risk_calibration: str = ""
 
     @property
     def short_name(self) -> str:
@@ -91,6 +96,10 @@ class HotspotAnalyzer:
         metrics.size_score = self.calculate_size_score(metrics)
         metrics.score = metrics.quality_score
         metrics.signals = self.generate_signals(metrics)
+        score_metadata = tool_score_metadata("hotspots")
+        metrics.risk_model_id = str(score_metadata["risk_model_id"])
+        metrics.risk_model_version = int(score_metadata["risk_model_version"])
+        metrics.risk_calibration = str(score_metadata["risk_calibration"])
 
         if metrics.sloc > 0:
             metrics.abc_density = metrics.abc_mag / metrics.sloc
@@ -99,14 +108,26 @@ class HotspotAnalyzer:
         return metrics
 
     def calculate_quality_score(self, components: Dict[str, float]) -> float:
-        score = sum(components.values()) * 1.12
+        score = sum(components.values()) * tool_calibration("hotspots")["quality_multiplier"]
         return round(score, 2)
 
     def calculate_quality_components(self, m: CodeMetrics) -> Dict[str, float]:
-        cognitive = min(260.0, m.cognitive * 3.7)
-        cyclomatic = min(220.0, m.cyclomatic * 2.0)
-        maintainability = min(150.0, max(0.0, 65.0 - m.mi) * 1.2)
-        effort = min(60.0, math.log1p(max(0.0, m.effort)) * 4.0)
+        calibration = tool_calibration("hotspots")
+        cognitive_config = calibration["cognitive"]
+        cyclomatic_config = calibration["cyclomatic"]
+        maintainability_config = calibration["maintainability"]
+        effort_config = calibration["effort"]
+        cognitive = min(cognitive_config["cap"], m.cognitive * cognitive_config["weight"])
+        cyclomatic = min(cyclomatic_config["cap"], m.cyclomatic * cyclomatic_config["weight"])
+        maintainability = min(
+            maintainability_config["cap"],
+            max(0.0, maintainability_config["baseline"] - m.mi)
+            * maintainability_config["weight"],
+        )
+        effort = min(
+            effort_config["cap"],
+            math.log1p(max(0.0, m.effort)) * effort_config["weight"],
+        )
         return {
             "cognitive_score": round(cognitive, 2),
             "cyclomatic_score": round(cyclomatic, 2),
@@ -115,19 +136,21 @@ class HotspotAnalyzer:
         }
 
     def calculate_size_score(self, m: CodeMetrics) -> float:
-        return round(min(20.0, m.sloc / 10.0), 2)
+        size = tool_calibration("hotspots")["size"]
+        return round(min(size["cap"], m.sloc / size["sloc_divisor"]), 2)
 
     def generate_signals(self, m: CodeMetrics) -> str:
+        calibration = tool_calibration("hotspots")
         signals = []
-        if m.cognitive >= 8:
+        if m.cognitive >= calibration["cognitive"]["signal_threshold"]:
             signals.append(f"high cognitive={m.cognitive}")
-        if m.cyclomatic >= 12:
+        if m.cyclomatic >= calibration["cyclomatic"]["signal_threshold"]:
             signals.append(f"high cyclomatic={m.cyclomatic}")
-        if m.mi < 40:
+        if m.mi < calibration["maintainability"]["signal_threshold"]:
             signals.append(f"low MI={m.mi:.1f}")
-        if m.effort >= 15000:
+        if m.effort >= calibration["effort"]["signal_threshold"]:
             signals.append(f"high effort={m.effort:,.0f}")
-        if m.sloc >= 150:
+        if m.sloc >= calibration["size"]["signal_threshold"]:
             signals.append(f"large size={m.sloc} sloc")
         return ", ".join(signals) if signals else "stable"
 
@@ -232,7 +255,10 @@ def main() -> None:
     analyzer = HotspotAnalyzer(
         top=args.top, scope=args.scope, include_anonymous=args.include_anonymous
     )
+    confidence = source_confidence(args.paths)
     payload = [asdict(metric) for metric in analyzer.run(args.paths)]
+    for item in payload:
+        item["measurement_confidence"] = confidence
     emit_report(
         payload,
         mode=args.mode,

@@ -63,6 +63,89 @@ def provenance() -> Dict[str, str]:
     }
 
 
+def measurement_confidence(
+    *,
+    missing_input: Sequence[str] | None = None,
+    stale_input: Sequence[str] | None = None,
+    unsupported_pattern: Sequence[str] | None = None,
+) -> Dict[str, object]:
+    missing = list(missing_input or [])
+    stale = list(stale_input or [])
+    unsupported = list(unsupported_pattern or [])
+    complete = not missing and not stale and not unsupported
+    return {
+        "complete": complete,
+        "partial": not complete,
+        "missing_input": missing,
+        "stale_input": stale,
+        "unsupported_pattern": unsupported,
+    }
+
+
+def source_confidence(
+    paths: Sequence[str | Path],
+    *,
+    facts: Sequence[Dict[str, object]] | None = None,
+) -> Dict[str, object]:
+    files = [str(path) for path in iter_rust_files(paths)]
+    missing_input = [] if files else ["no Rust source files matched the configured paths"]
+    unsupported = []
+    if facts is not None:
+        fact_paths = {str(fact.get("path", "")) for fact in facts if isinstance(fact, dict)}
+        if files and not fact_paths:
+            missing_input.append("Rust syntax fact extraction returned no files")
+        for fact in facts:
+            if not isinstance(fact, dict):
+                continue
+            status = str(fact.get("parse_status", "ok"))
+            if status != "ok":
+                unsupported.append(f"{fact.get('path', '<unknown>')}: {status}")
+    return measurement_confidence(
+        missing_input=missing_input,
+        unsupported_pattern=unsupported,
+    )
+
+
+def confidence_for_artifacts(
+    artifacts: Sequence[str | Path],
+    *,
+    source_paths: Sequence[str | Path],
+    required: bool = True,
+) -> Dict[str, object]:
+    source_files = [Path(path) for path in iter_rust_files(source_paths)]
+    newest_source = max((path.stat().st_mtime for path in source_files if path.exists()), default=None)
+    missing_input: List[str] = []
+    stale_input: List[str] = []
+    for artifact in artifacts:
+        path = Path(artifact)
+        if not path.exists():
+            if required:
+                missing_input.append(str(path))
+            continue
+        if newest_source is not None and path.stat().st_mtime < newest_source:
+            stale_input.append(str(path))
+    return measurement_confidence(missing_input=missing_input, stale_input=stale_input)
+
+
+def merge_confidences(*items: Dict[str, object]) -> Dict[str, object]:
+    missing: List[str] = []
+    stale: List[str] = []
+    unsupported: List[str] = []
+    for item in items:
+        missing.extend(str(value) for value in item.get("missing_input", []))
+        stale.extend(str(value) for value in item.get("stale_input", []))
+        unsupported.extend(str(value) for value in item.get("unsupported_pattern", []))
+    return measurement_confidence(
+        missing_input=_dedupe(missing),
+        stale_input=_dedupe(stale),
+        unsupported_pattern=_dedupe(unsupported),
+    )
+
+
+def _dedupe(values: Sequence[str]) -> List[str]:
+    return list(dict.fromkeys(values))
+
+
 def matching_brace(source: str, open_index: int) -> Optional[int]:
     if open_index < 0 or open_index >= len(source) or source[open_index] != "{":
         return None
@@ -218,6 +301,11 @@ def run_helper_json(binary: str, files: Sequence[str], warning_label: str) -> Li
         print(f"Warning: {warning_label} output was malformed: {exc}", file=sys.stderr)
         return []
     return records if isinstance(records, list) else []
+
+
+def rust_facts_for_paths(paths: Sequence[str | Path]) -> List[Dict[str, object]]:
+    files = [str(path) for path in iter_rust_files(paths)]
+    return run_helper_json("rust_facts", files, "Rust syntax fact extraction")
 
 
 def _print_process_tail(label: str, text: str | None, *, limit: int = 4000) -> None:

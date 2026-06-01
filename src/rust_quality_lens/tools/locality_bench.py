@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Sequence, Set
 from common import provenance
 from map import ArchitectureMapper
 from report_modes import add_mode_argument, emit_report
+from risk_model import bounded_score, inverse_risk, tool_calibration, tool_score_metadata
 
 DEFAULT_OUTPUT = Path("locality_metrics.json")
 VISIBILITY_OUTPUT = Path("target/analysis/locality_metrics.json")
@@ -44,6 +45,10 @@ class CodeLocalityMetrics:
     measured_at: str
     command: str
     host: str
+    measurement_confidence: Dict[str, object]
+    risk_model_id: str
+    risk_model_version: int
+    risk_calibration: str
     source: str = "static_code_git"
     mock: bool = False
 
@@ -61,9 +66,10 @@ class CodeLocalityAnalyzer:
         mapper.extract_dependencies()
         mapper.gather_test_support()
         mapper.gather_git_history()
+        confidence = mapper.measurement_confidence()
 
         rows = [
-            asdict(self._metrics_for_module(mapper, module_key))
+            asdict(self._metrics_for_module(mapper, module_key, confidence))
             for module_key in sorted(mapper.module_paths)
         ]
         ranked = sorted(rows, key=lambda item: (item["locality_score"], item["module_key"]))
@@ -72,7 +78,7 @@ class CodeLocalityAnalyzer:
         return ranked
 
     def _metrics_for_module(
-        self, mapper: ArchitectureMapper, module_key: str
+        self, mapper: ArchitectureMapper, module_key: str, confidence: Dict[str, object]
     ) -> CodeLocalityMetrics:
         outbound = mapper.dependencies.get(module_key, set())
         inbound = mapper.reverse_dependencies.get(module_key, set())
@@ -104,7 +110,7 @@ class CodeLocalityAnalyzer:
             has_inline_tests=has_inline_tests,
             has_tests=has_tests,
         )
-        score = max(0.0, min(100.0, 100.0 - risk))
+        score = inverse_risk(risk, cap=tool_calibration("locality")["score_cap"])
 
         signals = self._signals(
             far_dependencies=far_dependencies,
@@ -119,6 +125,7 @@ class CodeLocalityAnalyzer:
             has_tests=has_tests,
         )
         provenance = self._provenance()
+        score_metadata = tool_score_metadata("locality")
 
         return CodeLocalityMetrics(
             module_name=module_key,
@@ -150,6 +157,10 @@ class CodeLocalityAnalyzer:
             measured_at=provenance["measured_at"],
             command=provenance["command"],
             host=provenance["host"],
+            measurement_confidence=confidence,
+            risk_model_id=str(score_metadata["risk_model_id"]),
+            risk_model_version=int(score_metadata["risk_model_version"]),
+            risk_calibration=str(score_metadata["risk_calibration"]),
         )
 
     def _risk_score(
@@ -166,28 +177,43 @@ class CodeLocalityAnalyzer:
         has_inline_tests: bool,
         has_tests: bool,
     ) -> float:
+        calibration = tool_calibration("locality")
+        dependency = calibration["dependency_spread"]
         dependency_spread = min(
-            48.0,
-            far_dependencies * 9.0
-            + layer_violations * 16.0
-            + max(0, outbound_count - 5) * 3.0
-            + max(0, inbound_count - 12) * 0.75,
+            dependency["cap"],
+            far_dependencies * dependency["far_dependency_weight"]
+            + layer_violations * dependency["layer_violation_weight"]
+            + max(0, outbound_count - dependency["outbound_free"]) * dependency["outbound_weight"]
+            + max(0, inbound_count - dependency["inbound_free"]) * dependency["inbound_weight"],
         )
-        hidden_coupling = min(24.0, hidden_coupling_count * 8.0)
+        hidden_calibration = calibration["hidden_coupling"]
+        hidden_coupling = min(
+            hidden_calibration["cap"],
+            hidden_coupling_count * hidden_calibration["weight"],
+        )
+        interface = calibration["interface_penalty"]
         interface_penalty = (
-            10.0
-            if interface_explicitness_ratio < 0.25 and outbound_count + inbound_count >= 4
+            interface["penalty"]
+            if interface_explicitness_ratio < interface["explicitness_threshold"]
+            and outbound_count + inbound_count >= interface["coupling_threshold"]
             else 0.0
         )
-        test_distance = 0.0 if has_inline_tests else 0.5 if has_tests else 1.0
-        change_spread = min(18.0, churn / 160.0 + max(0, contributor_count - 3) * 2.0)
-        return min(
-            100.0,
+        test_calibration = calibration["test_distance"]
+        test_distance = 0.0 if has_inline_tests else test_calibration["external_only"] if has_tests else test_calibration["missing"]
+        change = calibration["change_spread"]
+        change_spread = min(
+            change["cap"],
+            churn / change["churn_divisor"]
+            + max(0, contributor_count - change["contributor_free"])
+            * change["contributor_weight"],
+        )
+        return bounded_score(
             dependency_spread
             + hidden_coupling
             + interface_penalty
             + test_distance
             + change_spread,
+            cap=calibration["score_cap"],
         )
 
     def _signals(
@@ -205,28 +231,53 @@ class CodeLocalityAnalyzer:
         has_tests: bool,
     ) -> Dict[str, float]:
         signals = {}
+        calibration = tool_calibration("locality")
+        dependency = calibration["dependency_spread"]
         if far_dependencies:
-            signals[f"far dependencies {far_dependencies}"] = far_dependencies * 9.0
+            signals[f"far dependencies {far_dependencies}"] = (
+                far_dependencies * dependency["far_dependency_weight"]
+            )
         if layer_violations:
-            signals[f"layer violations {layer_violations}"] = layer_violations * 16.0
-        if outbound_count >= 6:
-            signals[f"broad outbound surface {outbound_count}"] = max(1, outbound_count - 5) * 3.0
-        if inbound_count >= 12:
-            signals[f"shared by many modules {inbound_count}"] = max(1, inbound_count - 12) * 0.75
+            signals[f"layer violations {layer_violations}"] = (
+                layer_violations * dependency["layer_violation_weight"]
+            )
+        if outbound_count > dependency["outbound_free"]:
+            signals[f"broad outbound surface {outbound_count}"] = (
+                max(1, outbound_count - dependency["outbound_free"])
+                * dependency["outbound_weight"]
+            )
+        if inbound_count >= dependency["inbound_free"]:
+            signals[f"shared by many modules {inbound_count}"] = (
+                max(1, inbound_count - dependency["inbound_free"])
+                * dependency["inbound_weight"]
+            )
         hidden_count = int(hidden_coupling["hidden_coupling_count"])
+        hidden_calibration = calibration["hidden_coupling"]
         if hidden_count:
-            signals[f"hidden coupling signals {hidden_count}"] = min(24.0, hidden_count * 8.0)
+            signals[f"hidden coupling signals {hidden_count}"] = min(
+                hidden_calibration["cap"],
+                hidden_count * hidden_calibration["weight"],
+            )
         explicitness = float(interface["interface_explicitness_ratio"])
-        if explicitness < 0.25 and outbound_count + inbound_count >= 4:
-            signals[f"low explicit interface {explicitness:.2f}"] = 10.0
+        interface_calibration = calibration["interface_penalty"]
+        if (
+            explicitness < interface_calibration["explicitness_threshold"]
+            and outbound_count + inbound_count >= interface_calibration["coupling_threshold"]
+        ):
+            signals[f"low explicit interface {explicitness:.2f}"] = interface_calibration["penalty"]
         if not has_tests:
-            signals["no nearby tests"] = 1.0
+            signals["no nearby tests"] = calibration["test_distance"]["missing"]
         elif not has_inline_tests:
-            signals["external tests only"] = 0.5
-        if churn >= 400:
-            signals[f"high churn {churn}"] = min(18.0, churn / 160.0)
-        if contributor_count >= 4:
-            signals[f"many contributors {contributor_count}"] = max(1, contributor_count - 3) * 2.0
+            signals["external tests only"] = calibration["test_distance"]["external_only"]
+        change = calibration["change_spread"]
+        signal_thresholds = calibration["signals"]
+        if churn >= signal_thresholds["high_churn"]:
+            signals[f"high churn {churn}"] = min(change["cap"], churn / change["churn_divisor"])
+        if contributor_count >= signal_thresholds["many_contributors"]:
+            signals[f"many contributors {contributor_count}"] = (
+                max(1, contributor_count - change["contributor_free"])
+                * change["contributor_weight"]
+            )
         return signals
 
     def _far_dependency_count(self, module_key: str, outbound: Set[str]) -> int:

@@ -9,6 +9,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set
 from common import iter_rust_files, provenance, run_helper_json
 from map import ArchitectureMapper
 from report_modes import add_mode_argument, emit_report
+from risk_model import bounded_score, inverse_risk, tool_calibration, tool_score_metadata
 
 DEFAULT_OUTPUT = Path("leverage_metrics.json")
 VISIBILITY_OUTPUT = Path("target/analysis/leverage_metrics.json")
@@ -29,13 +30,14 @@ class LeverageAnalyzer:
         )
         mapper.extract_dependencies()
         mapper.gather_git_history()
+        confidence = mapper.measurement_confidence()
 
         style_records = {
             item.get("module_key") or item.get("module_name"): item
             for item in self._style_records(paths)
         }
         rows = [
-            self._module_record(mapper, module_key, style_records.get(module_key, {}))
+            self._module_record(mapper, module_key, style_records.get(module_key, {}), confidence)
             for module_key in sorted(mapper.module_paths)
         ]
         ranked = sorted(
@@ -60,7 +62,7 @@ class LeverageAnalyzer:
         return run_helper_json("leverage_ast", all_files, "Leverage AST style analysis")
 
     def _module_record(
-        self, mapper: ArchitectureMapper, module_key: str, style: Dict
+        self, mapper: ArchitectureMapper, module_key: str, style: Dict, confidence: Dict[str, object]
     ) -> Dict:
         inbound = mapper.reverse_dependencies.get(module_key, set())
         outbound = mapper.dependencies.get(module_key, set())
@@ -74,41 +76,71 @@ class LeverageAnalyzer:
         cochanged_count = int(git.get("cochanged_module_count", 0))
         unsafe_blocks = int(style.get("unsafe_blocks", 0))
         run_provenance = provenance()
+        calibration = tool_calibration("leverage")
+        score_metadata = tool_score_metadata("leverage")
 
         reach = len(inbound)
-        pressure_scale = 0.35 + min(0.65, reach / 6.0 * 0.65)
-        reach_score = min(22.0, reach * 2.5 + caller_area_count * 4.0)
+        pressure = calibration["pressure_scale"]
+        pressure_scale = pressure["base"] + min(
+            pressure["cap"],
+            reach / pressure["reach_full_scale"] * pressure["cap"],
+        )
+        reach_calibration = calibration["reach_score"]
+        reach_score = min(
+            reach_calibration["cap"],
+            reach * reach_calibration["reach_weight"]
+            + caller_area_count * reach_calibration["caller_area_weight"],
+        )
         invariant_ratio = public_types / max(1, public_types + public_functions)
-        invariant_score = min(18.0, public_types * 3.0 + invariant_ratio * 8.0)
-        leaf_fit_bonus = 14.0 if reach <= 1 and divergence_count == 0 and unsafe_blocks == 0 else 0.0
+        invariant = calibration["invariant_score"]
+        invariant_score = min(
+            invariant["cap"],
+            public_types * invariant["public_type_weight"]
+            + invariant_ratio * invariant["ratio_weight"],
+        )
+        leaf_fit_bonus = (
+            calibration["leaf_fit_bonus"]
+            if reach <= 1 and divergence_count == 0 and unsafe_blocks == 0
+            else 0.0
+        )
+        ripple = calibration["ripple_penalty"]
         ripple_penalty = (
             min(
-                24.0,
-                max(0.0, avg_cochanged - 2.0) * 1.1
-                + max(0, cochanged_count - 12) * 0.35,
+                ripple["cap"],
+                max(0.0, avg_cochanged - ripple["avg_cochanged_free"])
+                * ripple["avg_cochanged_weight"]
+                + max(0, cochanged_count - ripple["cochanged_free"])
+                * ripple["cochanged_weight"],
             )
             * pressure_scale
         )
-        divergence_penalty = min(28.0, divergence_count * 9.0)
-        unsafe_penalty = min(20.0, unsafe_blocks * 4.0)
+        divergence = calibration["divergence_penalty"]
+        unsafe = calibration["unsafe_penalty"]
+        divergence_penalty = min(
+            divergence["cap"],
+            divergence_count * divergence["weight"],
+        )
+        unsafe_penalty = min(unsafe["cap"], unsafe_blocks * unsafe["weight"])
+        surface = calibration["surface_penalty"]
         surface_penalty = (
-            8.0 if reach >= 3 and public_types == 0 and public_functions >= 6 else 0.0
+            surface["penalty"]
+            if reach >= surface["reach_threshold"]
+            and public_types == 0
+            and public_functions >= surface["public_function_threshold"]
+            else 0.0
         )
-        leverage_score = max(
-            0.0,
-            min(
-                100.0,
-                68.0
-                + reach_score
-                + invariant_score
-                + leaf_fit_bonus
-                - ripple_penalty
-                - divergence_penalty
-                - unsafe_penalty
-                - surface_penalty,
-            ),
+        leverage_score = bounded_score(
+            calibration["base_score"]
+            + reach_score
+            + invariant_score
+            + leaf_fit_bonus
+            - ripple_penalty
+            - divergence_penalty
+            - unsafe_penalty
+            - surface_penalty,
+            cap=calibration["score_cap"],
         )
-        leverage_risk = max(0.0, min(100.0, 100.0 - leverage_score))
+        leverage_risk = inverse_risk(leverage_score, cap=calibration["score_cap"])
         signals = self._signals(
             reach=reach,
             caller_area_count=caller_area_count,
@@ -151,6 +183,10 @@ class LeverageAnalyzer:
             "surface_penalty": round(surface_penalty, 2),
             "pressure_scale": round(pressure_scale, 3),
             "parse_status": style.get("parse_status", "not_measured"),
+            "measurement_confidence": confidence,
+            "risk_model_id": score_metadata["risk_model_id"],
+            "risk_model_version": score_metadata["risk_model_version"],
+            "risk_calibration": score_metadata["risk_calibration"],
             "signals": signals,
             "source": "architecture_static_git",
             "measured_at": run_provenance["measured_at"],
@@ -231,6 +267,7 @@ class LeverageAnalyzer:
         surface_penalty: float,
         style: Dict,
     ) -> List[str]:
+        calibration = tool_calibration("leverage")
         signals = []
         if leaf_fit_bonus:
             signals.append("self-contained leaf")
@@ -240,7 +277,10 @@ class LeverageAnalyzer:
             signals.append(f"cross-area callers {caller_area_count}")
         if public_types >= 3:
             signals.append(f"invariant surface {public_types} public types")
-        elif public_types == 0 and public_functions >= 4:
+        elif (
+            public_types == 0
+            and public_functions >= calibration["surface_penalty"]["public_function_threshold"] - 2
+        ):
             signals.append("function-heavy surface")
         if surface_penalty:
             signals.append("shared function-heavy surface")

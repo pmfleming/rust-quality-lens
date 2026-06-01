@@ -3,10 +3,13 @@ import json
 import re
 import subprocess
 import time
+from collections import Counter
+import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from common import iter_rust_files
+from common import measurement_confidence, merge_confidences, rust_facts_for_paths, source_confidence
+from lens_rules import RULESET_ID, RULESET_VERSION, classify_path
 from report_modes import add_mode_argument, analysis_path, emit_report
 
 DEFAULT_OUTPUT = Path("correctness_review.json")
@@ -18,33 +21,6 @@ MANIFEST_PATH = Path("Cargo.toml")
 
 def output_path(path: Path) -> Path:
     return analysis_path(path)
-
-LAYER_RULES = [
-    ("App Shell and State", ("app_state", "app_tests.rs")),
-    ("Commands and Transactions", ("commands", "transactions", "transaction_tests.rs")),
-    ("Domain Model", ("domain/tab", "domain\\tab", "domain/panes", "tab_tests.rs", "tab_manager_tests.rs")),
-    ("Buffer and Text Storage", ("domain/buffer", "buffer_tests.rs", "piece_tree_tests.rs")),
-    ("Services and Persistence", ("services", "file_service_tests.rs", "file_controller_tests.rs", "session_store_tests.rs")),
-    ("Search", ("search", "search_tests.rs")),
-    ("UI and Editor Interaction", ("ui", "editor", "tab_strip", "tab_drag")),
-    ("Startup and Settings", ("startup", "settings", "startup_tests.rs", "settings_store_tests.rs")),
-]
-
-FILE_DESCRIPTIONS = {
-    "app_tests.rs": "Checks app state behavior.",
-    "buffer_tests.rs": "Validates buffer metadata.",
-    "file_controller_tests.rs": "Covers open/save controller flows.",
-    "file_service_tests.rs": "Checks file service IO.",
-    "piece_tree_tests.rs": "Validates piece-tree editing behavior.",
-    "search_tests.rs": "Verifies search scopes and matches.",
-    "session_store_tests.rs": "Checks saved workspace restoration.",
-    "settings_store_tests.rs": "Checks settings persistence.",
-    "startup_tests.rs": "Validates startup argument parsing.",
-    "tab_manager_tests.rs": "Checks shared tab ordering.",
-    "tab_tests.rs": "Validates workspace tab behavior.",
-    "transaction_tests.rs": "Checks transaction grouping behavior.",
-}
-
 
 def load_descriptions() -> Dict[str, str]:
     if not DESCRIPTIONS_PATH.exists():
@@ -64,11 +40,7 @@ def trim_description(value: str) -> str:
 
 
 def layer_for_path(path: Path) -> str:
-    normalized = path.as_posix()
-    for layer, needles in LAYER_RULES:
-        if any(needle.replace("\\", "/") in normalized for needle in needles):
-            return layer
-    return "Domain Model" if normalized.startswith("tests/") else "App Shell and State"
+    return classify_path(path)
 
 
 def module_for_path(path: Path) -> str:
@@ -97,8 +69,6 @@ def description_for(path: Path, name: str, overrides: Dict[str, str]) -> str:
     for key in keys:
         if key in overrides:
             return overrides[key]
-    if path.name in FILE_DESCRIPTIONS:
-        return FILE_DESCRIPTIONS[path.name]
     return title_from_name(name)
 
 
@@ -111,46 +81,82 @@ def cargo_manifest_rust_targets() -> List[Path]:
         return []
     targets: List[Path] = []
     for block in re.split(r"(?m)^\s*\[\[", text):
-        if not block.startswith(("bin]]", "test]]")):
+        if not block.startswith(("bin]]", "test]]", "bench]]", "example]]")):
             continue
         path_match = re.search(r'(?m)^\s*path\s*=\s*"([^"]+\.rs)"', block)
         if path_match:
             targets.append(Path(path_match.group(1)))
+    lib_match = re.search(r'(?ms)^\s*\[lib\]\s+.*?^\s*path\s*=\s*"([^"]+\.rs)"', text)
+    if lib_match:
+        targets.append(Path(lib_match.group(1)))
     targets.extend(Path("src/bin").glob("*.rs"))
     return targets
 
 
-def discover_tests() -> List[Dict[str, Any]]:
+def default_discovery_paths() -> List[Path]:
+    env_roots = [
+        Path(path)
+        for path in os.environ.get("RQLENS_SOURCE_ROOTS", "").split(os.pathsep)
+        if path
+    ]
+    roots = env_roots or [Path("src")]
+    roots.extend(Path(path) for path in ("tests", "benches", "examples"))
+    roots.extend(cargo_manifest_rust_targets())
+    return dedupe_paths(roots)
+
+
+def supplemental_discovery_paths() -> List[Path]:
+    roots = [Path(path) for path in ("tests", "benches", "examples")]
+    roots.extend(cargo_manifest_rust_targets())
+    return roots
+
+
+def dedupe_paths(paths: List[Path]) -> List[Path]:
+    seen = set()
+    result: List[Path] = []
+    for path in paths:
+        key = path.as_posix()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(path)
+    return result
+
+
+def discover_tests(paths: List[Path] | None = None) -> tuple[List[Dict[str, Any]], Dict[str, object]]:
     overrides = load_descriptions()
     tests: List[Dict[str, Any]] = []
-    for path in sorted(iter_rust_files([Path("tests"), Path("src"), *cargo_manifest_rust_targets()])):
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
+    discovery_paths = dedupe_paths(
+        [*(paths or default_discovery_paths()), *supplemental_discovery_paths()]
+    )
+    facts = rust_facts_for_paths(discovery_paths)
+    unsupported = [
+        str(pattern)
+        for fact in facts
+        if isinstance(fact, dict)
+        for pattern in fact.get("unsupported_patterns", [])
+    ]
+    confidence = merge_confidences(
+        source_confidence(discovery_paths, facts=facts),
+        measurement_confidence(unsupported_pattern=unsupported),
+    )
+    for fact in facts:
+        if fact.get("parse_status") != "ok":
             continue
-        kind = "integration" if path.as_posix().startswith("tests/") else "inline"
-        pending_test_line: Optional[int] = None
-        for line_index, raw_line in enumerate(lines, start=1):
-            stripped = raw_line.strip()
-            if re.match(r"#\[(?:test|tokio::test|async_std::test)\]", stripped):
-                pending_test_line = line_index
+        path = Path(str(fact.get("path", "")))
+        kind = test_kind_for_path(path)
+        for raw_test in fact.get("tests", []):
+            if not isinstance(raw_test, dict):
                 continue
-            if pending_test_line is None:
-                continue
-            if not stripped or stripped.startswith("//") or re.match(r"#\[[^\]]+\]", stripped):
-                continue
-            match = re.match(r"(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)", stripped)
-            if not match:
-                pending_test_line = None
-                continue
-            name = match.group(1)
-            line = pending_test_line
-            pending_test_line = None
-            test_id = f"{path.as_posix()}::{name}"
+            name = str(raw_test.get("name", ""))
+            qualified_name = str(raw_test.get("qualified_name", name))
+            line = int(raw_test.get("line", 0))
+            test_id = f"{path.as_posix()}::{qualified_name}"
             tests.append(
                 {
                     "id": test_id,
                     "name": name,
+                    "qualified_name": qualified_name,
                     "path": path.as_posix(),
                     "line": line,
                     "layer": layer_for_path(path),
@@ -162,7 +168,20 @@ def discover_tests() -> List[Dict[str, Any]]:
                     "command": f"cargo test {name}",
                 }
             )
-    return tests
+    return tests, confidence
+
+
+def test_kind_for_path(path: Path) -> str:
+    normalized = path.as_posix()
+    if normalized.startswith("tests/"):
+        return "integration"
+    if normalized.startswith("benches/"):
+        return "benchmark"
+    if normalized.startswith("examples/"):
+        return "example"
+    if normalized.startswith("src/bin/"):
+        return "binary"
+    return "inline"
 
 
 def run_tests() -> Dict[str, Dict[str, Any]]:
@@ -172,32 +191,79 @@ def run_tests() -> Dict[str, Dict[str, Any]]:
     except FileNotFoundError:
         return {}
     duration = time.perf_counter() - started
+    statuses = parse_cargo_test_statuses(
+        result.stdout,
+        returncode=result.returncode,
+        duration=duration,
+        stderr=result.stderr,
+    )
+    return statuses
+
+
+def parse_cargo_test_statuses(
+    stdout: str,
+    *,
+    returncode: int,
+    duration: float | None = None,
+    stderr: str = "",
+) -> Dict[str, Dict[str, Any]]:
     statuses: Dict[str, Dict[str, Any]] = {}
-    for line in result.stdout.splitlines():
+    current_path: str | None = None
+    for line in stdout.splitlines():
+        running_match = re.match(
+            r"\s*Running\s+(?:(?:unittests|tests?)\s+)?(.+?\.rs)(?:\s+\(|$)",
+            line,
+        )
+        if running_match:
+            current_path = normalize_cargo_path(running_match.group(1))
+            continue
         match = re.match(r"test\s+(.+?)\s+\.\.\.\s+(ok|FAILED|ignored)", line.strip())
         if not match:
             continue
         full_name = match.group(1)
-        name = full_name.split("::")[-1]
         status = {"ok": "passed", "FAILED": "failed", "ignored": "skipped"}[match.group(2)]
-        statuses[name] = {"status": status, "duration": None}
+        status_record = {"status": status, "duration": None}
+        statuses[full_name] = status_record
+        if current_path:
+            statuses[f"{current_path}::{full_name}"] = status_record
     statuses["__run__"] = {
-        "status": "passed" if result.returncode == 0 else "failed",
+        "status": "passed" if returncode == 0 else "failed",
         "duration": duration,
-        "stdout_tail": "\n".join(result.stdout.splitlines()[-40:]),
-        "stderr_tail": "\n".join(result.stderr.splitlines()[-40:]),
+        "stdout_tail": "\n".join(stdout.splitlines()[-40:]),
+        "stderr_tail": "\n".join(stderr.splitlines()[-40:]),
     }
     return statuses
 
 
-def build_payload(run: bool = False) -> Dict[str, Any]:
-    tests = discover_tests()
-    statuses = run_tests() if run else {}
+def normalize_cargo_path(value: str) -> str:
+    return value.strip().strip('"').replace("\\", "/")
+
+
+def attach_statuses(tests: List[Dict[str, Any]], statuses: Dict[str, Dict[str, Any]]) -> None:
+    name_counts = Counter(str(item.get("name", "")) for item in tests)
+    qualified_counts = Counter(str(item.get("qualified_name", "")) for item in tests)
     for item in tests:
-        status = statuses.get(item["name"])
+        candidates = [
+            str(item.get("id", "")),
+            f"{item.get('path', '')}::{item.get('qualified_name', item.get('name', ''))}",
+        ]
+        qualified_name = str(item.get("qualified_name", ""))
+        if qualified_name and qualified_counts[qualified_name] == 1:
+            candidates.append(qualified_name)
+        name = str(item.get("name", ""))
+        if name and name_counts[name] == 1:
+            candidates.append(name)
+
+        status = next((statuses[key] for key in candidates if key in statuses), None)
         if status:
             item["last_status"] = status["status"]
             item["last_duration"] = status["duration"]
+
+
+def build_payload(run: bool = False, paths: List[Path] | None = None) -> Dict[str, Any]:
+    tests, confidence = discover_tests(paths)
+    statuses = run_tests() if run else {}
+    attach_statuses(tests, statuses)
 
     by_layer: Dict[str, Dict[str, int]] = {}
     for item in tests:
@@ -212,6 +278,9 @@ def build_payload(run: bool = False) -> Dict[str, Any]:
         "test_count": len(tests),
         "integration_count": sum(1 for item in tests if item["kind"] == "integration"),
         "inline_count": sum(1 for item in tests if item["kind"] == "inline"),
+        "benchmark_count": sum(1 for item in tests if item["kind"] == "benchmark"),
+        "example_count": sum(1 for item in tests if item["kind"] == "example"),
+        "binary_count": sum(1 for item in tests if item["kind"] == "binary"),
         "layers": len(by_layer),
         "failed": sum(1 for item in tests if item["last_status"] == "failed"),
         "unknown": sum(1 for item in tests if item["last_status"] == "unknown"),
@@ -220,7 +289,9 @@ def build_payload(run: bool = False) -> Dict[str, Any]:
     return {
         "version": 1,
         "generated_from": "scripts/test_catalog.py",
+        "layer_ruleset": {"id": RULESET_ID, "version": RULESET_VERSION},
         "summary": summary,
+        "measurement_confidence": confidence,
         "layers": [
             {
                 "name": layer,
@@ -263,11 +334,15 @@ def requested_run_failed(payload: object, *, run: bool) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Emit categorized correctness test catalog")
+    parser.add_argument("--paths", nargs="+", default=None, help="Paths to analyze")
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--run", action="store_true", help="Run cargo test and attach status")
     add_mode_argument(parser)
     args = parser.parse_args()
-    payload = build_payload(run=args.run)
+    payload = build_payload(
+        run=args.run,
+        paths=[Path(path) for path in args.paths] if args.paths else None,
+    )
     if args.mode == "visibility":
         test_catalog_output = output_path(TEST_CATALOG_OUTPUT)
         test_catalog_output.parent.mkdir(parents=True, exist_ok=True)

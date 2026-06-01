@@ -18,6 +18,11 @@ vendor dashboard code or project-specific scripts.
 - correctness catalog coverage
 - architecture risk map data
 
+The architecture map uses a versioned risk model so raw facts and derived risk
+scores remain separate. See `docs/risk-model-v1.md` for the current weights.
+Recent extractor and scoring upgrades are summarized in
+`docs/measurement-upgrades.md`.
+
 ## Quick Start
 
 Create a config in the Rust project you want to inspect:

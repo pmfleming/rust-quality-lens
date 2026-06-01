@@ -9,7 +9,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import DefaultDict, Dict, Iterable, List, Sequence, Set, Tuple
 
-from common import iter_rust_files, run_helper_json
+from common import (
+    iter_rust_files,
+    measurement_confidence,
+    merge_confidences,
+    run_helper_json,
+    source_confidence,
+)
 from report_modes import add_mode_argument, emit_report
 
 DEFAULT_OUTPUT = Path("clones.json")
@@ -470,7 +476,27 @@ def main() -> None:
         normalize=args.normalize,
         top=args.top,
     )
+    confidence = source_confidence(args.paths)
+    if args.engine in {"ast", "all"} and not shutil.which("cargo"):
+        confidence = merge_confidences(
+            confidence,
+            measurement_confidence(
+                missing_input=["cargo unavailable for AST clone analysis"]
+            ),
+        )
     payload = [asdict(group) for group in analyzer.run(args.paths, args.engine)]
+    if args.engine == "mir":
+        confidence = {
+            **confidence,
+            "complete": False,
+            "partial": True,
+            "unsupported_pattern": [
+                *confidence.get("unsupported_pattern", []),
+                "MIR clone analysis is not wired into the stable toolchain",
+            ],
+        }
+    for item in payload:
+        item["measurement_confidence"] = confidence
     emit_report(
         payload,
         mode=args.mode,

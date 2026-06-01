@@ -22,6 +22,8 @@ PATH_AWARE_TOOLS = {
     "clones",
     "escape-hatches",
     "type-health",
+    "correctness",
+    "correctness-run",
     "locality",
     "leverage",
 }
@@ -101,7 +103,7 @@ TASK_DEFINITIONS = [
         "category": "correctness",
         "subcategory": "tests",
         "title": "Correctness Catalog",
-        "description": "Discovers Rust tests and groups them by architecture layer.",
+        "description": "Discovers Rust tests and groups them by generic architecture area.",
         "outputs": ["correctness_review.json", "test_catalog.json"],
     },
     {
@@ -171,6 +173,8 @@ def tool_argv(tool: str, output_path: Path, config: LensConfig) -> list[str]:
         argv.extend(["--paths", *config.source_roots])
     if tool == "hotspots":
         argv.extend(["--scope", "all"])
+    if tool == "clones":
+        argv.extend(["--engine", "all"])
     if tool == "correctness-run":
         argv.append("--run")
     return argv

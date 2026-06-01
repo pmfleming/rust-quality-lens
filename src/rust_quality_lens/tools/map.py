@@ -8,7 +8,22 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+from common import (
+    confidence_for_artifacts,
+    measurement_confidence,
+    merge_confidences,
+    rust_facts_for_paths,
+    source_confidence,
+)
+from lens_rules import (
+    RULESET_ID,
+    RULESET_VERSION,
+    classify_module,
+    layer_color,
+    layer_rank,
+)
 from report_modes import add_mode_argument, analysis_path, emit_report
+from risk_model import RISK_MODEL, architecture_risk_scores, model_classification, model_id, model_version, model_weights
 
 HOTSPOT_CMD = [sys.executable, str(Path(__file__).with_name("hotspots.py"))]
 DEFAULT_OUTPUT = Path("map.json")
@@ -16,23 +31,6 @@ VISIBILITY_OUTPUT = Path("target/analysis/map.json")
 CORRECTNESS_PATH = Path("target/analysis/correctness_review.json")
 HOTSPOTS_PATH = Path("target/analysis/hotspots.json")
 SLOWSPOTS_PATH = Path("target/analysis/slowspots.json")
-
-AREA_COLORS = {
-    "chrome": "#569cd6",
-    "domain": "#4ec9b0",
-    "services": "#d7ba7d",
-    "ui": "#c586c0",
-    "default": "#808080",
-}
-
-LAYER_ORDER = {
-    "chrome": 0,
-    "ui": 1,
-    "app_state": 2,
-    "services": 2,
-    "domain": 3,
-    "default": 2,
-}
 
 DEFECT_KEYWORDS = ("fix", "bug", "regress", "panic", "crash", "issue", "fault")
 RISK_CATEGORIES = (
@@ -55,6 +53,7 @@ class ArchitectureMapper:
         self.project_name = project_name
         self.source_roots = tuple(source_roots)
         self.dependencies: Dict[str, Set[str]] = {}
+        self.external_dependencies: Dict[str, Set[str]] = {}
         self.reverse_dependencies: DefaultDict[str, Set[str]] = defaultdict(set)
         self.metrics: Dict[str, Dict] = {}
         self.performance: Dict[str, Dict] = {}
@@ -68,6 +67,9 @@ class ArchitectureMapper:
         self.git_history: Dict[str, Dict[str, object]] = {}
         self.locality_metrics: Dict[str, Dict[str, object]] = {}
         self.leverage_metrics: Dict[str, Dict[str, object]] = {}
+        self.rust_facts: Dict[str, Dict[str, object]] = {}
+        self.confidence_inputs: List[Dict[str, object]] = []
+        self.artifact_status: Dict[str, Dict[str, object]] = {}
         self.cycle_members: Set[str] = set()
         self.risk_breakdown: Dict[str, Dict[str, object]] = {}
 
@@ -76,14 +78,36 @@ class ArchitectureMapper:
             root = Path(source_root)
             if root.exists():
                 self._discover_modules(root)
+        facts = rust_facts_for_paths(self.source_roots)
+        self.confidence_inputs.append(source_confidence(self.source_roots, facts=facts))
+        unsupported = [
+            str(pattern)
+            for fact in facts
+            if isinstance(fact, dict)
+            for pattern in fact.get("unsupported_patterns", [])
+        ]
+        if unsupported:
+            self.confidence_inputs.append(
+                measurement_confidence(unsupported_pattern=unsupported)
+            )
+        self._apply_module_file_overrides(facts)
+        self.rust_facts = {
+            str(fact.get("module_key", "")): fact
+            for fact in facts
+            if isinstance(fact, dict) and fact.get("parse_status") == "ok"
+        }
         for file_path, mod_name in self.file_to_mod.items():
             content = Path(file_path).read_text(encoding="utf-8")
             self.module_sources[mod_name] = content
-            self.public_api_counts[mod_name] = self._count_public_api(content)
+            fact = self.rust_facts.get(mod_name, {})
+            self.public_api_counts[mod_name] = int(
+                fact.get("public_api_count", self._count_public_api(content))
+            )
             self.dependencies.setdefault(mod_name, set())
-            self.dependencies[mod_name].update(self._extract_use_dependencies(content))
+            self.external_dependencies.setdefault(mod_name, set())
+            self.dependencies[mod_name].update(self._extract_fact_dependencies(mod_name, fact))
             self.dependencies[mod_name].update(
-                self._extract_child_modules(content, mod_name)
+                self._extract_child_modules(fact, mod_name)
             )
 
         for source, targets in self.dependencies.items():
@@ -104,27 +128,112 @@ class ArchitectureMapper:
             self.mod_to_file[mod_name] = normalized_path
             self.module_paths.add(mod_name)
             self.dependencies.setdefault(mod_name, set())
+            self.external_dependencies.setdefault(mod_name, set())
 
-    def _extract_use_dependencies(self, content: str) -> Set[str]:
+    def _apply_module_file_overrides(self, facts: Sequence[Dict[str, object]]) -> None:
+        for fact in facts:
+            if not isinstance(fact, dict):
+                continue
+            parent_module = str(fact.get("module_key", ""))
+            for module_file in fact.get("module_files", []):
+                if not isinstance(module_file, dict):
+                    continue
+                module_key = self._normalize_declared_module_key(
+                    str(module_file.get("module_key", "")),
+                    parent_module,
+                )
+                raw_path = str(module_file.get("path", ""))
+                if not module_key or not raw_path:
+                    continue
+                file_path = str(Path(raw_path).resolve())
+                old_module = self.file_to_mod.get(file_path)
+                if old_module and old_module != module_key:
+                    self.module_paths.discard(old_module)
+                    self.mod_to_file.pop(old_module, None)
+                    self.dependencies.pop(old_module, None)
+                    self.external_dependencies.pop(old_module, None)
+                self.file_to_mod[file_path] = module_key
+                self.mod_to_file[module_key] = file_path
+                self.module_paths.add(module_key)
+                self.dependencies.setdefault(module_key, set())
+                self.external_dependencies.setdefault(module_key, set())
+
+    def _normalize_declared_module_key(self, raw_key: str, parent_module: str) -> str:
+        raw_key = raw_key.strip()
+        if not raw_key:
+            return ""
+        parts = [part for part in raw_key.split("::") if part]
+        if parts and parts[0] in {"lib", "main"}:
+            parts = parts[1:]
+        if parts:
+            return "::".join(parts)
+        if parent_module in {"lib", "main"}:
+            return raw_key
+        return f"{parent_module}::{raw_key}"
+
+    def _extract_fact_dependencies(self, mod_name: str, fact: Dict[str, object]) -> Set[str]:
         dependencies: Set[str] = set()
-        use_statements = re.findall(r"^\s*use\s+crate::([^;]+);", content, re.MULTILINE)
-        for raw_use in use_statements:
-            dependency = self._normalize_use_dependency(raw_use.strip())
-            if dependency and dependency in self.module_paths:
+        for raw in fact.get("dependencies", []) if isinstance(fact, dict) else []:
+            raw_dependency = str(raw)
+            dependency = self._resolve_dependency(raw_dependency, mod_name)
+            if dependency and dependency != mod_name:
                 dependencies.add(dependency)
+                continue
+            external_dependency = self._external_dependency_name(raw_dependency, mod_name)
+            if external_dependency:
+                self.external_dependencies.setdefault(mod_name, set()).add(external_dependency)
         return dependencies
 
-    def _normalize_use_dependency(self, raw_use: str) -> Optional[str]:
-        candidate = raw_use.split(" as ")[0].strip()
-        if "::{" in candidate:
-            candidate = candidate.split("::{", 1)[0]
-        elif "{" in candidate:
-            candidate = candidate.split("{", 1)[0].rstrip(":")
-
-        candidate = candidate.split(",")[0].strip().rstrip(":")
-        if not candidate:
+    def _resolve_dependency(self, raw_dependency: str, source_module: str) -> Optional[str]:
+        raw = raw_dependency.strip().rstrip(":")
+        if raw.endswith("::*"):
+            raw = raw[:-3]
+        if not raw:
             return None
+
+        parts = [part for part in raw.split("::") if part]
+        if not parts:
+            return None
+
+        if parts[0] == "crate":
+            candidate = "::".join(parts[1:])
+        elif parts[0] == "self":
+            candidate = "::".join([part for part in [source_module, *parts[1:]] if part])
+        elif parts[0] == "super":
+            base = source_module.split("::")
+            index = 0
+            while index < len(parts) and parts[index] == "super":
+                if base:
+                    base.pop()
+                index += 1
+            candidate = "::".join([*base, *parts[index:]])
+        else:
+            candidate = raw
+
+        candidate_parts = [part for part in candidate.split("::") if part]
+        if candidate_parts and candidate_parts[0] in {source_module, "lib", "main"}:
+            tail_resolved = self._resolve_module_prefix("::".join(candidate_parts[1:]))
+            if tail_resolved is not None:
+                return tail_resolved
         return self._resolve_module_prefix(candidate)
+
+    def _external_dependency_name(self, raw_dependency: str, source_module: str) -> Optional[str]:
+        raw = raw_dependency.strip().rstrip(":")
+        if raw.endswith("::*"):
+            raw = raw[:-3]
+        parts = [part for part in raw.split("::") if part]
+        if len(parts) < 2:
+            return None
+        first = parts[0]
+        if first in {"crate", "self", "super", source_module, "lib", "main"}:
+            return None
+        if self._resolve_module_prefix(raw) is not None:
+            return None
+        if first in self.module_paths:
+            return None
+        if first and first[0].isupper():
+            return None
+        return first
 
     def _resolve_module_prefix(self, candidate: str) -> Optional[str]:
         parts = candidate.split("::")
@@ -134,15 +243,10 @@ class ArchitectureMapper:
                 return prefix
         return None
 
-    def _extract_child_modules(self, content: str, mod_name: str) -> Set[str]:
+    def _extract_child_modules(self, fact: Dict[str, object], mod_name: str) -> Set[str]:
         children = set()
-        declared_mods = re.findall(
-            r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([a-zA-Z0-9_]+)\s*;",
-            content,
-            re.MULTILINE,
-        )
-        for child in declared_mods:
-            child_mod = f"{mod_name}::{child}"
+        for raw_child in fact.get("child_modules", []) if isinstance(fact, dict) else []:
+            child_mod = self._resolve_dependency(str(raw_child), mod_name)
             if child_mod in self.module_paths:
                 children.add(child_mod)
         return children
@@ -161,8 +265,18 @@ class ArchitectureMapper:
         )
 
     def gather_metrics(self) -> None:
+        hotspots_path = analysis_path(HOTSPOTS_PATH)
+        self.artifact_status["hotspots"] = self._artifact_status(hotspots_path, required=True)
+        self.confidence_inputs.append(
+            confidence_for_artifacts(
+                [hotspots_path],
+                source_paths=self.source_roots,
+            )
+        )
+        if not hotspots_path.exists():
+            return
         try:
-            payload = json.loads(analysis_path(HOTSPOTS_PATH).read_text(encoding="utf-8"))
+            payload = json.loads(hotspots_path.read_text(encoding="utf-8"))
             results = payload if isinstance(payload, list) else payload.get("items", [])
             for item in results:
                 if not isinstance(item, dict):
@@ -171,6 +285,9 @@ class ArchitectureMapper:
                 if mod_name:
                     self.metrics[mod_name] = item
         except Exception as exc:
+            self.confidence_inputs.append(
+                measurement_confidence(unsupported_pattern=[f"hotspots: {exc}"])
+            )
             print(f"Warning: Could not load hotspot metrics: {exc}", file=sys.stderr)
 
     def _metric_module_name(self, metric_name: str) -> Optional[str]:
@@ -196,6 +313,14 @@ class ArchitectureMapper:
 
     def gather_performance(self) -> None:
         slowspots_path = analysis_path(SLOWSPOTS_PATH)
+        self.artifact_status["slowspots"] = self._artifact_status(slowspots_path, required=False)
+        self.confidence_inputs.append(
+            confidence_for_artifacts(
+                [slowspots_path],
+                source_paths=self.source_roots,
+                required=False,
+            )
+        )
         if not slowspots_path.exists():
             return
         try:
@@ -226,6 +351,9 @@ class ArchitectureMapper:
                     )
                     perf_entry["items"].append(item)
         except (OSError, json.JSONDecodeError) as exc:
+            self.confidence_inputs.append(
+                measurement_confidence(unsupported_pattern=[f"slowspots: {exc}"])
+            )
             print(f"Warning: Could not load performance metrics: {exc}", file=sys.stderr)
 
     def _benchmark_score(self, item: Dict) -> float:
@@ -238,44 +366,55 @@ class ArchitectureMapper:
         return float(item.get("std_dev_ns", 0.0)) / mean_ns
 
     def gather_test_support(self) -> None:
-        test_files = list(Path("tests").rglob("*.rs")) if Path("tests").exists() else []
-        test_contents = []
-        for path in test_files:
-            try:
-                test_contents.append((str(path), path.read_text(encoding="utf-8")))
-            except OSError:
+        test_roots = [
+            root
+            for root in (Path("tests"), Path("benches"), Path("examples"))
+            if root.exists()
+        ]
+        test_facts = rust_facts_for_paths(test_roots) if test_roots else []
+        syntax_refs: DefaultDict[str, Set[str]] = defaultdict(set)
+        for fact in test_facts:
+            if not isinstance(fact, dict) or fact.get("parse_status") != "ok":
                 continue
+            test_path = str(fact.get("path", ""))
+            source_module = str(fact.get("module_key", ""))
+            for raw_dependency in fact.get("dependencies", []):
+                dependency = self._resolve_dependency(str(raw_dependency), source_module)
+                if dependency in self.module_paths:
+                    syntax_refs[dependency].add(test_path)
 
         for mod_name, file_path in self.mod_to_file.items():
-            source = self.module_sources.get(mod_name, "")
-            stem = Path(file_path).stem
-            path_hint = mod_name.replace("::", "_")
-            has_inline_tests = "#[cfg(test)]" in source or "mod tests" in source
-            references: List[str] = []
-
-            for test_path, content in test_contents:
-                if (
-                    mod_name in content
-                    or stem in content
-                    or path_hint in Path(test_path).stem
-                    or stem in Path(test_path).stem
-                ):
-                    references.append(test_path)
+            fact = self.rust_facts.get(mod_name, {})
+            has_inline_tests = bool(fact.get("has_inline_tests", False))
+            references = sorted(syntax_refs.get(mod_name, set()))
 
             self.test_support[mod_name] = {
                 "has_inline_tests": has_inline_tests,
-                "external_refs": sorted(set(references)),
+                "external_refs": references,
+                "support_detection": "syntax_dependencies",
                 "coverage_hint": has_inline_tests or bool(references),
             }
 
     def gather_correctness(self) -> None:
         correctness_path = analysis_path(CORRECTNESS_PATH)
+        self.artifact_status["correctness"] = self._artifact_status(correctness_path, required=True)
+        self.confidence_inputs.append(
+            confidence_for_artifacts(
+                [correctness_path],
+                source_paths=self.source_roots,
+            )
+        )
         if not correctness_path.exists():
             return
         try:
             payload = json.loads(correctness_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as exc:
+            self.confidence_inputs.append(
+                measurement_confidence(unsupported_pattern=[f"correctness: {exc}"])
+            )
             return
+        if isinstance(payload, dict) and isinstance(payload.get("measurement_confidence"), dict):
+            self.confidence_inputs.append(payload["measurement_confidence"])
 
         tests = payload.get("tests", []) if isinstance(payload, dict) else []
         for item in tests:
@@ -291,7 +430,7 @@ class ArchitectureMapper:
         for candidate in (module, module.replace("/", "::"), module.replace("\\", "::")):
             if candidate in self.module_paths:
                 return candidate
-        return self._match_test_to_module(str(item.get("path", "")), module)
+        return None
 
     def _record_correctness_item(self, matched: str, item: Dict[str, object]) -> None:
         entry = self.correctness.setdefault(
@@ -472,6 +611,16 @@ class ArchitectureMapper:
             )
 
     def gather_locality_leverage_metrics(self) -> None:
+        locality_path = analysis_path(Path("target/analysis/locality_metrics.json"))
+        leverage_path = analysis_path(Path("target/analysis/leverage_metrics.json"))
+        self.artifact_status["locality"] = self._artifact_status(locality_path, required=True)
+        self.artifact_status["leverage"] = self._artifact_status(leverage_path, required=True)
+        self.confidence_inputs.append(
+            confidence_for_artifacts(
+                [locality_path, leverage_path],
+                source_paths=self.source_roots,
+            )
+        )
         self.locality_metrics = self._load_module_metric_artifact(
             Path("target/analysis/locality_metrics.json")
         )
@@ -485,7 +634,10 @@ class ArchitectureMapper:
             return {}
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as exc:
+            self.confidence_inputs.append(
+                measurement_confidence(unsupported_pattern=[f"{path}: {exc}"])
+            )
             return {}
         rows = payload if isinstance(payload, list) else payload.get("items", [])
         metrics: Dict[str, Dict[str, object]] = {}
@@ -498,6 +650,33 @@ class ArchitectureMapper:
             if key:
                 metrics[key] = item
         return metrics
+
+    def _artifact_status(self, path: Path, *, required: bool) -> Dict[str, object]:
+        source_files = [Path(item) for item in self.file_to_mod]
+        newest_source = max(
+            (source.stat().st_mtime for source in source_files if source.exists()),
+            default=None,
+        )
+        exists = path.exists()
+        stale = bool(exists and newest_source is not None and path.stat().st_mtime < newest_source)
+        if not required and not exists:
+            state = "not_provided"
+        elif not exists:
+            state = "missing"
+        elif stale:
+            state = "stale"
+        else:
+            state = "complete"
+        return {
+            "path": str(path),
+            "required": required,
+            "exists": exists,
+            "stale": stale,
+            "state": state,
+        }
+
+    def _artifact_unknown(self, name: str) -> bool:
+        return self.artifact_status.get(name, {}).get("state") in {"missing", "stale"}
 
     def _find_cycle_members(self) -> Set[str]:
         visited: Set[str] = set()
@@ -529,18 +708,15 @@ class ArchitectureMapper:
         return cycle_members
 
     def layer_name(self, mod_name: str) -> str:
-        parts = mod_name.split("::")
-        if len(parts) > 1 and parts[0] == "app":
-            return parts[1]
-        return "default"
+        return classify_module(mod_name)
 
     def _count_layer_violations(self, mod_name: str) -> int:
         source_layer = self.layer_name(mod_name)
-        source_rank = LAYER_ORDER.get(source_layer, LAYER_ORDER["default"])
+        source_rank = layer_rank(source_layer)
         violations = 0
         for dependency in self.dependencies.get(mod_name, set()):
             target_layer = self.layer_name(dependency)
-            target_rank = LAYER_ORDER.get(target_layer, LAYER_ORDER["default"])
+            target_rank = layer_rank(target_layer)
             if source_rank < target_rank:
                 violations += 1
         return violations
@@ -558,6 +734,8 @@ class ArchitectureMapper:
         correctness = self.correctness.get(mod_name, {})
         outbound, inbound = self._dependency_density(mod_name)
         test_count = int(correctness.get("test_count", 0))
+        hotspots_unknown = self._artifact_unknown("hotspots")
+        correctness_unknown = self._artifact_unknown("correctness")
         return {
             "metric": metric,
             "perf": perf,
@@ -567,74 +745,39 @@ class ArchitectureMapper:
             "outbound": outbound,
             "inbound": inbound,
             "public_api": self.public_api_counts.get(mod_name, 0),
-            "sloc": float(metric.get("sloc", 0.0)),
-            "complexity": float(metric.get("score", 0.0)),
+            "sloc": None if hotspots_unknown else float(metric.get("sloc", 0.0)),
+            "complexity": None if hotspots_unknown else float(metric.get("score", 0.0)),
             "churn": float(git.get("churn", 0)),
             "contributors": int(git.get("contributor_count", 0)),
             "defect_commits": int(git.get("defect_commits", 0)),
             "commit_count": int(git.get("commits", 0)),
-            "test_count": test_count,
-            "failed_tests": int(correctness.get("failed_tests", 0)),
-            "unknown_tests": int(correctness.get("unknown_tests", 0)),
-            "skipped_tests": int(correctness.get("skipped_tests", 0)),
-            "has_correctness_tests": bool(tests.get("coverage_hint", False)) or test_count > 0,
+            "test_count": None if correctness_unknown else test_count,
+            "failed_tests": None if correctness_unknown else int(correctness.get("failed_tests", 0)),
+            "unknown_tests": None if correctness_unknown else int(correctness.get("unknown_tests", 0)),
+            "skipped_tests": None if correctness_unknown else int(correctness.get("skipped_tests", 0)),
+            "has_correctness_tests": None
+            if correctness_unknown
+            else bool(tests.get("coverage_hint", False)) or test_count > 0,
             "perf_score": float(perf.get("score", 0.0)),
             "perf_mean_ms": float(perf.get("mean_ms", 0.0)),
             "perf_variance": float(perf.get("variance", 0.0)),
             "layer_violations": self._count_layer_violations(mod_name),
             "cycle_member": mod_name in self.cycle_members,
+            "external_dependencies": sorted(self.external_dependencies.get(mod_name, set())),
+            "unknown_categories": self._unknown_categories(),
         }
 
+    def _unknown_categories(self) -> Set[str]:
+        unknown = set()
+        if self._artifact_unknown("hotspots"):
+            unknown.add("maintainability")
+        if self._artifact_unknown("correctness"):
+            unknown.update({"change", "correctness"})
+        return unknown
+
     @staticmethod
-    def _risk_scores(values: Dict[str, Any]) -> Dict[str, float]:
-        maintainability = round(
-            values["complexity"]
-            + min(70.0, values["sloc"] * 0.12)
-            + min(30.0, values["public_api"] * 2.5)
-            + min(35.0, values["outbound"] * 4.0 + values["inbound"] * 1.0),
-            2,
-        )
-        change = round(
-            min(160.0, values["churn"] / 12.0)
-            + min(100.0, values["commit_count"] * 2.5)
-            + min(80.0, values["contributors"] * 14.0)
-            + min(90.0, values["defect_commits"] * 18.0)
-            + (90.0 if not values["has_correctness_tests"] else 0.0),
-            2,
-        )
-        correctness = round(
-            (140.0 if values["failed_tests"] else 0.0)
-            + min(120.0, values["failed_tests"] * 45.0)
-            + min(80.0, values["unknown_tests"] * 4.0)
-            + min(40.0, values["skipped_tests"] * 10.0)
-            + (90.0 if not values["has_correctness_tests"] else 0.0),
-            2,
-        )
-        performance = round(
-            values["perf_score"]
-            + min(120.0, values["perf_mean_ms"] * 2.5)
-            + min(90.0, values["perf_variance"] * 180.0),
-            2,
-        )
-        architectural = round(
-            min(120.0, values["outbound"] * 10.0)
-            + min(120.0, values["inbound"] * 8.0)
-            + min(120.0, values["layer_violations"] * 32.0)
-            + (110.0 if values["cycle_member"] else 0.0)
-            + (60.0 if values["sloc"] >= 250 else 0.0),
-            2,
-        )
-        return {
-            "maintainability_risk": maintainability,
-            "change_risk": change,
-            "performance_risk": performance,
-            "correctness_risk": correctness,
-            "quality_risk": maintainability,
-            "architectural_risk": architectural,
-            "total_score": round(
-                maintainability + change + performance + architectural + correctness, 2
-            ),
-        }
+    def _risk_scores(values: Dict[str, Any]) -> Dict[str, Optional[float]]:
+        return architecture_risk_scores(values)
 
     @staticmethod
     def _add_signal(
@@ -648,10 +791,18 @@ class ArchitectureMapper:
 
     def _risk_signals(self, values: Dict[str, Any]) -> Dict[str, List[str]]:
         signals: Dict[str, List[str]] = {category: [] for category in RISK_CATEGORIES}
+        unknown_categories = values["unknown_categories"]
         rules = {
             "maintainability": [
-                (values["complexity"] >= 300, f"high internal complexity {values['complexity']:.0f}"),
-                (values["sloc"] >= 150, f"large module {int(values['sloc'])} sloc"),
+                ("maintainability" in unknown_categories, "unknown: missing or stale hotspot metrics"),
+                (
+                    values["complexity"] is not None and values["complexity"] >= 300,
+                    f"high internal complexity {values['complexity'] or 0:.0f}",
+                ),
+                (
+                    values["sloc"] is not None and values["sloc"] >= 150,
+                    f"large module {int(values['sloc'] or 0)} sloc",
+                ),
                 (values["public_api"] >= 10, f"broad interface {values['public_api']} public items"),
                 (
                     values["outbound"] >= 10 or values["inbound"] >= 20,
@@ -659,7 +810,8 @@ class ArchitectureMapper:
                 ),
             ],
             "change": [
-                (not values["has_correctness_tests"], "low test evidence"),
+                ("change" in unknown_categories, "unknown: missing or stale correctness catalog"),
+                (values["has_correctness_tests"] is False, "low test evidence"),
                 (values["churn"] >= 200, f"high churn {int(values['churn'])} lines"),
                 (values["contributors"] >= 3, f"many contributors {values['contributors']}"),
                 (
@@ -676,16 +828,17 @@ class ArchitectureMapper:
                 (not values["perf"].get("items"), "no benchmark mapping"),
             ],
             "correctness": [
+                ("correctness" in unknown_categories, "unknown: missing or stale correctness catalog"),
                 (bool(values["failed_tests"]), f"failing tests {values['failed_tests']}"),
                 (bool(values["unknown_tests"]), f"unknown tests {values['unknown_tests']}"),
                 (bool(values["skipped_tests"]), f"skipped tests {values['skipped_tests']}"),
-                (not values["has_correctness_tests"], "no direct tests"),
+                (values["has_correctness_tests"] is False, "no direct tests"),
             ],
             "architectural": [
                 (values["layer_violations"] >= 1, f"layer violations {values['layer_violations']}"),
                 (values["cycle_member"], "circular dependency"),
                 (values["inbound"] >= 6, f"oversized hub inbound {values['inbound']}"),
-                (values["sloc"] >= 250, "oversized module"),
+                (values["sloc"] is not None and values["sloc"] >= 250, "oversized module"),
             ],
         }
         for category, category_rules in rules.items():
@@ -697,10 +850,11 @@ class ArchitectureMapper:
     def _risk_evidence(values: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "complexity_score": values["complexity"],
-            "sloc": int(values["sloc"]),
+            "sloc": int(values["sloc"]) if values["sloc"] is not None else None,
             "public_api_count": values["public_api"],
             "outbound_dependencies": values["outbound"],
             "inbound_dependencies": values["inbound"],
+            "external_dependencies": values["external_dependencies"],
             "commit_count": values["commit_count"],
             "churn": int(values["churn"]),
             "contributors": values["git"].get("contributors", []),
@@ -717,6 +871,7 @@ class ArchitectureMapper:
             "cycle_member": values["cycle_member"],
             "perf_mean_ms": values["perf_mean_ms"],
             "perf_variance": values["perf_variance"],
+            "unknown_categories": sorted(values["unknown_categories"]),
         }
 
     def compute_risks(self) -> None:
@@ -729,16 +884,16 @@ class ArchitectureMapper:
             }
 
     def risk_color(self, score: float) -> str:
-        if score >= 700:
+        classification = model_classification()
+        if score >= classification["bad_color_score"]:
             return "#f44747"
-        if score >= 350:
+        if score >= classification["warn_color_score"]:
             return "#d7ba7d"
         return "#b5cea8"
 
     def get_group_style(self, mod_name: str) -> Dict[str, str]:
         parts = mod_name.split("::")
-        area = parts[1] if len(parts) > 1 and parts[0] == "app" else "default"
-        base_color = AREA_COLORS.get(area, AREA_COLORS["default"])
+        base_color = layer_color(self.layer_name(mod_name))
         opacity = max(0.1, 0.4 - (len(parts) * 0.08))
         return {"color": base_color, "opacity": opacity}
 
@@ -793,6 +948,18 @@ class ArchitectureMapper:
             )
         )
 
+    @staticmethod
+    def _float_or_none(value: object) -> Optional[float]:
+        if value is None:
+            return None
+        return float(value)
+
+    @staticmethod
+    def _int_or_none(value: object) -> Optional[int]:
+        if value is None:
+            return None
+        return int(value)
+
     def _module_node(self, mod_name: str) -> Dict[str, Dict[str, object]]:
         perf_data = self.performance.get(mod_name, {})
         perf_items = perf_data.get("items", [])
@@ -802,9 +969,13 @@ class ArchitectureMapper:
         category_signals = risk.get("signals", {})
         locality = self.locality_metrics.get(mod_name, {})
         leverage = self.leverage_metrics.get(mod_name, {})
-        leverage_score = float(
-            leverage.get("leverage_score", leverage.get("total_leverage_score", 0.0))
-        )
+        locality_unknown = self._artifact_unknown("locality")
+        leverage_unknown = self._artifact_unknown("leverage")
+        leverage_score = None
+        if not leverage_unknown:
+            leverage_score = float(
+                leverage.get("leverage_score", leverage.get("total_leverage_score", 0.0))
+            )
         return {
             "data": {
                 "id": mod_name,
@@ -812,35 +983,41 @@ class ArchitectureMapper:
                 "churn": int(evidence.get("churn", 0)),
                 "label": mod_name.split("::")[-1],
                 "parent": group_id("::".join(mod_name.split("::")[:-1]) or None),
-                "comp_score": float(metric.get("score", 0.0)),
+                "comp_score": None if self._artifact_unknown("hotspots") else float(metric.get("score", 0.0)),
                 "perf_score": float(perf_data.get("score", 0.0)),
-                "quality_risk": float(
-                    risk.get("quality_risk", risk.get("maintainability_risk", 0.0))
+                "quality_risk": self._float_or_none(
+                    risk.get("quality_risk", risk.get("maintainability_risk"))
                 ),
-                "maintainability_risk": float(risk.get("maintainability_risk", 0.0)),
-                "correctness_risk": float(risk.get("correctness_risk", 0.0)),
-                "change_risk": float(risk.get("change_risk", 0.0)),
-                "performance_risk": float(risk.get("performance_risk", 0.0)),
-                "architectural_risk": float(risk.get("architectural_risk", 0.0)),
-                "locality_score": float(locality.get("locality_score", 0.0)),
-                "locality_risk": float(
-                    locality.get("non_locality_risk", locality.get("locality_risk", 0.0))
-                ),
-                "non_locality_risk": float(
-                    locality.get("non_locality_risk", locality.get("locality_risk", 0.0))
-                ),
+                "maintainability_risk": self._float_or_none(risk.get("maintainability_risk")),
+                "correctness_risk": self._float_or_none(risk.get("correctness_risk")),
+                "change_risk": self._float_or_none(risk.get("change_risk")),
+                "performance_risk": self._float_or_none(risk.get("performance_risk")),
+                "architectural_risk": self._float_or_none(risk.get("architectural_risk")),
+                "locality_score": None
+                if locality_unknown
+                else float(locality.get("locality_score", 0.0)),
+                "locality_risk": None
+                if locality_unknown
+                else float(locality.get("non_locality_risk", locality.get("locality_risk", 0.0))),
+                "non_locality_risk": None
+                if locality_unknown
+                else float(locality.get("non_locality_risk", locality.get("locality_risk", 0.0))),
                 "leverage_score": leverage_score,
-                "leverage_risk": float(
-                    leverage.get("leverage_risk", 100.0 - leverage_score)
-                ),
-                "total_score": float(risk.get("total_score", 0.0)),
-                "sloc": int(metric.get("sloc", 0)),
+                "leverage_risk": None
+                if leverage_unknown
+                else float(leverage.get("leverage_risk", 100.0 - (leverage_score or 0.0))),
+                "total_score": self._float_or_none(risk.get("total_score")),
+                "sloc": None if self._artifact_unknown("hotspots") else int(metric.get("sloc", 0)),
                 "signals": self._flat_signals(category_signals),
                 "category_signals": category_signals,
                 "risk_colors": self.risk_colors(risk),
                 "evidence": evidence,
-                "locality_metrics": locality,
-                "leverage_metrics": leverage,
+                "locality_metrics": None if locality_unknown else locality,
+                "leverage_metrics": None if leverage_unknown else leverage,
+                "unknown_metrics": self._unknown_metrics(),
+                "external_dependencies": sorted(
+                    self.external_dependencies.get(mod_name, set())
+                ),
                 "is_slow": bool(perf_items),
                 "perf_benchmarks": self._perf_benchmark_rows(perf_items),
                 "perf_kind": ", ".join(
@@ -851,6 +1028,14 @@ class ArchitectureMapper:
 
     def build_graph_payload(self) -> Dict[str, List[Dict]]:
         nodes = [self._group_node(group) for group in sorted(self._graph_groups())]
+        external_names = sorted(
+            {
+                dependency
+                for dependencies in self.external_dependencies.values()
+                for dependency in dependencies
+            }
+        )
+        nodes.extend(self._external_node(name) for name in external_names)
         nodes.extend(self._module_node(mod_name) for mod_name in sorted(self.dependencies))
         edges = [
             {"data": {"source": source, "target": target}}
@@ -858,48 +1043,103 @@ class ArchitectureMapper:
             for target in sorted(targets)
             if source != target
         ]
+        edges.extend(
+            {
+                "data": {
+                    "source": source,
+                    "target": self._external_node_id(target),
+                    "is_external": True,
+                }
+            }
+            for source, targets in sorted(self.external_dependencies.items())
+            for target in sorted(targets)
+        )
         return {"nodes": nodes, "edges": edges}
+
+    @staticmethod
+    def _external_node_id(name: str) -> str:
+        return f"external:{name}"
+
+    def _external_node(self, name: str) -> Dict[str, Dict[str, object]]:
+        return {
+            "data": {
+                "id": self._external_node_id(name),
+                "module": name,
+                "label": name,
+                "layer": "External",
+                "is_external": True,
+            }
+        }
 
     def risk_colors(self, risk: Dict[str, object]) -> Dict[str, str]:
         return {
-            category: self.risk_color(float(risk.get(f"{category}_risk", 0.0)))
+            category: (
+                "#808080"
+                if risk.get(f"{category}_risk") is None
+                else self.risk_color(float(risk.get(f"{category}_risk", 0.0)))
+            )
             for category in RISK_CATEGORIES
         }
+
+    def _unknown_metrics(self) -> List[str]:
+        unknown = []
+        if self._artifact_unknown("hotspots"):
+            unknown.extend(["comp_score", "sloc", "maintainability_risk", "quality_risk"])
+        if self._artifact_unknown("correctness"):
+            unknown.extend(["correctness_risk", "change_risk", "test evidence"])
+        if self._artifact_unknown("locality"):
+            unknown.extend(["locality_score", "locality_risk"])
+        if self._artifact_unknown("leverage"):
+            unknown.extend(["leverage_score", "leverage_risk"])
+        return unknown
 
     def meta_summary(self) -> Dict[str, object]:
         measured_modules = len(self.risk_breakdown)
         good = warn = bad = 0
+        unknown = 0
         for item in self.risk_breakdown.values():
-            score = float(item.get("total_score") or item.get("total_risk") or 0)
-            if score >= 600:
+            raw_score = item.get("total_score", item.get("total_risk"))
+            if raw_score is None:
+                unknown += 1
+                continue
+            score = float(raw_score)
+            classification = model_classification()
+            if score >= classification["bad_total_score"]:
                 bad += 1
-            elif score >= 300:
+            elif score >= classification["warn_total_score"]:
                 warn += 1
             else:
                 good += 1
         category_totals = {
-            category: round(
-                sum(item[f"{category}_risk"] for item in self.risk_breakdown.values()),
-                2,
-            )
+            category: self._category_total(category)
             for category in RISK_CATEGORIES
         }
         return {
             "measured_modules": measured_modules,
+            "unknown_modules": unknown,
             "cycle_members": len(self.cycle_members),
             "modules_without_test_evidence": sum(
                 1
                 for item in self.risk_breakdown.values()
-                if not bool(item["evidence"]["has_tests"])
+                if item["evidence"]["has_tests"] is False
             ),
             "category_totals": category_totals,
+            "artifact_status": self.artifact_status,
+            "unknown_metrics": self._unknown_metrics(),
             "good": good,
             "warn": warn,
             "bad": bad,
         }
 
+    def _category_total(self, category: str) -> Optional[float]:
+        values = [item.get(f"{category}_risk") for item in self.risk_breakdown.values()]
+        if any(value is None for value in values):
+            return None
+        return round(sum(float(value) for value in values), 2)
+
     def viewer_payload(self) -> Dict:
         graph = self.build_graph_payload()
+        confidence = self.measurement_confidence()
         return {
             "meta": {
                 "title": f"{self.project_name} Architecture Risk Map",
@@ -909,10 +1149,21 @@ class ArchitectureMapper:
                 "node_count": len(graph["nodes"]),
                 "edge_count": len(graph["edges"]),
                 "risk_model": list(RISK_CATEGORIES),
+                "risk_model_id": model_id(),
+                "risk_model_version": model_version(),
+                "risk_model_weights": model_weights(),
+                "risk_model_tool_scores": RISK_MODEL["tool_scores"],
+                "risk_model_contract": RISK_MODEL["raw_fact_contract"],
+                "layer_ruleset": {"id": RULESET_ID, "version": RULESET_VERSION},
                 "summary": self.meta_summary(),
+                "measurement_confidence": confidence,
             },
             "graph": graph,
+            "measurement_confidence": confidence,
         }
+
+    def measurement_confidence(self) -> Dict[str, object]:
+        return merge_confidences(*self.confidence_inputs)
 
 
 def refresh_analysis_inputs() -> None:
@@ -940,16 +1191,24 @@ def render_cli(payload: object) -> str:
         node.get("data", {})
         for node in nodes
         if not node.get("data", {}).get("is_group")
+        and not node.get("data", {}).get("is_external")
     ]
-    top = sorted(modules, key=lambda item: -float(item.get("total_score", 0.0)))[:10]
+    top = sorted(
+        modules,
+        key=lambda item: -float(item.get("total_score") or -1.0),
+    )[:10]
     lines = ["Architecture Risk Map"]
     for index, item in enumerate(top, start=1):
         lines.append(
-            f"{index:>2}. {item.get('id', '<unknown>')} | total={float(item.get('total_score', 0.0)):.2f} | maintainability={float(item.get('maintainability_risk', 0.0)):.2f} | change={float(item.get('change_risk', 0.0)):.2f} | architectural={float(item.get('architectural_risk', 0.0)):.2f}"
+            f"{index:>2}. {item.get('id', '<unknown>')} | total={format_risk(item.get('total_score'))} | maintainability={format_risk(item.get('maintainability_risk'))} | change={format_risk(item.get('change_risk'))} | architectural={format_risk(item.get('architectural_risk'))}"
         )
     if not top:
         lines.append("No modules found.")
     return "\n".join(lines)
+
+
+def format_risk(value: object) -> str:
+    return "unknown" if value is None else f"{float(value):.2f}"
 
 
 def main() -> None:

@@ -1,52 +1,21 @@
 import argparse
-import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 from common import (
-    iter_rust_files,
-    module_key_for_path,
+    source_confidence,
     provenance,
-    strip_comments_and_strings,
+    rust_facts_for_paths,
 )
 from report_modes import add_mode_argument, emit_report
+from risk_model import tool_score_metadata, tool_score_weights
 
 DEFAULT_OUTPUT = Path("rust_escape_hatches.json")
 VISIBILITY_OUTPUT = Path("target/analysis/rust_escape_hatches.json")
 
 
-PATTERNS = {
-    "unsafe_block": (r"\bunsafe\s*\{", 10.0),
-    "unsafe_fn": (r"\bunsafe\s+fn\b", 10.0),
-    "unsafe_impl": (r"\bunsafe\s+impl\b", 10.0),
-    "unsafe_trait": (r"\bunsafe\s+trait\b", 10.0),
-    "extern_block": (r"\b(?:unsafe\s+)?extern\s*(?:\"[^\"]+\")?\s*\{", 8.0),
-    "extern_fn": (r"\b(?:unsafe\s+)?extern\s*(?:\"[^\"]+\")?\s+fn\b", 7.0),
-    "static_mut": (r"\bstatic\s+mut\b", 14.0),
-    "union": (r"\bunion\s+[A-Za-z_][A-Za-z0-9_]*", 12.0),
-    "raw_borrow": (r"&\s*raw\s+(?:const|mut)\b", 6.0),
-    "asm_macro": (r"\b(?:asm|global_asm)!\s*\(", 14.0),
-    "transmute": (r"\btransmute(?:_copy)?\s*(?:::<[^>]+>)?\s*\(", 12.0),
-    "maybe_uninit": (r"\bMaybeUninit\b", 5.0),
-    "deref_impl": (r"\bimpl\b(?:\s*<[^{};]*>)?\s+(?:(?:::)?(?:std|core)::ops::)?Deref\s+for\b", 4.0),
-    "deref_mut_impl": (r"\bimpl\b(?:\s*<[^{};]*>)?\s+(?:(?:::)?(?:std|core)::ops::)?DerefMut\s+for\b", 5.0),
-    "glob_import": (r"::\s*\*", 2.0),
-    "container_ref_return": (r"->\s*&\s*(?!mut\b)(?:'[A-Za-z_][A-Za-z0-9_]*\s+)?(?:(?:::)?[A-Za-z_][A-Za-z0-9_]*::)*(?:Vec|HashMap|BTreeMap|HashSet|BTreeSet|Option|Box|Rc|Arc|String)\s*(?:<|\b)", 3.0),
-    "repr_escape": (r"#\s*\[\s*repr\s*\(\s*(?:C|packed|transparent|align)", 5.0),
-    "linkage_escape": (r"#\s*\[\s*(?:no_mangle|export_name|link_name|link_section|used)\b", 8.0),
-    "clippy_suppression": (r"#\s*!\s*\[\s*(?:allow|expect)\s*\([^)]*clippy::|#\s*\[\s*(?:allow|expect)\s*\([^)]*clippy::", 3.0),
-    "lint_suppression": (r"#\s*!\s*\[\s*(?:allow|expect)\s*\(|#\s*\[\s*(?:allow|expect)\s*\(", 2.0),
-}
-
-ALLOW_ATTRIBUTE_PATTERN = re.compile(
-    r"#\s*!?\s*\[\s*(?:allow|expect)\s*\(",
-    re.MULTILINE,
-)
-CLIPPY_ALLOW_PATTERN = re.compile(
-    r"#\s*!?\s*\[\s*(?:allow|expect)\s*\([^)]*clippy::",
-    re.MULTILINE,
-)
+WEIGHTS = tool_score_weights("escape_hatches")
 
 SIGNAL_LABELS = {
     "unsafe_block": "unsafe block",
@@ -92,12 +61,17 @@ class EscapeHatchRecord:
     allow_attribute_count: int
     clippy_allow_count: int
     counts: Dict[str, int]
+    scoring_counts: Dict[str, int]
     locations: List[Dict[str, object]]
     allow_locations: List[Dict[str, object]]
     signals: List[str]
     measured_at: str
     command: str
     host: str
+    measurement_confidence: Dict[str, object]
+    risk_model_id: str
+    risk_model_version: int
+    risk_calibration: str
     source: str = "static_rust_escape_hatches"
     mock: bool = False
 
@@ -107,7 +81,9 @@ class RustEscapeHatchAnalyzer:
         self.top = top
 
     def run(self, paths: Sequence[str]) -> List[Dict]:
-        rows = [asdict(self._record_for_file(path)) for path in self._iter_rust_files(paths)]
+        facts = rust_facts_for_paths(paths)
+        confidence = source_confidence(paths, facts=facts)
+        rows = [asdict(self._record_for_fact(fact, confidence)) for fact in facts]
         rows = [row for row in rows if row["total_count"] > 0]
         rows.sort(
             key=lambda item: (
@@ -120,31 +96,34 @@ class RustEscapeHatchAnalyzer:
             return rows[: self.top]
         return rows
 
-    def _iter_rust_files(self, paths: Sequence[str]) -> Iterable[Path]:
-        yield from iter_rust_files(paths)
-
-    def _record_for_file(self, path: Path) -> EscapeHatchRecord:
-        source = path.read_text(encoding="utf-8")
-        searchable = strip_comments_and_strings(source)
-        module_key = module_key_for_path(path)
+    def _record_for_fact(
+        self, fact: Dict[str, object], confidence: Dict[str, object]
+    ) -> EscapeHatchRecord:
+        module_key = str(fact.get("module_key", ""))
         run_provenance = provenance()
-        counts: Dict[str, int] = {}
+        raw_counts = fact.get("escape_counts", {})
+        score_metadata = tool_score_metadata("escape_hatches")
+        counts: Dict[str, int] = {
+            key: int(raw_counts.get(key, 0)) if isinstance(raw_counts, dict) else 0
+            for key in WEIGHTS
+        }
         locations: List[Dict[str, object]] = []
-        score = 0.0
+        scoring_counts = self._scoring_counts(counts)
+        score = sum(scoring_counts[key] * weight for key, weight in WEIGHTS.items())
 
-        for key, (pattern, weight) in PATTERNS.items():
-            matches = list(re.finditer(pattern, searchable, re.MULTILINE))
-            if not matches:
-                counts[key] = 0
-                continue
-            counts[key] = len(matches)
-            score += len(matches) * weight
-            for match in matches[:20]:
+        raw_locations = fact.get("escape_locations", [])
+        if isinstance(raw_locations, list):
+            for raw_location in raw_locations:
+                if not isinstance(raw_location, dict):
+                    continue
+                key = str(raw_location.get("kind", ""))
+                if key not in SIGNAL_LABELS:
+                    continue
                 locations.append(
                     {
                         "kind": key,
                         "label": SIGNAL_LABELS[key],
-                        "line": searchable.count("\n", 0, match.start()) + 1,
+                        "line": int(raw_location.get("line", 0)),
                     }
                 )
 
@@ -167,22 +146,18 @@ class RustEscapeHatchAnalyzer:
         layout_linkage_count = counts["repr_escape"] + counts["linkage_escape"]
         clippy_suppression_count = counts["clippy_suppression"]
         lint_suppression_count = counts["lint_suppression"]
-        allow_matches = list(ALLOW_ATTRIBUTE_PATTERN.finditer(searchable))
-        allow_attribute_count = len(allow_matches)
-        clippy_allow_count = len(list(CLIPPY_ALLOW_PATTERN.finditer(searchable)))
-        source_lines = source.splitlines()
-        allow_locations = []
-        for match in allow_matches:
-            line = searchable.count("\n", 0, match.start()) + 1
-            snippet = source_lines[line - 1].strip() if line - 1 < len(source_lines) else ""
-            allow_locations.append(
-                {
-                    "kind": "allow_attribute",
-                    "label": "allow/expect attribute",
-                    "line": line,
-                    "snippet": snippet,
-                }
-            )
+        allow_attribute_count = lint_suppression_count + clippy_suppression_count
+        clippy_allow_count = clippy_suppression_count
+        allow_locations = [
+            {
+                "kind": "allow_attribute",
+                "label": "allow/expect attribute",
+                "line": item["line"],
+                "snippet": "",
+            }
+            for item in locations
+            if item["kind"] in {"lint_suppression", "clippy_suppression"}
+        ]
         signals = [
             f"{SIGNAL_LABELS[key]} {count}"
             for key, count in counts.items()
@@ -196,7 +171,7 @@ class RustEscapeHatchAnalyzer:
         return EscapeHatchRecord(
             module_name=module_key,
             module_key=module_key,
-            path=path.as_posix(),
+            path=str(fact.get("path", "")),
             escape_hatch_score=round(score, 2),
             total_count=sum(counts.values()),
             unsafe_count=unsafe_count,
@@ -212,13 +187,25 @@ class RustEscapeHatchAnalyzer:
             allow_attribute_count=allow_attribute_count,
             clippy_allow_count=clippy_allow_count,
             counts=counts,
+            scoring_counts=scoring_counts,
             locations=sorted(locations, key=lambda item: (int(item["line"]), str(item["kind"]))),
             allow_locations=allow_locations,
             signals=signals,
             measured_at=run_provenance["measured_at"],
             command=run_provenance["command"],
             host=run_provenance["host"],
+            measurement_confidence=confidence,
+            risk_model_id=str(score_metadata["risk_model_id"]),
+            risk_model_version=int(score_metadata["risk_model_version"]),
+            risk_calibration=str(score_metadata["risk_calibration"]),
         )
+
+    @staticmethod
+    def _scoring_counts(counts: Dict[str, int]) -> Dict[str, int]:
+        scoring_counts = dict(counts)
+        if scoring_counts.get("clippy_suppression", 0):
+            scoring_counts["lint_suppression"] = 0
+        return scoring_counts
 
 
 def render_cli(payload: object) -> str:

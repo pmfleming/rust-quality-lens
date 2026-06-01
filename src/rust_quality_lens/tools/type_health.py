@@ -1,17 +1,15 @@
 import argparse
-import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from common import (
-    iter_rust_files,
-    matching_brace,
-    module_key_for_path,
+    source_confidence,
     provenance,
-    strip_comments_and_strings,
+    rust_facts_for_paths,
 )
 from report_modes import add_mode_argument, emit_report
+from risk_model import bounded_score, inverse_risk, over_free, tool_calibration, tool_score_metadata
 
 DEFAULT_OUTPUT = Path("type_health.json")
 VISIBILITY_OUTPUT = Path("target/analysis/type_health.json")
@@ -25,8 +23,10 @@ class TypeRecord:
     path: str
     line: int
     kind: str
+    shape: str = ""
     field_count: int = 0
     variant_count: int = 0
+    variant_field_count: int = 0
     declaration_span: int = 0
     method_count: int = 0
     impl_block_count: int = 0
@@ -38,6 +38,10 @@ class TypeRecord:
     measured_at: str = ""
     command: str = ""
     host: str = ""
+    measurement_confidence: Dict[str, object] = field(default_factory=dict)
+    risk_model_id: str = ""
+    risk_model_version: int = 0
+    risk_calibration: str = ""
     source: str = "static_type_health"
     mock: bool = False
 
@@ -57,35 +61,61 @@ class TypeHealthAnalyzer:
         declarations: List[TypeRecord] = []
         impls: Dict[str, ImplStats] = {}
 
-        for path in self._iter_rust_files(paths):
-            source = path.read_text(encoding="utf-8")
-            searchable = strip_comments_and_strings(source)
-            module_key = module_key_for_path(path)
-            rel_path = path.as_posix()
+        facts = rust_facts_for_paths(paths)
+        confidence = source_confidence(paths, facts=facts)
+        for fact in facts:
+            if fact.get("parse_status") != "ok":
+                continue
+            for raw_record in fact.get("types", []):
+                if not isinstance(raw_record, dict):
+                    continue
+                declarations.append(
+                    TypeRecord(
+                        type_name=str(raw_record.get("type_name", "")),
+                        qualified_name=str(raw_record.get("qualified_name", "")),
+                        module_key=str(raw_record.get("module_key", "")),
+                        path=str(raw_record.get("path", "")),
+                        line=int(raw_record.get("line", 0)),
+                        kind=str(raw_record.get("kind", "")),
+                        shape=str(raw_record.get("shape", "")),
+                        field_count=int(raw_record.get("field_count", 0)),
+                        variant_count=int(raw_record.get("variant_count", 0)),
+                        variant_field_count=int(raw_record.get("variant_field_count", 0)),
+                        declaration_span=int(raw_record.get("declaration_span", 0)),
+                    )
+                )
 
-            for record in self._type_declarations(searchable, module_key, rel_path):
-                declarations.append(record)
-
-            for type_name, method_count in self._impl_blocks(searchable):
-                stats = impls.setdefault(type_name, ImplStats())
+            for raw_impl in fact.get("impls", []):
+                if not isinstance(raw_impl, dict):
+                    continue
+                key = (str(raw_impl.get("module_key", "")), str(raw_impl.get("type_name", "")))
+                stats = impls.setdefault(key, ImplStats())
                 stats.impl_block_count += 1
-                stats.method_count += method_count
-                stats.impl_files.add(rel_path)
+                stats.method_count += int(raw_impl.get("method_count", 0))
+                stats.impl_files.add(str(raw_impl.get("path", "")))
 
         rows: List[Dict] = []
         run_provenance = provenance()
+        score_metadata = tool_score_metadata("type_health")
 
         for record in declarations:
-            stats = impls.get(record.type_name, ImplStats())
+            stats = impls.get((record.module_key, record.type_name), ImplStats())
             record.method_count = stats.method_count
             record.impl_block_count = stats.impl_block_count
             record.impl_files = sorted(stats.impl_files)
             record.impl_file_count = len(record.impl_files)
             record.structural_risk, record.signals = self._risk(record)
-            record.structural_score = round(max(0.0, 100.0 - record.structural_risk), 2)
+            record.structural_score = round(
+                inverse_risk(record.structural_risk, cap=tool_calibration("type_health")["score_cap"]),
+                2,
+            )
             record.measured_at = run_provenance["measured_at"]
             record.command = run_provenance["command"]
             record.host = run_provenance["host"]
+            record.measurement_confidence = confidence
+            record.risk_model_id = str(score_metadata["risk_model_id"])
+            record.risk_model_version = int(score_metadata["risk_model_version"])
+            record.risk_calibration = str(score_metadata["risk_calibration"])
             rows.append(asdict(record))
 
         rows.sort(
@@ -100,114 +130,62 @@ class TypeHealthAnalyzer:
             return rows[: self.top]
         return rows
 
-    def _iter_rust_files(self, paths: Sequence[str]) -> Iterable[Path]:
-        yield from iter_rust_files(paths)
-
-    def _type_declarations(
-        self, source: str, module_key: str, path: str
-    ) -> Iterable[TypeRecord]:
-        pattern = re.compile(
-            r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?P<kind>struct|enum)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)[^{;]*\{",
-            re.MULTILINE,
-        )
-        for match in pattern.finditer(source):
-            kind = match.group("kind")
-            name = match.group("name")
-            open_index = source.find("{", match.start())
-            close_index = matching_brace(source, open_index)
-            if close_index is None:
-                continue
-            body = source[open_index + 1 : close_index]
-            start_line = source.count("\n", 0, match.start()) + 1
-            end_line = source.count("\n", 0, close_index) + 1
-            field_count = self._field_count(body) if kind == "struct" else 0
-            variant_count = self._variant_count(body) if kind == "enum" else 0
-            yield TypeRecord(
-                type_name=name,
-                qualified_name=f"{module_key}::{name}",
-                module_key=module_key,
-                path=path,
-                line=start_line,
-                kind=kind,
-                field_count=field_count,
-                variant_count=variant_count,
-                declaration_span=end_line - start_line + 1,
-            )
-
-    def _field_count(self, body: str) -> int:
-        fields = 0
-        for line in body.splitlines():
-            if re.match(r"^\s*(?:pub(?:\([^)]*\))?\s+)?[A-Za-z_][A-Za-z0-9_]*\s*:", line):
-                fields += 1
-        return fields
-
-    def _variant_count(self, body: str) -> int:
-        variants = 0
-        for line in body.splitlines():
-            if re.match(r"^\s*[A-Z][A-Za-z0-9_]*(?:\s*[({,]|$)", line):
-                variants += 1
-        return variants
-
-    def _impl_blocks(self, source: str) -> Iterable[Tuple[str, int]]:
-        pattern = re.compile(r"^\s*impl(?:<[^>{}]*>)?\s+(?P<head>[^{]+)\{", re.MULTILINE)
-        for match in pattern.finditer(source):
-            head = match.group("head").strip()
-            type_name = self._impl_type_name(head)
-            if not type_name:
-                continue
-            open_index = source.find("{", match.start())
-            close_index = matching_brace(source, open_index)
-            if close_index is None:
-                continue
-            body = source[open_index + 1 : close_index]
-            method_count = len(
-                re.findall(
-                    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*",
-                    body,
-                    re.MULTILINE,
-                )
-            )
-            yield type_name, method_count
-
-    def _impl_type_name(self, head: str) -> Optional[str]:
-        if " for " in head:
-            raw = head.rsplit(" for ", 1)[1]
-        else:
-            raw = head
-        raw = raw.strip().lstrip("&")
-        match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", raw)
-        return match.group(1) if match else None
-
     def _risk(self, record: TypeRecord) -> Tuple[float, List[str]]:
-        field_pressure = min(35.0, max(0, record.field_count - 8) * 2.5)
-        variant_pressure = min(28.0, max(0, record.variant_count - 8) * 1.8)
-        method_pressure = min(32.0, max(0, record.method_count - 12) * 0.85)
-        impl_spread_pressure = min(
-            24.0,
-            max(0, record.impl_file_count - 2) * 4.5
-            + max(0, record.impl_block_count - 4) * 1.2,
+        calibration = tool_calibration("type_health")
+        field_pressure = over_free(record.field_count, **calibration["field_pressure"])
+        variant_pressure = over_free(record.variant_count, **calibration["variant_pressure"])
+        variant_payload_pressure = over_free(
+            record.variant_field_count,
+            **calibration["variant_payload_pressure"],
         )
-        declaration_pressure = min(12.0, max(0, record.declaration_span - 30) * 0.35)
-        risk = min(
-            100.0,
+        method_pressure = over_free(record.method_count, **calibration["method_pressure"])
+        impl_calibration = calibration["impl_spread_pressure"]
+        impl_spread_pressure = min(
+            impl_calibration["cap"],
+            max(0, record.impl_file_count - impl_calibration["file_free"])
+            * impl_calibration["file_weight"]
+            + max(0, record.impl_block_count - impl_calibration["block_free"])
+            * impl_calibration["block_weight"],
+        )
+        declaration_pressure = over_free(
+            record.declaration_span,
+            **calibration["declaration_pressure"],
+        )
+        risk = bounded_score(
             field_pressure
             + variant_pressure
+            + variant_payload_pressure
             + method_pressure
             + impl_spread_pressure
             + declaration_pressure,
+            cap=calibration["score_cap"],
         )
+        signal_thresholds = calibration["signals"]
         signals = []
-        if record.field_count >= 16:
+        if (
+            record.kind == "struct"
+            and record.shape == "tuple"
+            and record.field_count >= signal_thresholds["tuple_struct_fields"]
+        ):
+            signals.append(f"wide tuple struct {record.field_count} fields")
+        elif (
+            record.kind == "struct"
+            and record.field_count >= signal_thresholds["wide_struct_fields"]
+        ):
             signals.append(f"wide struct {record.field_count} fields")
-        if record.variant_count >= 12:
+        if record.kind == "struct" and record.shape == "unit":
+            signals.append("unit struct")
+        if record.variant_count >= signal_thresholds["large_enum_variants"]:
             signals.append(f"large enum {record.variant_count} variants")
-        if record.method_count >= 20:
+        if record.variant_field_count >= signal_thresholds["enum_payload_fields"]:
+            signals.append(f"enum payload surface {record.variant_field_count} fields")
+        if record.method_count >= signal_thresholds["broad_methods"]:
             signals.append(f"broad method surface {record.method_count}")
-        if record.impl_file_count >= 4:
+        if record.impl_file_count >= signal_thresholds["impl_files"]:
             signals.append(f"impl spread {record.impl_file_count} files")
-        if record.impl_block_count >= 6:
+        if record.impl_block_count >= signal_thresholds["impl_blocks"]:
             signals.append(f"many impl blocks {record.impl_block_count}")
-        if record.declaration_span >= 45:
+        if record.declaration_span >= signal_thresholds["large_declaration_lines"]:
             signals.append(f"large declaration {record.declaration_span} lines")
         return round(risk, 2), signals or ["stable"]
 
