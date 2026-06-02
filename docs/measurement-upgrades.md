@@ -10,6 +10,11 @@ tool-local regex parsing for the major Rust-aware measurements. This improves
 coverage for dependency graph extraction, type health, correctness discovery,
 test status attachment, and escape-hatch detection.
 
+`measure all` builds a per-run `RunContext` so source syntax facts are computed
+once and passed by reference to producers that need them. Correctness facts are
+also cached for correctness and map work. This keeps the major producers from
+re-running and re-parsing the same Rust tree independently.
+
 The extractor now handles common Rust patterns that were previously missed or
 fragile:
 
@@ -31,9 +36,21 @@ distinguish clean measurements from incomplete or stale ones:
 
 - `complete`
 - `partial`
+- `confidence_scope`
+- `required_inputs`
+- `observed_inputs`
 - `missing_input`
 - `stale_input`
 - `unsupported_pattern`
+
+Confidence distinguishes source-file coverage from syntax-fact coverage.
+Syntax-backed producers such as `hotspots`, `escape-hatches`, `type-health`,
+`correctness`, `locality`, `leverage`, and `map` report
+`confidence_scope: "syntax_facts"` and require both `rust_source_files` and
+`rust_syntax_facts`. Text-oriented producers such as token `clones` report
+`confidence_scope: "source_scan"` and require only `rust_source_files`.
+Unreadable source files are reported in confidence instead of being treated as
+empty text.
 
 The map no longer substitutes `0` for required missing or stale artifacts.
 Affected derived fields are marked unknown, usually as `null`, and listed in
@@ -43,7 +60,7 @@ counts and artifact status.
 ## Risk Calibration
 
 Raw facts and derived risk are separated. The versioned model lives in
-`src/main.rs`, is documented in
+`src/risk_model.rs`, is documented in
 `docs/risk-model-v1.md`, and is emitted into `map.json` metadata.
 
 Architecture map scoring now calls the shared `architecture_risk_scores(...)`
@@ -65,8 +82,11 @@ Shared producer calibrations currently cover:
 ## Correctness Discovery
 
 Correctness discovery is now project-neutral rather than Scratchpad-shaped. It
-uses configured source roots plus common Rust target roots such as `tests`,
-`benches`, and `examples`, and it honors Cargo manifest targets where present.
+uses configured source roots plus top-level Cargo test targets under `tests`,
+`benches`, and `examples`, and it honors structured Cargo manifest targets from
+`[[bin]]`, `[[test]]`, `[[bench]]`, and `[[example]]`. Nested fixture crates are
+not cataloged as tests for the current package unless they are explicitly listed
+or configured as source roots.
 
 Test status attachment now prefers stable test identities and qualified names,
 which prevents duplicate test names from receiving the wrong pass/fail status.
@@ -78,6 +98,10 @@ test patterns are surfaced through measurement confidence.
 Dependency extraction now captures more Rust dependency forms, including
 relative module paths, re-exports, direct crate calls, external crates, grouped
 imports, and attribute-wired modules.
+
+Attribute evidence is kept separate from dependency extraction. Attribute names
+such as `cfg` or `test` do not become dependency edges; only attribute values
+that actually wire modules, such as `#[path = "..."]`, influence module wiring.
 
 Test-support detection now uses syntax-resolved test dependencies rather than
 file names, stems, or substring matches. This removes easy false positives where
@@ -91,10 +115,18 @@ suppressions in score calculation, while the raw evidence remains visible.
 
 ## Clone Analysis
 
-The catalog promises AST clone analysis, and normal catalog-driven runs now use
-`--engine all` so token and AST clone signals are both requested when the helper
-toolchain is available. If AST analysis cannot run, clone records carry partial
-measurement confidence instead of pretending the requested signal was complete.
+Clone analysis reports two clone layers:
+
+- `engine: "token"` rows from normalized token windows over source text
+- `engine: "ast"` rows from the helper-backed function and method structural
+  hasher
+
+Token rows use source-scan confidence. AST rows use syntax-fact confidence and
+are emitted only when multiple non-trivial functions or methods share the same
+stable structural hash. The AST hasher records nested functions and impl
+methods, normalizes local names and literal values, keeps discriminating
+operator/call/type structure, skips trivial functions below the minimum node
+threshold, and uses the same stable hash discipline as the token engine.
 
 ## Generic Lens Rules
 

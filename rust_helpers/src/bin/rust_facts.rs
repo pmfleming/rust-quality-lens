@@ -1,5 +1,6 @@
 use proc_macro2::Span;
 use quote::ToTokens;
+use rust_quality_lens_helpers::{module_key_for_path, normalize_path, read_paths_file};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::env;
@@ -9,9 +10,9 @@ use std::path::Path;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::{
-    Attribute, ExprCall, ExprPath, ExprRawAddr, Fields, ForeignItem, ImplItem, Item, ItemEnum,
-    ItemFn, ItemForeignMod, ItemImpl, ItemStatic, ItemStruct, ItemUse, ReturnType, Type, TypePath,
-    UseTree,
+    Attribute, BinOp, ExprBinary, ExprCall, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprPath,
+    ExprRawAddr, ExprTry, ExprWhile, Fields, ForeignItem, ImplItem, Item, ItemEnum, ItemFn,
+    ItemForeignMod, ItemImpl, ItemStatic, ItemStruct, ItemUse, ReturnType, Type, TypePath, UseTree,
 };
 
 #[derive(Serialize)]
@@ -25,6 +26,12 @@ struct FileFacts {
     unsupported_patterns: Vec<String>,
     public_api_count: usize,
     has_inline_tests: bool,
+    source_line_count: usize,
+    source_nonblank_line_count: usize,
+    source_comment_line_count: usize,
+    function_count: usize,
+    cognitive_complexity: usize,
+    cyclomatic_complexity: usize,
     types: Vec<TypeFact>,
     impls: Vec<ImplFact>,
     tests: Vec<TestFact>,
@@ -63,6 +70,7 @@ struct TestFact {
     path: String,
     line: usize,
     attribute: String,
+    module_key: String,
 }
 
 #[derive(Serialize)]
@@ -88,6 +96,12 @@ struct FactVisitor {
     module_stack: Vec<String>,
     public_api_count: usize,
     has_inline_tests: bool,
+    source_line_count: usize,
+    source_nonblank_line_count: usize,
+    source_comment_line_count: usize,
+    function_count: usize,
+    cognitive_complexity: usize,
+    cyclomatic_complexity: usize,
     types: Vec<TypeFact>,
     impls: Vec<ImplFact>,
     tests: Vec<TestFact>,
@@ -96,7 +110,16 @@ struct FactVisitor {
 }
 
 impl FactVisitor {
-    fn new(path: &str) -> Self {
+    fn new(path: &str, content: &str) -> Self {
+        let source_line_count = content.lines().count();
+        let source_nonblank_line_count = content
+            .lines()
+            .filter(|line| !line.trim().is_empty() && !line.trim().starts_with("//"))
+            .count();
+        let source_comment_line_count = content
+            .lines()
+            .filter(|line| line.trim().starts_with("//"))
+            .count();
         Self {
             path: normalize_path(path),
             module_key: module_key_for_path(path),
@@ -107,6 +130,12 @@ impl FactVisitor {
             module_stack: Vec::new(),
             public_api_count: 0,
             has_inline_tests: false,
+            source_line_count,
+            source_nonblank_line_count,
+            source_comment_line_count,
+            function_count: 0,
+            cognitive_complexity: 0,
+            cyclomatic_complexity: 1,
             types: Vec::new(),
             impls: Vec::new(),
             tests: Vec::new(),
@@ -134,6 +163,12 @@ impl FactVisitor {
             unsupported_patterns: self.unsupported_patterns,
             public_api_count: self.public_api_count,
             has_inline_tests: self.has_inline_tests,
+            source_line_count: self.source_line_count,
+            source_nonblank_line_count: self.source_nonblank_line_count,
+            source_comment_line_count: self.source_comment_line_count,
+            function_count: self.function_count,
+            cognitive_complexity: self.cognitive_complexity,
+            cyclomatic_complexity: self.cyclomatic_complexity,
             types: self.types,
             impls: self.impls,
             tests: self.tests,
@@ -159,7 +194,6 @@ impl FactVisitor {
     fn scan_attrs(&mut self, attrs: &[Attribute]) {
         for attr in attrs {
             let path = path_to_string(attr.path());
-            self.add_dependency(path.clone());
             if path == "repr" {
                 self.bump_escape("repr_escape", attr.span());
             }
@@ -192,6 +226,7 @@ impl FactVisitor {
                     path: self.path.clone(),
                     line: span_start_line(attr.span()),
                     attribute: path,
+                    module_key: self.current_module_key(),
                 });
                 self.has_inline_tests = true;
                 return;
@@ -223,6 +258,11 @@ impl FactVisitor {
         } else {
             format!("{}::{name}", self.module_stack.join("::"))
         }
+    }
+
+    fn bump_branch(&mut self) {
+        self.cognitive_complexity += 1;
+        self.cyclomatic_complexity += 1;
     }
 }
 
@@ -292,6 +332,43 @@ impl<'ast> Visit<'ast> for FactVisitor {
             self.add_dependency(value);
         }
         visit::visit_expr_call(self, i);
+    }
+
+    fn visit_expr_if(&mut self, i: &'ast ExprIf) {
+        self.bump_branch();
+        visit::visit_expr_if(self, i);
+    }
+
+    fn visit_expr_match(&mut self, i: &'ast ExprMatch) {
+        self.bump_branch();
+        visit::visit_expr_match(self, i);
+    }
+
+    fn visit_expr_for_loop(&mut self, i: &'ast ExprForLoop) {
+        self.bump_branch();
+        visit::visit_expr_for_loop(self, i);
+    }
+
+    fn visit_expr_while(&mut self, i: &'ast ExprWhile) {
+        self.bump_branch();
+        visit::visit_expr_while(self, i);
+    }
+
+    fn visit_expr_loop(&mut self, i: &'ast ExprLoop) {
+        self.bump_branch();
+        visit::visit_expr_loop(self, i);
+    }
+
+    fn visit_expr_try(&mut self, i: &'ast ExprTry) {
+        self.cognitive_complexity += 1;
+        visit::visit_expr_try(self, i);
+    }
+
+    fn visit_expr_binary(&mut self, i: &'ast ExprBinary) {
+        if matches!(i.op, BinOp::And(_) | BinOp::Or(_)) {
+            self.bump_branch();
+        }
+        visit::visit_expr_binary(self, i);
     }
 
     fn visit_expr_path(&mut self, i: &'ast ExprPath) {
@@ -372,6 +449,7 @@ impl FactVisitor {
 
     fn record_fn(&mut self, item: &ItemFn) {
         self.scan_attrs(&item.attrs);
+        self.function_count += 1;
         if is_public(&item.vis) {
             self.public_api_count += 1;
         }
@@ -542,15 +620,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Err("expected exactly one paths file argument".into());
     }
 
-    let paths_content = fs::read_to_string(&args[1])
-        .map_err(|error| format!("error reading paths file '{}': {error}", args[1]))?;
+    let paths = read_paths_file(&args[1])?;
     let mut results = Vec::new();
 
-    for line in paths_content.lines() {
-        let path = line.trim();
-        if path.is_empty() {
-            continue;
-        }
+    for path in &paths {
         let content = match fs::read_to_string(path) {
             Ok(content) => content,
             Err(error) => {
@@ -565,7 +638,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 continue;
             }
         };
-        let mut visitor = FactVisitor::new(path);
+        let mut visitor = FactVisitor::new(path, &content);
         visitor.visit_file(&file);
         results.push(visitor.into_facts());
     }
@@ -585,6 +658,12 @@ fn failed_record(path: &str, parse_status: String) -> FileFacts {
         unsupported_patterns: Vec::new(),
         public_api_count: 0,
         has_inline_tests: false,
+        source_line_count: 0,
+        source_nonblank_line_count: 0,
+        source_comment_line_count: 0,
+        function_count: 0,
+        cognitive_complexity: 0,
+        cyclomatic_complexity: 0,
         types: Vec::new(),
         impls: Vec::new(),
         tests: Vec::new(),
@@ -799,34 +878,6 @@ fn span_line_span(span: Span) -> usize {
     let start = span.start().line;
     let end = span.end().line;
     end.saturating_sub(start) + 1
-}
-
-fn normalize_path(path: &str) -> String {
-    path.replace('\\', "/")
-}
-
-fn module_key_for_path(path: &str) -> String {
-    let normalized = normalize_path(path);
-    let mut rel = normalized.as_str();
-    if let Some(roots) = env::var_os("RQLENS_SOURCE_ROOTS") {
-        for root in env::split_paths(&roots) {
-            let root = normalize_path(&root.to_string_lossy());
-            let root = root.trim_end_matches('/');
-            if let Some(rest) = normalized.strip_prefix(&format!("{root}/")) {
-                rel = rest;
-                break;
-            }
-        }
-    }
-    let without_src = rel.strip_prefix("src/").unwrap_or(rel);
-    let without_extension = without_src.strip_suffix(".rs").unwrap_or(without_src);
-    let module_path = Path::new(without_extension);
-    module_path
-        .components()
-        .filter_map(|component| component.as_os_str().to_str())
-        .filter(|part| *part != "mod")
-        .collect::<Vec<_>>()
-        .join("::")
 }
 
 fn print_usage() {

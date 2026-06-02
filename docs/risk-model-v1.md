@@ -42,9 +42,10 @@ Derived risk scores are model outputs. They are not raw facts:
 ## Weights
 
 The canonical machine-readable weights and tool calibrations live in
-`src/main.rs`. Architecture category weights are
-emitted into map metadata as `meta.risk_model_weights`; producer calibration
-tables are emitted as `meta.risk_model_tool_scores`.
+`src/risk_model.rs`, with metadata serialization helpers in `src/main.rs`.
+Architecture category weights are emitted into map metadata as
+`meta.risk_model_weights`; producer calibration tables are emitted as
+`meta.risk_model_tool_scores`.
 
 ### Maintainability
 
@@ -107,3 +108,21 @@ Currently shared producer calibrations cover:
 - `type_health`: structural pressure caps, free allowances, and signal thresholds
 - `locality`: non-locality risk weights for coupling, hidden state, tests, and churn
 - `leverage`: leverage score base, bonuses, penalties, pressure scaling, and risk inversion
+- `clones_token`: token-window size, minimum line span, and instance weight
+- `clones_ast`: minimum AST node threshold and cross-file factor
+
+## Implementation Boundaries
+
+The current Rust implementation is split by responsibility:
+
+- `src/config.rs`: config loading and absolute path resolution
+- `src/catalog.rs`: task catalog contract consumed by dashboards and runners
+- `src/facts.rs`: syntax fact caching, module graph construction, Cargo target discovery, and test-status parsing
+- `src/producers.rs`: individual measurement producers
+- `src/artifacts.rs`: map artifact loading, artifact status, git history, cycle detection, and layer violations
+- `src/risk_model.rs`: shared `architecture_risk_scores(...)` function and score structs
+- `src/util.rs`: small filesystem, path, hashing, and JSON helpers
+
+The map producer calls `architecture_risk_scores(...)` for every module. If an
+input category is unavailable, the affected category and `total_score` remain
+`null`, and `unknown_metrics` records why.

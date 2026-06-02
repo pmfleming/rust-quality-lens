@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rust-quality-lens — Code Review &amp; Improvement Opportunities</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a22;
+    --panel-2: #1d2230;
+    --text: #d7dae0;
+    --muted: #8b93a3;
+    --accent: #4ec9b0;
+    --line: #2a2f3c;
+    --high: #f08a8a;
+    --med: #e6c07b;
+    --low: #7aa6f0;
+    --info: #9aa6b8;
+    --code: #c586c0;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.page {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 24px;
+    margin-bottom: 8px;
+  }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.4px; }
+  .sub { color: var(--muted); font-size: 15px; }
+  h2 {
+    font-size: 22px;
+    margin: 48px 0 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    letter-spacing: -0.3px;
+  }
+  h3 { font-size: 17px; margin: 26px 0 6px; }
+  p { margin: 10px 0; }
+  code {
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--panel-2);
+    color: var(--code);
+    padding: 1px 6px;
+    border-radius: 5px;
+  }
+  pre {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #cdd3dd;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .lede {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 24px 0;
+    color: var(--text);
+  }
+  .toc {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin: 24px 0;
+  }
+  .toc h2 { border: 0; margin: 0 0 10px; padding: 0; font-size: 15px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .toc ol { margin: 0; padding-left: 20px; }
+  .toc li { margin: 4px 0; }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+  .b-high { background: rgba(240,138,138,.15); color: var(--high); border: 1px solid rgba(240,138,138,.4); }
+  .b-med  { background: rgba(230,192,123,.13); color: var(--med);  border: 1px solid rgba(230,192,123,.4); }
+  .b-low  { background: rgba(122,166,240,.13); color: var(--low);  border: 1px solid rgba(122,166,240,.4); }
+  .b-info { background: rgba(154,166,184,.12); color: var(--info); border: 1px solid rgba(154,166,184,.35); }
+  .finding {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 4px 22px 18px;
+    margin: 20px 0;
+  }
+  .finding h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+  td.sev { white-space: nowrap; }
+  .tag { color: var(--muted); font-size: 13px; }
+  .label { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; margin-top: 12px; }
+  ul.tight { margin: 8px 0; }
+  ul.tight li { margin: 3px 0; }
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  .filelink { color: var(--accent); font-family: "SF Mono", Consolas, monospace; font-size: 0.85em; }
+  .pos { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <h1>rust-quality-lens — Code Review</h1>
+  <div class="sub">Improvement opportunities &amp; observations · reviewed 2026-06-02 · commit <code>4e0d7bb</code> (master)</div>
+</header>
+
+<div class="lede">
+  <strong>Summary.</strong> <code>rust-quality-lens</code> is a well-shaped, single-purpose tool: a Rust CLI
+  (<code>rqlens</code>) that emits portable JSON measurements (hotspots, clones, escape hatches, type health,
+  locality, leverage, correctness, architecture map), backed by a <code>syn</code> fact-extractor helper. The
+  command/artifact contract is clean, the confidence model is a genuinely good idea, and the golden-fixture
+  approach is sound. The most valuable improvements are not bugs but <em>drift</em>: documentation that
+  describes a richer scoring engine than the code actually implements, an entire unused helper binary, and a
+  per-producer subprocess model that re-parses the whole tree several times. None of the items below require
+  the tool to change its public contract.
+</div>
+
+<div class="toc">
+  <h2>Findings</h2>
+  <ol>
+    <li><a href="#doc-drift">Documentation describes scoring that the code does not implement</a> <span class="badge b-high">High</span></li>
+    <li><a href="#dead-helper">The <code>leverage_ast</code> helper binary is dead code</a> <span class="badge b-high">High</span></li>
+    <li><a href="#subprocess">Fact extraction re-runs and re-parses the tree once per producer</a> <span class="badge b-med">Medium</span></li>
+    <li><a href="#hotspots">Hotspots complexity is computed by substring matching on raw text</a> <span class="badge b-med">Medium</span></li>
+    <li><a href="#dep-pollution">Attribute names leak into the dependency graph</a> <span class="badge b-med">Medium</span></li>
+    <li><a href="#cwd">Process-wide <code>set_current_dir</code> as control flow</a> <span class="badge b-med">Medium</span></li>
+    <li><a href="#tests">Scoring logic has no unit tests; several producers lack integration coverage</a> <span class="badge b-med">Medium</span></li>
+    <li><a href="#dup">Helper binaries duplicate path/module logic with no shared crate</a> <span class="badge b-low">Low</span></li>
+    <li><a href="#robustness">Silent read failures and <code>partial_cmp().unwrap()</code> panic surface</a> <span class="badge b-low">Low</span></li>
+    <li><a href="#cargo-toml">Cargo manifest is regex-scraped instead of parsed</a> <span class="badge b-low">Low</span></li>
+    <li><a href="#structure">Monolithic <code>main.rs</code> and minor cleanups</a> <span class="badge b-info">Nit</span></li>
+  </ol>
+</div>
+
+<h2>At a glance</h2>
+<table>
+  <thead><tr><th>#</th><th>Finding</th><th>Severity</th><th>Effort</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Docs vs. implementation drift in risk model</td><td class="sev"><span class="badge b-high">High</span></td><td>Low</td></tr>
+    <tr><td>2</td><td><code>leverage_ast</code> binary never invoked</td><td class="sev"><span class="badge b-high">High</span></td><td>Low</td></tr>
+    <tr><td>3</td><td>Per-producer subprocess + re-parse</td><td class="sev"><span class="badge b-med">Medium</span></td><td>Medium</td></tr>
+    <tr><td>4</td><td>Substring-based complexity in hotspots</td><td class="sev"><span class="badge b-med">Medium</span></td><td>Medium</td></tr>
+    <tr><td>5</td><td>Attribute paths added as dependencies</td><td class="sev"><span class="badge b-med">Medium</span></td><td>Low</td></tr>
+    <tr><td>6</td><td>Global <code>set_current_dir</code></td><td class="sev"><span class="badge b-med">Medium</span></td><td>Medium</td></tr>
+    <tr><td>7</td><td>Missing unit tests on scoring</td><td class="sev"><span class="badge b-med">Medium</span></td><td>Medium</td></tr>
+    <tr><td>8</td><td>Duplicated helper utilities</td><td class="sev"><span class="badge b-low">Low</span></td><td>Low</td></tr>
+    <tr><td>9</td><td>Silent read failures / NaN unwrap</td><td class="sev"><span class="badge b-low">Low</span></td><td>Low</td></tr>
+    <tr><td>10</td><td>Regex-scraped <code>Cargo.toml</code></td><td class="sev"><span class="badge b-low">Low</span></td><td>Low</td></tr>
+    <tr><td>11</td><td>Monolithic file / nits</td><td class="sev"><span class="badge b-info">Nit</span></td><td>Medium</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="doc-drift">1. Documentation describes scoring the code does not implement <span class="badge b-high">High</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <p>
+    <code>docs/risk-model-v1.md</code> and <code>docs/measurement-upgrades.md</code> document a substantially
+    richer engine than <code>src/main.rs</code> actually contains. Concretely, the docs reference machinery that
+    exists nowhere in the codebase (confirmed by a full-repo search — these strings appear only inside the docs):
+  </p>
+  <ul class="tight">
+    <li>
+      <strong>A shared <code>architecture_risk_scores(...)</code> function.</strong>
+      <code>measurement-upgrades.md</code> states &ldquo;Architecture map scoring now calls the shared
+      <code>architecture_risk_scores(...)</code> function instead of carrying local weight math.&rdquo; No such
+      function exists. <code>architecture_map()</code> in <span class="filelink">src/main.rs:1012</span> carries
+      local math: <code>architectural = (outbound*10 + inbound*8).min(300)</code>, and sets
+      <code>change_risk</code>, <code>correctness_risk</code>, and <code>total_score</code> to <code>null</code>,
+      <code>performance_risk</code> to a hardcoded <code>0.0</code>.
+    </li>
+    <li>
+      <strong>Change / correctness / performance scoring.</strong> <code>risk-model-v1.md</code> specifies
+      detailed weights for churn, commit count, contributors, defect-keyword commits, benchmark mean/variance,
+      layer violations, and cycle-membership penalties. None of these are computed — there is no git history
+      ingestion, no benchmark ingestion, and no layer-violation or cycle detection in the code.
+    </li>
+    <li>
+      <strong><code>meta.summary.artifact_status</code> and unknown-module counts.</strong> Both docs promise a
+      map-level summary reporting unknown metrics and artifact status. The <code>architecture_map()</code> output
+      has no <code>summary</code> key at all.
+    </li>
+    <li>
+      <strong><code>slowspots.json</code> performance facts.</strong> Referenced as an input in
+      <code>risk-model-v1.md</code>; never produced or consumed.
+    </li>
+    <li>
+      <strong>README plurality.</strong> <code>README.md</code> says &ldquo;Syntax-aware facts come from helper
+      binaries&rdquo; (plural), but only <code>rust_facts</code> is invoked (see finding 2).
+    </li>
+  </ul>
+  <p class="label">Why it matters</p>
+  <p>
+    This is the highest-leverage issue precisely because the tool's <em>entire purpose</em> is to be a trustworthy
+    measurement source for a downstream dashboard. Documentation that overstates the model erodes exactly the
+    trust the confidence-field design works so hard to build. A consumer reading <code>risk-model-v1.md</code>
+    will expect <code>change_risk</code> and <code>total_score</code> to be populated and meaningful.
+  </p>
+  <p class="label">Suggested direction</p>
+  <p>
+    Split the docs into &ldquo;implemented v1&rdquo; vs. &ldquo;planned&rdquo;. Move the git/benchmark/layer-violation
+    weights and the <code>architecture_risk_scores</code> / <code>artifact_status</code> / <code>slowspots</code>
+    descriptions into a clearly-labelled roadmap section, and have <code>risk-model-v1.md</code> describe only what
+    <code>map.json</code> actually emits today (the flat outbound/inbound architectural score and the
+    <code>unknown_metrics</code> nulls). Alternatively, if the richer model is the real target, the docs become a
+    spec to implement against — either way, close the gap explicitly.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="dead-helper">2. The <code>leverage_ast</code> helper binary is dead code <span class="badge b-high">High</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <p>
+    <span class="filelink">rust_helpers/src/bin/leverage_ast.rs</span> is a complete <code>syn</code>-based
+    visitor (heap-vs-inline type ratios, iterator-vs-for-loop leverage, unsafe surface, scoring, and its own unit
+    tests). But the CLI's <code>leverage()</code> producer at <span class="filelink">src/main.rs:980</span>
+    computes leverage purely from the module dependency graph
+    (<code>68.0 + inbound*2.5 - outbound*3.0</code>) and never invokes this binary. A repo-wide search confirms
+    <code>leverage_ast</code> is referenced only by its own file — <code>main.rs</code> only ever spawns the
+    <code>rust_facts</code> bin.
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    An entire compiled binary with tests is shipped but unreachable. It compiles on every helper build, carries its
+    own (subtly divergent) copy of <code>module_key_for_path</code> that ignores <code>RQLENS_SOURCE_ROOTS</code>,
+    and creates a strong false impression that AST-level leverage metrics are part of the output. The
+    <code>leverage_metrics.json</code> a consumer receives contains <em>graph</em> reach/pressure, not the
+    indirection-ratio / iterator-leverage signals this file computes.
+  </p>
+  <p class="label">Suggested direction</p>
+  <p>
+    Decide its fate explicitly: either wire <code>leverage_ast</code> into the <code>leverage</code> producer
+    (the richer signals look more useful than raw fan-in/fan-out, and would justify the &ldquo;binaries&rdquo;
+    plural in the README), or delete it. Leaving it half-connected is the worst of both.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="subprocess">3. Fact extraction re-runs and re-parses the tree once per producer <span class="badge b-med">Medium</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <p>
+    <code>rust_facts_for_paths()</code> (<span class="filelink">src/main.rs:467</span>) shells out to
+    <code>cargo run --bin rust_facts</code> and re-parses every file. In a single <code>measure all</code> run it is
+    invoked independently by <code>escape_hatches</code>, <code>type_health</code>, <code>correctness</code>, and
+    by <code>module_graph()</code> — which is itself called separately by <code>locality</code>,
+    <code>leverage</code>, and <code>map</code>. That is on the order of <strong>six</strong> full passes over the
+    same source tree per run, each paying <code>cargo</code> dispatch overhead plus a complete <code>syn</code>
+    re-parse, with no caching of the resulting <code>FileFacts</code>.
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    Cost scales linearly with the number of producers for no analytical gain. On a large target project the
+    repeated parse dominates wall-clock time, and the work is trivially shared because every producer keys off the
+    same <code>source_roots</code>.
+  </p>
+  <p class="label">Suggested direction</p>
+  <ul class="tight">
+    <li>Compute <code>FileFacts</code> once at the start of a multi-tool run and pass the slice into each producer
+        (the data structures are already shared between <code>main.rs</code> and the helper).</li>
+    <li>Invoke the prebuilt helper binary directly rather than <code>cargo run</code> each time, so dispatch and the
+        up-to-date check happen once.</li>
+    <li>The helper already iterates files independently — parsing them with <code>rayon</code> would be a cheap
+        further win on large trees.</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="hotspots">4. Hotspots complexity is substring matching on raw text <span class="badge b-med">Medium</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <p>
+    <code>hotspots()</code> (<span class="filelink">src/main.rs:794</span>) derives cognitive/cyclomatic complexity
+    with <code>count_matches(&amp;text, &amp;[" if ", " match ", " for ", ...])</code> over the file's raw text.
+    This counts keyword-shaped substrings inside string literals, comments, and identifiers, and depends on exact
+    surrounding spaces (e.g. <code>"&amp;&amp;"</code>, <code>"?"</code> match anywhere, while <code>" if "</code>
+    misses <code>if</code> not flanked by spaces). The token <code>clones</code> producer goes to the trouble of
+    tokenizing and normalizing, and the project already has a full <code>syn</code> AST in the helper — so
+    hotspots is the one producer working against the grain of the rest of the design.
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    Complexity is the headline &ldquo;quality_score&rdquo; and the map's <code>maintainability</code> input. Counting
+    <code>?</code> and <code>||</code> inside doc comments or string literals inflates it unpredictably, which
+    undercuts the &ldquo;trustworthy measurement&rdquo; goal and contradicts the docs' claim that the major
+    measurements are <code>syn</code>-backed.
+  </p>
+  <p class="label">Suggested direction</p>
+  <p>
+    Move branch/decision counting into the <code>rust_facts</code> visitor (it already walks <code>if</code>,
+    <code>match</code>, loops, and <code>?</code> as AST nodes) and emit per-file complexity facts, leaving
+    <code>hotspots</code> to do only scoring. If a pure-text fallback is intentional (for files that fail to parse),
+    document that and gate it on <code>parse_status</code>.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="dep-pollution">5. Attribute names leak into the dependency graph <span class="badge b-med">Medium</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <p>
+    In the helper, <code>scan_attrs()</code> (<span class="filelink">rust_helpers/src/bin/rust_facts.rs:159</span>)
+    calls <code>self.add_dependency(path)</code> for <em>every</em> attribute path it encounters — so
+    <code>derive</code>, <code>cfg</code>, <code>test</code>, <code>repr</code>, <code>allow</code>, etc. all enter
+    the <code>dependencies</code> vector. Similarly <code>visit_expr_path</code>, <code>visit_path</code>, and
+    <code>visit_type_path</code> each push path strings, producing heavy over-collection.
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    <code>resolve_dependency()</code> later filters candidates against known module keys, so most noise is dropped —
+    but a project with a module literally named <code>test</code>, <code>used</code>, or <code>derive</code> would
+    pick up phantom edges, skewing locality, leverage, and the architecture map. It is also wasted allocation on
+    every file.
+  </p>
+  <p class="label">Suggested direction</p>
+  <p>
+    Don't feed attribute-path identifiers into <code>dependencies</code> — attributes are already handled for their
+    specific escape-hatch signals. Restrict dependency collection to <code>use</code> trees, call/type paths, and
+    explicit module references.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="cwd">6. Process-wide <code>set_current_dir</code> as control flow <span class="badge b-med">Medium</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <p>
+    <code>measure()</code> (<span class="filelink">src/main.rs:196</span>) does
+    <code>env::set_current_dir(&amp;config.project_root)</code>, runs all producers against relative paths, then
+    restores the old cwd in a closure. Producers and helpers then rely on the ambient cwd (e.g.
+    <code>Path::new("Cargo.toml")</code>, <code>iter_rust_files</code> on relative roots).
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    Mutating the process-global working directory is implicit, non-reentrant, and unsafe under any future
+    threading. If a producer panics, the closure-based restore is bypassed (panics unwind past it), leaving the
+    process in the wrong directory. It also makes the code harder to reason about because path resolution depends
+    on hidden global state rather than on <code>config.project_root</code>.
+  </p>
+  <p class="label">Suggested direction</p>
+  <p>
+    Thread <code>project_root</code> through path construction (join roots onto it explicitly) instead of changing
+    the cwd. If that is too large a change short-term, at least restore the cwd via a guard type with a
+    <code>Drop</code> impl so it survives panics.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tests">7. Scoring logic has no unit tests; several producers lack coverage <span class="badge b-med">Medium</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <p>
+    <code>src/main.rs</code> contains no <code>#[cfg(test)]</code> module at all. The scoring and resolution
+    functions that encode the actual model — <code>type_risk</code>, <code>over_free</code>,
+    <code>resolve_dependency</code> (with its <code>crate::</code>/<code>self::</code>/<code>super::</code>
+    handling), escape-hatch weighting and the Clippy de-duplication, and the hotspots formula — are exercised only
+    indirectly, if at all. The integration suite (<span class="filelink">tests/cli.rs</span>) covers catalog,
+    type-health, map, correctness, hotspots-confidence, and clones-confidence, but not the
+    <code>escape-hatches</code>, <code>locality</code>, or <code>leverage</code> outputs, cross-file clone
+    grouping, or <code>correctness-run</code>. Only <code>leverage_ast</code> (the dead binary) has dedicated unit
+    tests.
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    The model weights and thresholds are the product. Without unit tests, a tweak to a weight or a refactor of
+    <code>resolve_dependency</code> can silently change every downstream score, and the golden fixtures only catch
+    a narrow slice.
+  </p>
+  <p class="label">Suggested direction</p>
+  <p>
+    Add pure-function unit tests for <code>resolve_dependency</code> (each prefix form), <code>over_free</code>
+    /<code>type_risk</code> boundaries, and the escape-hatch Clippy/lint de-duplication. These are deterministic and
+    cheap. Extend the integration suite to assert on at least one escape-hatch and one leverage row.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="dup">8. Helper binaries duplicate path/module logic with no shared crate <span class="badge b-low">Low</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <p>
+    <code>normalize_path</code>, <code>module_key_for_path</code>, <code>failed_record</code>, the
+    <code>-h/--help</code> + single-argument parsing, and the read/parse loop are copy-pasted between
+    <span class="filelink">rust_facts.rs</span> and <span class="filelink">leverage_ast.rs</span>. The two copies of
+    <code>module_key_for_path</code> have already diverged: <code>rust_facts</code> honors
+    <code>RQLENS_SOURCE_ROOTS</code>, <code>leverage_ast</code> does not.
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    Divergent duplicates are a maintenance trap — a fix applied to one extractor silently misses the other, exactly
+    as the <code>RQLENS_SOURCE_ROOTS</code> divergence demonstrates.
+  </p>
+  <p class="label">Suggested direction</p>
+  <p>
+    Promote <code>rust_helpers</code> to a small library crate with the two binaries depending on it, hoisting the
+    shared path/module/arg helpers. (Moot for <code>leverage_ast</code> specifically if finding 2 resolves to
+    deletion.)
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="robustness">9. Silent read failures and a <code>partial_cmp().unwrap()</code> panic surface <span class="badge b-low">Low</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <ul class="tight">
+    <li>
+      <code>hotspots</code>, <code>clones</code>, and <code>architecture_map</code> read source with
+      <code>fs::read_to_string(&amp;path).unwrap_or_default()</code> (e.g.
+      <span class="filelink">src/main.rs:798</span>, <span class="filelink">:1027</span>). An unreadable file is
+      silently treated as empty — it still counts toward the file total in the confidence model, so the output
+      reports <code>complete: true</code> while having measured nothing for that file.
+    </li>
+    <li>
+      Every producer's sort uses <code>partial_cmp(...).unwrap()</code> on <code>f64</code> scores
+      (e.g. <span class="filelink">src/main.rs:849</span>). If any score is <code>NaN</code> (reachable if an
+      upstream count ever yields a NaN through <code>round2</code>), the sort comparator panics.
+    </li>
+  </ul>
+  <p class="label">Why it matters</p>
+  <p>
+    Both are low-probability but both undermine the confidence guarantees: one hides missing data behind a
+    &ldquo;complete&rdquo; flag, the other turns a data anomaly into a crash rather than a degraded measurement.
+  </p>
+  <p class="label">Suggested direction</p>
+  <p>
+    Record read failures as a confidence signal (a <code>stale_input</code>/<code>missing_input</code> entry)
+    rather than defaulting to empty. Use <code>total_cmp</code> for <code>f64</code> sorting, or push NaN to the
+    bottom deterministically.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="cargo-toml">10. Cargo manifest is regex-scraped instead of parsed <span class="badge b-low">Low</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <p>
+    <code>correctness_paths()</code> (<span class="filelink">src/main.rs:1302</span>) extracts test/target paths
+    from <code>Cargo.toml</code> with the regex <code>^\s*path\s*=\s*"([^"]+\.rs)"</code>. The crate already depends
+    on <code>toml</code> and deserializes <code>rqlens.toml</code> with it.
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    A line-oriented regex is blind to TOML structure: it would match a <code>path = "&hellip;.rs"</code> key in any
+    table (including a hypothetical path dependency), and miss anything not formatted on one line. It is more
+    fragile than the parser already in the dependency tree.
+  </p>
+  <p class="label">Suggested direction</p>
+  <p>
+    Deserialize the relevant <code>[[bin]]</code>/<code>[[test]]</code>/<code>[[bench]]</code>/<code>[[example]]</code>
+    target tables with <code>toml</code> and read their <code>path</code> fields structurally.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="structure">11. Monolithic <code>main.rs</code> and minor cleanups <span class="badge b-info">Nit</span></h2>
+<div class="finding">
+  <p class="label">What I found</p>
+  <ul class="tight">
+    <li>
+      <code>src/main.rs</code> is ~1,750 lines holding CLI parsing, config, all eight producers, the risk model,
+      the layer classifier, and IO helpers. <code>docs/extraction-notes.md</code> already flags &ldquo;split the
+      Rust CLI into smaller modules&rdquo; as the next step — worth acting on, e.g. <code>producers/</code>,
+      <code>model.rs</code>, <code>graph.rs</code>, <code>facts.rs</code>.
+    </li>
+    <li>
+      <code>clones()</code> stores a full <code>(path, start, end, snippet)</code> tuple for <em>every</em> 50-token
+      window of every file in a <code>HashMap</code> before filtering to groups of &ge;2
+      (<span class="filelink">src/main.rs:891</span>). On a large tree this is a lot of transient memory; the
+      snippet could be reconstructed lazily for surviving groups only.
+    </li>
+    <li>
+      <code>"token_count": 50</code> is emitted as a literal even though it always equals the hardcoded window
+      width — fine, but tie it to the constant so the two can't drift.
+    </li>
+    <li>
+      <code>MeasureTool</code> repeats its name strings across <code>name()</code> and the <code>#[value(name=)]</code>
+      attributes; a single source of truth would prevent skew.
+    </li>
+  </ul>
+  <p class="label">Why it matters</p>
+  <p>Pure maintainability — none affect output today.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>What's already good</h2>
+<div class="finding">
+  <ul class="tight">
+    <li><span class="pos">The measurement-confidence model</span> (source-scan vs. syntax-facts scopes, explicit
+        <code>missing_input</code>/<code>unsupported_pattern</code>) is a genuinely strong design that most quality
+        tools lack.</li>
+    <li><span class="pos">Raw counts are kept separate from scoring counts</span> (e.g. the Clippy/lint
+        de-duplication in <code>escape_hatches</code> preserves raw evidence while adjusting the score) — exactly
+        the right instinct for a versioned model.</li>
+    <li><span class="pos">Golden + mini fixtures</span> make the intended extraction behavior executable and
+        regression-resistant.</li>
+    <li><span class="pos">Cross-platform path handling</span> is careful and consistent
+        (<code>normalize_slashes</code>, <code>RQLENS_SOURCE_ROOTS</code>, absolutize/resolve helpers).</li>
+    <li><span class="pos">Clean separation of concerns at the product level</span>: the lens emits JSON only and
+        deliberately leaves the dashboard to a sibling repo.</li>
+  </ul>
+</div>
+
+<footer>
+  Review of <code>rust-quality-lens</code> @ <code>4e0d7bb</code> · generated 2026-06-02 · documentation only, no
+  code was modified. Severity reflects impact on the tool's measurement-trust goal, not defect likelihood.
+</footer>
+
+</div>
+</body>
+</html>

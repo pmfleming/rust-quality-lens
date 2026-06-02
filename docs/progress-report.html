@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rust-quality-lens — Progress Report &amp; Clone-Detection Review</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a22; --panel-2: #1d2230; --text: #d7dae0;
+    --muted: #8b93a3; --accent: #4ec9b0; --line: #2a2f3c;
+    --high: #f08a8a; --med: #e6c07b; --low: #7aa6f0; --info: #9aa6b8;
+    --ok: #6fcf97; --code: #c586c0;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.page { border-bottom: 1px solid var(--line); padding-bottom: 24px; margin-bottom: 8px; }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.4px; }
+  .sub { color: var(--muted); font-size: 15px; }
+  h2 { font-size: 22px; margin: 48px 0 10px; padding-top: 10px; border-top: 1px solid var(--line); letter-spacing: -0.3px; }
+  h3 { font-size: 17px; margin: 26px 0 6px; }
+  p { margin: 10px 0; }
+  code { font-family: "SF Mono","JetBrains Mono",Consolas,monospace; font-size: 0.86em;
+    background: var(--panel-2); color: var(--code); padding: 1px 6px; border-radius: 5px; }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
+    overflow-x: auto; font-family: "SF Mono","JetBrains Mono",Consolas,monospace; font-size: 13px; line-height: 1.5; color: #cdd3dd; }
+  pre code { background: none; color: inherit; padding: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .lede { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--ok);
+    border-radius: 8px; padding: 16px 20px; margin: 24px 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px 22px; margin: 24px 0; }
+  .toc h2 { border: 0; margin: 0 0 10px; padding: 0; font-size: 15px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .toc ol { margin: 0; padding-left: 20px; }
+  .toc li { margin: 4px 0; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.6px; padding: 2px 8px; border-radius: 999px; vertical-align: middle; margin-left: 8px; }
+  .b-high { background: rgba(240,138,138,.15); color: var(--high); border: 1px solid rgba(240,138,138,.4); }
+  .b-med  { background: rgba(230,192,123,.13); color: var(--med);  border: 1px solid rgba(230,192,123,.4); }
+  .b-low  { background: rgba(122,166,240,.13); color: var(--low);  border: 1px solid rgba(122,166,240,.4); }
+  .b-info { background: rgba(154,166,184,.12); color: var(--info); border: 1px solid rgba(154,166,184,.35); }
+  .b-ok   { background: rgba(111,207,151,.14); color: var(--ok);   border: 1px solid rgba(111,207,151,.45); }
+  .finding { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px 22px 18px; margin: 20px 0; }
+  .finding h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+  td.sev { white-space: nowrap; }
+  .label { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; margin-top: 12px; }
+  ul.tight { margin: 8px 0; } ul.tight li { margin: 3px 0; }
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  .filelink { color: var(--accent); font-family: "SF Mono",Consolas,monospace; font-size: 0.85em; }
+  .verify { display: flex; gap: 14px; flex-wrap: wrap; margin: 18px 0; }
+  .chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; font-size: 14px; }
+  .chip b { color: var(--ok); }
+  .pos { color: var(--ok); }
+  .scoreline { font-size: 15px; color: var(--muted); margin: 6px 0 0; }
+  .resolved { color: var(--ok); font-weight: 700; }
+  .partial { color: var(--med); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <h1>Progress Report &amp; Clone-Detection Review</h1>
+  <div class="sub">rust-quality-lens · 2026-06-02 · follow-up to <a href="code-review.html">code-review.html</a> · reviewing the in-progress working tree</div>
+</header>
+
+<div class="lede">
+  <strong>Headline.</strong> This is a strong revision. Of the 11 opportunities in the first review,
+  <strong>10 are fully resolved and 1 is resolved with minor residue</strong> — and the highest-value item
+  (documentation describing a scoring engine that did not exist) was closed by <em>building the engine</em>, not by
+  trimming the docs. The CLI was split from a 1,746-line <code>main.rs</code> into seven focused modules, a shared
+  helper library was introduced, real unit and integration tests were added, and the architecture map now computes
+  maintainability / change / correctness / performance / quality / architectural risk with git history, cycle
+  detection, layer violations, and artifact-status tracking. I verified the tree builds and all tests pass.
+</div>
+
+<div class="lede">
+  <strong>Follow-up update.</strong> The main residual clone items from this report have now been addressed:
+  <code>ast_hasher</code> is wired into the CLI clone producer, uses stable hashing, records nested functions and
+  impl methods, includes operator/call/type structure while normalizing local names and literal values, and has
+  direct helper-crate unit tests. <code>clones.json</code> can now contain both <code>engine: "token"</code> rows
+  with source-scan confidence and <code>engine: "ast"</code> rows with syntax-fact confidence. On the current
+  repository run no AST clone groups survive the minimum-node threshold, so the refreshed artifact contains token
+  rows only.
+</div>
+
+<div class="verify">
+  <div class="chip"><b>cargo build</b> — clean (both crates)</div>
+  <div class="chip"><b>4</b> unit tests pass</div>
+  <div class="chip"><b>8</b> integration tests pass</div>
+  <div class="chip">main.rs <b>1746 → 540</b> lines</div>
+</div>
+
+<div class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#scorecard">Part 1 — Scorecard against the previous review</a></li>
+    <li><a href="#highlights">Part 1 — What stands out</a></li>
+    <li><a href="#residual">Part 1 — Residual / new items</a></li>
+    <li><a href="#clones">Part 2 — Clone detection: opportunities to improve</a></li>
+  </ol>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="scorecard">Part 1 · Scorecard</h2>
+<p>Each row is a finding from the first report, its current status, and the evidence I verified in the working tree.</p>
+<table>
+  <thead><tr><th>#</th><th>Original finding</th><th>Status</th><th>Evidence</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>1</td><td>Docs describe scoring the code didn't implement</td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td><code>architecture_risk_scores()</code> now exists in <span class="filelink">risk_model.rs</span> and computes all six categories; git/cycles/layer-violations/slowspots wired in <span class="filelink">artifacts.rs</span>; docs updated to point at the real modules and to walk back the clone claim.</td>
+    </tr>
+    <tr>
+      <td>2</td><td><code>leverage_ast</code> dead helper binary</td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td>File deleted (<code>git</code> shows <code>D leverage_ast.rs</code>). <em>See residual R1 re: <code>ast_hasher</code>.</em></td>
+    </tr>
+    <tr>
+      <td>3</td><td>Fact extraction re-runs per producer</td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td><code>RunContext::new()</code> (<span class="filelink">facts.rs:112</span>) extracts source facts once and passes them by reference; correctness facts reuse source facts when the path sets match.</td>
+    </tr>
+    <tr>
+      <td>4</td><td>Hotspots complexity via raw-text substring matching</td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td>Complexity is AST-derived in the helper (<code>bump_branch</code>, <span class="filelink">rust_facts.rs:263</span>); <code>hotspots()</code> consumes <code>source.cognitive_complexity</code>/<code>cyclomatic_complexity</code>.</td>
+    </tr>
+    <tr>
+      <td>5</td><td>Attribute names leak into the dependency graph</td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td><code>scan_attrs()</code> (<span class="filelink">rust_facts.rs:194</span>) no longer calls <code>add_dependency</code>; it only emits escape-hatch signals.</td>
+    </tr>
+    <tr>
+      <td>6</td><td>Process-wide <code>set_current_dir</code></td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td>Gone. Subprocesses use <code>Command::current_dir(&amp;config.project_root)</code>; paths are built with <code>project_root.join(...)</code>.</td>
+    </tr>
+    <tr>
+      <td>7</td><td>No unit tests on scoring logic</td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td>Unit tests for <code>resolve_dependency</code> &amp; <code>correctness_paths</code> (<span class="filelink">facts.rs:427</span>) and the risk model (<span class="filelink">risk_model.rs:173</span>); new map integration tests for missing artifacts and git/cycle/layer scoring. <em>See residual R2.</em></td>
+    </tr>
+    <tr>
+      <td>8</td><td>Duplicated helper utilities, no shared crate</td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td><span class="filelink">rust_helpers/src/lib.rs</span> now holds the single <code>module_key_for_path</code> (honoring <code>RQLENS_SOURCE_ROOTS</code>), <code>normalize_path</code>, and <code>read_paths_file</code>.</td>
+    </tr>
+    <tr>
+      <td>9</td><td>Silent read failures &amp; <code>partial_cmp().unwrap()</code></td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td><code>clones()</code> collects <code>read_errors</code> into confidence (<span class="filelink">producers.rs:395</span>); all sorts use <code>total_cmp</code> via <code>json_f64</code> (<span class="filelink">artifacts.rs:595</span>), removing the NaN panic path.</td>
+    </tr>
+    <tr>
+      <td>10</td><td>Regex-scraped <code>Cargo.toml</code></td>
+      <td class="sev"><span class="badge b-ok">Resolved</span></td>
+      <td><code>correctness_paths()</code> parses <code>toml::Value</code> and reads structured <code>[[bin]]/[[test]]/[[bench]]/[[example]]</code> targets; covered by a unit test that asserts a <code>[package.metadata]</code> <code>path</code> is <em>not</em> mistaken for a target.</td>
+    </tr>
+    <tr>
+      <td>11</td><td>Monolithic <code>main.rs</code> / nits</td>
+      <td class="sev"><span class="badge b-med">Resolved*</span></td>
+      <td>Split into <code>config / catalog / facts / producers / artifacts / risk_model / util</code>. <em>*Minor nits remain: <code>token_count</code> still hardcoded <code>50</code>; <code>MeasureTool</code> name strings still duplicated across <code>name()</code> and <code>#[value]</code>.</em></td>
+    </tr>
+  </tbody>
+</table>
+<p class="scoreline">Score: <span class="resolved">10 resolved</span> · <span class="partial">1 resolved with minor residue</span> · 0 open.</p>
+
+<!-- ============================================================ -->
+<h2 id="highlights">Part 1 · What stands out</h2>
+<div class="finding">
+  <ul class="tight">
+    <li><span class="pos">The risk model is now real and honest.</span> <code>architecture_risk_scores()</code> returns
+        <code>Option</code> per category and accumulates an <code>unknown_metrics</code> list; <code>total_score</code>
+        stays <code>null</code> unless every required category is known. This is exactly the &ldquo;don't fabricate a
+        zero&rdquo; discipline the confidence model was always reaching for, now enforced in one tested function.</li>
+    <li><span class="pos">Artifact freshness is tracked.</span> <code>read_artifact()</code> distinguishes
+        <code>missing</code> / <code>stale</code> / <code>unreadable</code> / <code>available</code> and compares
+        artifact mtime against source mtime (<span class="filelink">artifacts.rs:134</span>), feeding
+        <code>meta.summary.artifact_status</code> and map confidence. Stale inputs can no longer silently score a
+        module.</li>
+    <li><span class="pos">Git history is derived from one <code>git log --numstat</code> pass</span> and bucketed to
+        modules, with defect-keyword detection and co-change counting — a clean, dependency-free implementation.</li>
+    <li><span class="pos">The docs were corrected in both directions.</span> The clone-analysis section was honestly
+        downgraded from the previous &ldquo;<code>--engine all</code>&rdquo; claim to &ldquo;token signals only; a
+        future syntax-backed engine should report its own confidence&rdquo; — which sets up Part&nbsp;2 nicely.</li>
+    <li><span class="pos">Cargo target discovery got safer <em>and</em> narrower</span>: only top-level files under
+        <code>tests/benches/examples</code> are cataloged, so nested fixture crates (like this repo's own
+        <code>tests/fixtures/*</code>) are no longer miscounted as the package's tests.</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="residual">Part 1 · Residual &amp; new items</h2>
+<div class="finding">
+  <h3>R1 · <code>ast_hasher</code> is the new unused helper <span class="badge b-low">Low</span></h3>
+  <p>
+    Deleting <code>leverage_ast</code> closed finding 2, but <span class="filelink">rust_helpers/src/bin/ast_hasher.rs</span>
+    is now an unused helper in the same position — a full <code>syn</code> binary that nothing invokes (a repo-wide
+    search finds no caller). The difference is that it is <em>explicitly labelled</em> &ldquo;Experimental &hellip;
+    Reserved for AST clone analysis,&rdquo; so this is intentional scaffolding rather than forgotten code. It is the
+    subject of Part&nbsp;2 — the recommendation is to wire it in or keep it clearly fenced, not to delete it.
+  </p>
+</div>
+<div class="finding">
+  <h3>R2 · The helper crate now has zero tests <span class="badge b-low">Low</span></h3>
+  <p>
+    The unit tests that used to live beside <code>leverage_ast</code> went with it, and <code>ast_hasher</code> ships
+    untested. <code>cargo test --manifest-path rust_helpers/Cargo.toml</code> reports <code>0 tests</code>. The
+    extractor (<code>rust_facts</code>) is the most semantically dense code in the project and is currently exercised
+    only end-to-end through the CLI fixtures. A few direct <code>parse_file</code>-based unit tests on the visitor
+    (escape counting, complexity, module-file resolution) would localize regressions.
+  </p>
+</div>
+<div class="finding">
+  <h3>R3 · Extraction still shells out via <code>cargo run</code> <span class="badge b-info">Nit</span></h3>
+  <p>
+    <code>RunContext</code> removed the repeated extraction, which was the real cost. What remains is that each
+    surviving extraction call still goes through <code>cargo run --bin rust_facts</code>
+    (<span class="filelink">facts.rs:167</span>), paying a Cargo freshness check per invocation. Building the helper
+    once and invoking the binary directly would shave the last bit of startup overhead, and parsing files with
+    <code>rayon</code> inside the helper remains an easy win on large targets. Optional.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="clones">Part 2 · Clone detection — opportunities to improve</h2>
+<p>
+  The current detector (<code>clones()</code>, <span class="filelink">producers.rs:390</span>) is a single
+  <strong>token engine</strong>: it tokenizes each file line-by-line with a regex, normalizes identifiers to
+  <code>ID</code> and integer literals to <code>LIT</code> (keeping a small keyword/punctuation set), slides a
+  <strong>fixed 50-token window</strong> across the stream, groups windows whose normalized token sequence is
+  <em>byte-for-byte identical</em>, and (newly) drops overlapping windows per file before emitting groups of &ge;2.
+  That is a solid, deterministic Type-1 / normalized-Type-2 detector. The opportunities below are ordered by
+  value-to-effort.
+</p>
+
+<div class="finding">
+  <h3>C1 · Wire in the AST engine that already exists <span class="badge b-high">High value</span></h3>
+  <p class="label">Observation</p>
+  <p>
+    The output schema already carries an <code>"engine": "token"</code> discriminator, the catalog historically
+    promised AST clone analysis, and <code>ast_hasher</code> already computes a per-function, name-insensitive,
+    literal-normalized structural hash. Yet <code>clones()</code> never calls it, so only one engine ever runs.
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    The token engine groups only on <em>identical</em> normalized sequences, so it cannot see two functions that are
+    structurally the same but differ in formatting, statement order, or interleaved comments. A function-level AST
+    engine catches exactly that class (Type-2 with reordering, near Type-3), which is where the highest-value
+    refactor candidates usually hide.
+  </p>
+  <p class="label">Direction</p>
+  <ul class="tight">
+    <li>Run <code>ast_hasher</code> from <code>RunContext</code> (it reuses the same paths file machinery), group
+        functions by <code>ast_hash</code>, and emit <code>engine: "ast"</code> rows alongside the token rows.</li>
+    <li>Per the project's own docs, give AST rows <code>confidence_scope: "syntax_facts"</code> (they depend on the
+        helper) while token rows keep <code>source_scan</code> — so a parse failure correctly degrades only the AST
+        layer.</li>
+  </ul>
+</div>
+
+<div class="finding">
+  <h3>C2 · The AST hasher is currently too loose <em>and</em> too narrow <span class="badge b-high">High value</span></h3>
+  <p class="label">Observation</p>
+  <p>Before wiring it in, two correctness issues in <code>ast_hasher.rs</code> need attention:</p>
+  <ul class="tight">
+    <li>
+      <strong>Too narrow:</strong> it only walks top-level <code>file.items</code> for <code>Item::Fn</code>
+      (<span class="filelink">ast_hasher.rs:104</span>). Methods inside <code>impl</code> blocks and functions in
+      nested <code>mod</code>s — i.e. most real code — are never hashed. It should use a <code>Visit</code> that
+      records every <code>ItemFn</code> <em>and</em> <code>ImplItemFn</code>, as <code>rust_facts</code> already does.
+    </li>
+    <li>
+      <strong>Too loose:</strong> the structural hash mixes in only <code>std::mem::discriminant</code> of each
+      <code>Expr</code>/<code>Stmt</code> (<span class="filelink">ast_hasher.rs:40-50</span>). Two functions with the
+      same <em>shape</em> of statements collide regardless of operators, called methods, or paths — so a
+      <code>+</code> function and a <code>-</code> function hash equal. With no minimum node-count guard, every
+      trivial getter collides too, flooding results with noise.
+    </li>
+  </ul>
+  <p class="label">Direction</p>
+  <ul class="tight">
+    <li>Incorporate discriminating detail into the hash: binary/unary operator kind, method-call identifiers,
+        path tails, and literal <em>kinds</em> — while still normalizing identifier <em>names</em> and literal
+        <em>values</em> so Type-2 clones survive.</li>
+    <li>Skip functions below a minimum node/statement count (e.g. &lt; 6 nodes) to suppress getter/setter noise, and
+        emit that node count so scoring can weight by clone size.</li>
+  </ul>
+</div>
+
+<div class="finding">
+  <h3>C3 · Use a stable hash for persisted AST identities <span class="badge b-med">Medium</span></h3>
+  <p class="label">Observation</p>
+  <p>
+    <code>ast_hasher</code> uses <code>std::collections::hash_map::DefaultHasher</code> (SipHash with a
+    library-defined seed). The token engine, by contrast, uses the project's own FNV <code>stable_hash()</code>.
+    <code>DefaultHasher</code>'s output is explicitly <em>not</em> guaranteed stable across Rust versions or runs.
+  </p>
+  <p class="label">Why it matters</p>
+  <p>
+    The moment an <code>ast_hash</code> is written into <code>clones.json</code> and compared across machines or over
+    time (which is the whole point of a portable measurement artifact), an unstable hash produces spurious churn and
+    breaks cross-run diffing.
+  </p>
+  <p class="label">Direction</p>
+  <p>Hash with the same FNV-1a routine used by <code>stable_hash()</code> (or any fixed-seed hasher) so identities are reproducible.</p>
+</div>
+
+<div class="finding">
+  <h3>C4 · The fixed 50-token window is rigid and crosses item boundaries <span class="badge b-med">Medium</span></h3>
+  <p class="label">Observation</p>
+  <p>
+    <code>tokens.windows(50)</code> slides one global window across the whole file's token stream. Two consequences:
+    (a) clones meaningfully shorter or longer than ~50 tokens are reported at a fixed, misleading length —
+    <code>token_count</code> is even hardcoded to <code>50</code> in the output; and (b) a window can straddle the end
+    of one function and the start of the next, manufacturing a &ldquo;clone&rdquo; that is really two unrelated
+    fragments that happen to abut.
+  </p>
+  <p class="label">Direction</p>
+  <ul class="tight">
+    <li>Short term: reset the window at item boundaries (don't let a window span two functions), and report the
+        <em>actual</em> matched token length rather than the constant 50.</li>
+    <li>Longer term: replace fixed windows with maximal-match detection — build a suffix automaton / suffix array
+        over the normalized token stream and report longest repeated token runs above a threshold. This yields true
+        clone lengths and finds both short and long duplicates in one pass.</li>
+  </ul>
+</div>
+
+<div class="finding">
+  <h3>C5 · Tokenizer is line-oriented and string/comment-blind <span class="badge b-med">Medium</span></h3>
+  <p class="label">Observation</p>
+  <p>
+    Tokenizing line-by-line with a regex means the contents of string and char literals and the text of comments are
+    tokenized as if they were code — e.g. a string literal <code>"if x { }"</code> contributes <code>if</code> and
+    brace tokens. This is the same class of issue the hotspots producer just moved away from by going AST-backed, but
+    the token clone path still has it.
+  </p>
+  <p class="label">Direction</p>
+  <p>
+    Either lex with a Rust-aware tokenizer (<code>proc-macro2</code>'s token stream, available in the helper) so
+    strings/comments are single opaque tokens, or normalize whole string/char literals to a single <code>STR</code>
+    token. This reduces false positives from comment blocks and string tables.
+  </p>
+</div>
+
+<div class="finding">
+  <h3>C6 · Scoring ignores clone size and noise class <span class="badge b-low">Low</span></h3>
+  <p class="label">Observation</p>
+  <p>
+    <code>score = instance_count &times; 5</code> (<span class="filelink">producers.rs:473</span>) treats a tiny
+    3-line same-file repeat the same as a large cross-file duplication of equal instance count, and applies no floor
+    to filter boilerplate (repeated <code>use</code> blocks, derive-shaped field lists, match-arm scaffolding).
+  </p>
+  <p class="label">Direction</p>
+  <p>
+    Fold clone size and cross-file spread into the score (e.g. <code>instances &times; matched_tokens &times;
+    cross_file_factor</code>), and expose a minimum-tokens / minimum-lines threshold (config-driven) to cut trivial
+    repeats. Attach <code>risk_model_id</code>/<code>risk_calibration</code> as the other scored producers do, so the
+    clone score is traceable to a calibration table like the rest of the model.
+  </p>
+</div>
+
+<div class="finding">
+  <h3>C7 · Memory: full snippets are materialized for every window <span class="badge b-low">Low</span></h3>
+  <p class="label">Observation</p>
+  <p>
+    Each of the (very many) sliding windows stores a reconstructed multi-line <code>snippet</code> string in the
+    <code>windows</code> map <em>before</em> filtering to groups of &ge;2 (<span class="filelink">producers.rs:441</span>).
+    On a large tree this is a large transient allocation, almost all of which is discarded.
+  </p>
+  <p class="label">Direction</p>
+  <p>
+    Key the first pass on a rolling hash of the normalized window and store only <code>(file, start, end)</code>;
+    reconstruct snippets lazily for the surviving groups. A rolling hash also removes the per-position
+    <code>join("|")</code> of 50 tokens.
+  </p>
+</div>
+
+<h3>Clone-detection priority</h3>
+<table>
+  <thead><tr><th>Step</th><th>Item</th><th>Payoff</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>C2 — fix AST hasher coverage + discrimination</td><td>Prerequisite for a trustworthy AST engine</td></tr>
+    <tr><td>2</td><td>C1 — wire the AST engine into <code>clones()</code></td><td>Detects the clone class token matching can't</td></tr>
+    <tr><td>3</td><td>C3 — stable AST hash</td><td>Makes AST identities portable across runs/machines</td></tr>
+    <tr><td>4</td><td>C4/C5 — boundary-aware windows + Rust-aware lexing</td><td>Fewer false positives, honest clone lengths</td></tr>
+    <tr><td>5</td><td>C6/C7 — size-aware scoring + lazy snippets</td><td>Better ranking, lower memory</td></tr>
+  </tbody>
+</table>
+
+<footer>
+  Follow-up review of <code>rust-quality-lens</code> working tree (uncommitted changes atop <code>4e0d7bb</code>) ·
+  generated 2026-06-02 · build &amp; tests verified locally · documentation only, no code modified.
+</footer>
+
+</div>
+</body>
+</html>

@@ -1,7 +1,7 @@
 # Extraction Notes
 
-`rust-quality-lens` currently carries the reusable JSON-producing part of
-Scratchpad's measurement layer.
+`rust-quality-lens` carries reusable JSON-producing quality, correctness, and
+architecture-map measurements for Rust projects.
 
 Included:
 
@@ -14,7 +14,10 @@ Included:
 - `correctness`
 - `map`
 - shared catalog and artifact-writing support
-- Rust helper binaries for AST clone hashing and leverage style counts
+- Rust helper binaries for syntax facts and AST hashing
+- shared helper-side path and module-key logic in `rust_helpers/src/lib.rs`
+- shared CLI-side modules for config, catalog, facts, producers, artifacts,
+  risk scoring, and utilities
 
 Not included:
 
@@ -27,6 +30,7 @@ Left in Scratchpad for now:
 - capacity/resource probes
 - Scratchpad-specific profile binaries
 
-The next cleanup step is to split the Rust CLI into smaller modules. For the
-first Rust pass, preserving the command and artifact contracts matters more than
-polishing internal structure.
+The CLI is now split into smaller modules while preserving the command and
+artifact contracts consumed by dashboards and local runners. Performance inputs
+remain project-specific unless a measured project provides compatible
+`slowspots.json` data.
