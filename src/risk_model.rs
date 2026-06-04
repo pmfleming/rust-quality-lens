@@ -28,14 +28,8 @@ impl CorrectnessFacts {
     }
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct PerformanceFacts {
-    pub(crate) benchmark_score: f64,
-    pub(crate) mean_ms: f64,
-    pub(crate) variance: f64,
-}
-
 pub(crate) struct ArchitectureRiskInputs {
+    pub(crate) is_entrypoint: bool,
     pub(crate) sloc: usize,
     pub(crate) public_api_count: usize,
     pub(crate) outbound_dependencies: usize,
@@ -45,7 +39,6 @@ pub(crate) struct ArchitectureRiskInputs {
     pub(crate) correctness: Option<CorrectnessFacts>,
     pub(crate) locality_risk: Option<f64>,
     pub(crate) leverage_pressure: Option<f64>,
-    pub(crate) performance: Option<PerformanceFacts>,
     pub(crate) layer_violations: usize,
     pub(crate) in_cycle: bool,
 }
@@ -53,7 +46,6 @@ pub(crate) struct ArchitectureRiskInputs {
 pub(crate) struct ArchitectureRiskScores {
     pub(crate) maintainability_risk: Option<f64>,
     pub(crate) change_risk: Option<f64>,
-    pub(crate) performance_risk: Option<f64>,
     pub(crate) correctness_risk: Option<f64>,
     pub(crate) architectural_risk: f64,
     pub(crate) quality_risk: Option<f64>,
@@ -62,12 +54,22 @@ pub(crate) struct ArchitectureRiskScores {
 }
 
 pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> ArchitectureRiskScores {
+    let scored_outbound_dependencies = if inputs.is_entrypoint {
+        inputs.outbound_dependencies.saturating_sub(8)
+    } else {
+        inputs.outbound_dependencies
+    };
+    let scored_layer_violations = if inputs.is_entrypoint {
+        inputs.layer_violations.saturating_sub(2)
+    } else {
+        inputs.layer_violations
+    };
     let maintainability_risk = inputs.complexity_score.map(|complexity| {
         round2(
             (complexity
                 + (inputs.sloc as f64 * 0.12).min(70.0)
                 + (inputs.public_api_count as f64 * 2.5).min(30.0)
-                + (inputs.outbound_dependencies as f64 * 4.0 + inputs.inbound_dependencies as f64)
+                + (scored_outbound_dependencies as f64 * 4.0 + inputs.inbound_dependencies as f64)
                     .min(35.0))
             .min(400.0),
         )
@@ -99,18 +101,10 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
             .min(470.0),
         )
     });
-    let performance_risk = inputs.performance.as_ref().map(|performance| {
-        round2(
-            (performance.benchmark_score
-                + (performance.mean_ms * 2.5).min(120.0)
-                + (performance.variance * 180.0).min(90.0))
-            .min(300.0),
-        )
-    });
     let architectural_risk = round2(
-        ((inputs.outbound_dependencies as f64 * 10.0).min(120.0)
+        ((scored_outbound_dependencies as f64 * 10.0).min(120.0)
             + (inputs.inbound_dependencies as f64 * 8.0).min(120.0)
-            + (inputs.layer_violations as f64 * 32.0).min(120.0)
+            + (scored_layer_violations as f64 * 32.0).min(120.0)
             + if inputs.in_cycle { 110.0 } else { 0.0 }
             + if inputs.sloc >= 250 { 60.0 } else { 0.0 })
         .min(530.0),
@@ -129,7 +123,6 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
     for (name, value) in [
         ("maintainability_risk", maintainability_risk),
         ("change_risk", change_risk),
-        ("performance_risk", performance_risk),
         ("correctness_risk", correctness_risk),
         ("quality_risk", quality_risk),
     ] {
@@ -140,18 +133,11 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
     let total_score = match (
         maintainability_risk,
         change_risk,
-        performance_risk,
         correctness_risk,
         quality_risk,
     ) {
-        (
-            Some(maintainability),
-            Some(change),
-            Some(performance),
-            Some(correctness),
-            Some(quality),
-        ) => Some(round2(
-            maintainability + change + performance + correctness + quality + architectural_risk,
+        (Some(maintainability), Some(change), Some(correctness), Some(quality)) => Some(round2(
+            maintainability + change + correctness + quality + architectural_risk,
         )),
         _ => {
             unknown_metrics.push("total_score".to_string());
@@ -161,7 +147,6 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
     ArchitectureRiskScores {
         maintainability_risk,
         change_risk,
-        performance_risk,
         correctness_risk,
         architectural_risk,
         quality_risk,
@@ -172,14 +157,12 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ArchitectureRiskInputs, ChangeFacts, CorrectnessFacts, PerformanceFacts,
-        architecture_risk_scores,
-    };
+    use super::{ArchitectureRiskInputs, ChangeFacts, CorrectnessFacts, architecture_risk_scores};
 
     #[test]
     fn total_is_unknown_until_required_scores_are_known() {
         let missing = architecture_risk_scores(ArchitectureRiskInputs {
+            is_entrypoint: false,
             sloc: 10,
             public_api_count: 1,
             outbound_dependencies: 0,
@@ -189,7 +172,6 @@ mod tests {
             correctness: None,
             locality_risk: None,
             leverage_pressure: None,
-            performance: None,
             layer_violations: 0,
             in_cycle: false,
         });
@@ -204,6 +186,7 @@ mod tests {
     #[test]
     fn computes_full_score_when_inputs_are_known() {
         let scored = architecture_risk_scores(ArchitectureRiskInputs {
+            is_entrypoint: false,
             sloc: 10,
             public_api_count: 1,
             outbound_dependencies: 1,
@@ -224,16 +207,78 @@ mod tests {
             }),
             locality_risk: Some(2.0),
             leverage_pressure: Some(3.0),
-            performance: Some(PerformanceFacts {
-                benchmark_score: 1.0,
-                mean_ms: 2.0,
-                variance: 0.1,
-            }),
             layer_violations: 1,
             in_cycle: true,
         });
         assert!(scored.total_score.is_some());
         assert!(scored.unknown_metrics.is_empty());
         assert_eq!(scored.architectural_risk, 160.0);
+    }
+
+    #[test]
+    fn computes_total_from_owned_quality_evidence() {
+        let scored = architecture_risk_scores(ArchitectureRiskInputs {
+            is_entrypoint: false,
+            sloc: 10,
+            public_api_count: 1,
+            outbound_dependencies: 1,
+            inbound_dependencies: 1,
+            complexity_score: Some(10.0),
+            change: Some(ChangeFacts {
+                churn: 24,
+                commit_count: 2,
+                contributor_count: 1,
+                defect_commit_count: 1,
+                has_test_evidence: true,
+            }),
+            correctness: Some(CorrectnessFacts {
+                test_count: 1,
+                failed_count: 0,
+                unknown_count: 0,
+                skipped_count: 0,
+            }),
+            locality_risk: Some(2.0),
+            leverage_pressure: Some(3.0),
+            layer_violations: 1,
+            in_cycle: true,
+        });
+
+        assert!(scored.total_score.is_some());
+        assert!(scored.unknown_metrics.is_empty());
+    }
+
+    #[test]
+    fn entrypoints_get_orchestration_allowance() {
+        let normal = architecture_risk_scores(ArchitectureRiskInputs {
+            is_entrypoint: false,
+            sloc: 20,
+            public_api_count: 0,
+            outbound_dependencies: 10,
+            inbound_dependencies: 0,
+            complexity_score: Some(4.0),
+            change: None,
+            correctness: None,
+            locality_risk: None,
+            leverage_pressure: None,
+            layer_violations: 3,
+            in_cycle: false,
+        });
+        let entrypoint = architecture_risk_scores(ArchitectureRiskInputs {
+            is_entrypoint: true,
+            sloc: 20,
+            public_api_count: 0,
+            outbound_dependencies: 10,
+            inbound_dependencies: 0,
+            complexity_score: Some(4.0),
+            change: None,
+            correctness: None,
+            locality_risk: None,
+            leverage_pressure: None,
+            layer_violations: 3,
+            in_cycle: false,
+        });
+
+        assert!(entrypoint.architectural_risk < normal.architectural_risk);
+        assert!(entrypoint.maintainability_risk.unwrap() < normal.maintainability_risk.unwrap());
     }
 }

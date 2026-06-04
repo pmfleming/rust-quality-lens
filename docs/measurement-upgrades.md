@@ -99,6 +99,20 @@ Dependency extraction now captures more Rust dependency forms, including
 relative module paths, re-exports, direct crate calls, external crates, grouped
 imports, and attribute-wired modules.
 
+Syntax facts now carry Cargo target context:
+
+- `target_kind`: `lib`, `bin`, `test`, `bench`, `example`, or `module`
+- `entrypoint_kind`: runnable entrypoint kind for `bin`, `test`, `bench`, and
+  `example` targets
+- `is_entrypoint`: whether the file is a tool/runtime entrypoint
+
+The lens infers common target paths such as `src/main.rs`, `src/bin/*.rs`,
+`tests/*.rs`, `benches/*.rs`, and `examples/*.rs`, and refines them with
+explicit `Cargo.toml` target paths. Map, locality, leverage, clone, and review
+outputs preserve this metadata. Entrypoints receive an orchestration allowance
+for outbound dependency spread and a small layer-boundary allowance so they stay
+visible without being scored like ordinary domain modules.
+
 Attribute evidence is kept separate from dependency extraction. Attribute names
 such as `cfg` or `test` do not become dependency edges; only attribute values
 that actually wire modules, such as `#[path = "..."]`, influence module wiring.
@@ -115,11 +129,14 @@ suppressions in score calculation, while the raw evidence remains visible.
 
 ## Clone Analysis
 
-Clone analysis reports two clone layers:
+Clone analysis reports multiple clone and duplication layers:
 
 - `engine: "token"` rows from normalized token windows over source text
 - `engine: "ast"` rows from the helper-backed function and method structural
   hasher
+- `engine: "module-responsibility"` rows for modules with matching coarse API,
+  type, impl, and dependency footprints
+- `engine: "test-ast"` rows for repeated non-trivial test body structures
 
 Token rows use source-scan confidence. AST rows use syntax-fact confidence and
 are emitted only when multiple non-trivial functions or methods share the same
@@ -127,6 +144,13 @@ stable structural hash. The AST hasher records nested functions and impl
 methods, normalizes local names and literal values, keeps discriminating
 operator/call/type structure, skips trivial functions below the minimum node
 threshold, and uses the same stable hash discipline as the token engine.
+Module-responsibility rows are intentionally coarse design-duplication signals,
+not proof that code should be merged. Test AST rows use Cargo test target
+discovery so duplicated integration-test bodies can be surfaced even when
+`source_roots` only contains `src`.
+Module-responsibility signatures include target and entrypoint kind, which lets
+duplicated tool scaffolding group with other entrypoint scaffolding instead of
+with ordinary source modules.
 
 ## Generic Lens Rules
 

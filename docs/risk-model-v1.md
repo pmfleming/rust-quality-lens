@@ -19,7 +19,6 @@ Raw fact inputs include:
 - locality facts from `locality_metrics.json`
 - leverage facts from `leverage_metrics.json`
 - churn, commits, contributors, defect-keyword commits, and co-change facts from git history
-- optional benchmark facts from `slowspots.json`
 
 When a required input artifact is missing or stale, the affected derived scores
 are `null` rather than `0`, and the map records the missing or stale artifact in
@@ -31,7 +30,6 @@ Derived risk scores are model outputs. They are not raw facts:
 
 - `maintainability_risk`
 - `change_risk`
-- `performance_risk`
 - `correctness_risk`
 - `architectural_risk`
 - `quality_risk`
@@ -55,6 +53,8 @@ Architecture category weights are emitted into map metadata as
 - outbound dependencies: weight `4.0`
 - inbound dependencies: weight `1.0`
 - combined dependency contribution cap: `35.0`
+- entrypoint modules receive an outbound orchestration allowance before
+  dependency pressure is scored
 
 ### Change
 
@@ -72,12 +72,6 @@ Architecture category weights are emitted into map metadata as
 - skipped test count: weight `10.0`, cap `40.0`
 - missing test evidence penalty: `90.0`
 
-### Performance
-
-- benchmark score: weight `1.0`
-- mean runtime in milliseconds: weight `2.5`, cap `120.0`
-- runtime variance: weight `180.0`, cap `90.0`
-
 ### Architectural
 
 - outbound dependencies: weight `10.0`, cap `120.0`
@@ -86,6 +80,8 @@ Architecture category weights are emitted into map metadata as
 - cycle membership penalty: `110.0`
 - large module threshold: `250` SLOC
 - large module penalty: `60.0`
+- entrypoint modules receive a small layer-boundary allowance so tool wiring
+  remains visible without being penalized like ordinary modules
 
 ## Classification
 
@@ -110,6 +106,10 @@ Currently shared producer calibrations cover:
 - `leverage`: leverage score base, bonuses, penalties, pressure scaling, and risk inversion
 - `clones_token`: token-window size, minimum line span, and instance weight
 - `clones_ast`: minimum AST node threshold and cross-file factor
+- `clones_module_responsibility`: coarse module API/type/dependency duplication
+- `clones_test_ast`: repeated non-trivial test body structures
+- target metadata: `target_kind`, `entrypoint_kind`, and `is_entrypoint`
+  derived from common Rust paths and explicit Cargo target paths
 
 ## Implementation Boundaries
 

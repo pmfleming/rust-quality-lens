@@ -237,6 +237,7 @@ fn print_usage() {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::{FnInfo, FunctionCollector};
     use syn::visit::Visit;

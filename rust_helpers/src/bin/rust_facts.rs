@@ -19,6 +19,9 @@ use syn::{
 struct FileFacts {
     path: String,
     module_key: String,
+    target_kind: String,
+    entrypoint_kind: Option<String>,
+    is_entrypoint: bool,
     parse_status: String,
     dependencies: Vec<String>,
     child_modules: Vec<String>,
@@ -145,6 +148,9 @@ impl FactVisitor {
     }
 
     fn into_facts(mut self) -> FileFacts {
+        let target_kind = target_kind_for_path(&self.path).to_string();
+        let entrypoint_kind = entrypoint_kind_for_path(&self.path).map(str::to_string);
+        let is_entrypoint = entrypoint_kind.is_some();
         self.dependencies.sort();
         self.dependencies.dedup();
         self.child_modules.sort();
@@ -156,6 +162,9 @@ impl FactVisitor {
         FileFacts {
             path: self.path,
             module_key: self.module_key,
+            target_kind,
+            entrypoint_kind,
+            is_entrypoint,
             parse_status: "ok".to_string(),
             dependencies: self.dependencies,
             child_modules: self.child_modules,
@@ -405,10 +414,10 @@ impl<'ast> Visit<'ast> for FactVisitor {
         if path_ends_with(&i.path, "MaybeUninit") {
             self.bump_escape("maybe_uninit", i.path.span());
         }
-        if let Some(qself) = &i.qself {
-            if let Some(value) = type_dependency_string(&qself.ty) {
-                self.add_dependency(value);
-            }
+        if let Some(qself) = &i.qself
+            && let Some(value) = type_dependency_string(&qself.ty)
+        {
+            self.add_dependency(value);
         }
         self.add_dependency(path);
         visit::visit_type_path(self, i);
@@ -534,19 +543,19 @@ impl FactVisitor {
         }
         let module_key = child_module_key(&self.module_key, &item.ident.to_string());
         self.child_modules.push(module_key.clone());
-        if item.content.is_none() {
-            if let Some(path) = module_file_path(
+        if item.content.is_none()
+            && let Some(path) = module_file_path(
                 &self.path,
                 &self.module_key,
                 &item.ident.to_string(),
                 &item.attrs,
-            ) {
-                self.module_files.push(ModuleFileFact {
-                    module_key,
-                    path,
-                    line: span_start_line(item.mod_token.span),
-                });
-            }
+            )
+        {
+            self.module_files.push(ModuleFileFact {
+                module_key,
+                path,
+                line: span_start_line(item.mod_token.span),
+            });
         }
         if item.ident == "tests" {
             self.has_inline_tests = true;
@@ -651,6 +660,9 @@ fn failed_record(path: &str, parse_status: String) -> FileFacts {
     FileFacts {
         path: normalize_path(path),
         module_key: module_key_for_path(path),
+        target_kind: target_kind_for_path(path).to_string(),
+        entrypoint_kind: entrypoint_kind_for_path(path).map(str::to_string),
+        is_entrypoint: entrypoint_kind_for_path(path).is_some(),
         parse_status,
         dependencies: Vec::new(),
         child_modules: Vec::new(),
@@ -669,6 +681,32 @@ fn failed_record(path: &str, parse_status: String) -> FileFacts {
         tests: Vec::new(),
         escape_counts: BTreeMap::new(),
         escape_locations: Vec::new(),
+    }
+}
+
+fn target_kind_for_path(path: &str) -> &'static str {
+    let path = normalize_path(path);
+    let relative = path.split("/src/").nth(1).map(|rest| format!("src/{rest}"));
+    let path = relative.as_deref().unwrap_or(&path);
+    let parts = path.split('/').collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["src", "lib.rs"] => "lib",
+        ["src", "main.rs"] => "bin",
+        ["src", "bin", ..] => "bin",
+        ["tests", file] if file.ends_with(".rs") => "test",
+        ["benches", file] if file.ends_with(".rs") => "bench",
+        ["examples", file] if file.ends_with(".rs") => "example",
+        _ => "module",
+    }
+}
+
+fn entrypoint_kind_for_path(path: &str) -> Option<&'static str> {
+    match target_kind_for_path(path) {
+        "bin" => Some("bin"),
+        "test" => Some("test"),
+        "bench" => Some("bench"),
+        "example" => Some("example"),
+        _ => None,
     }
 }
 
@@ -763,12 +801,11 @@ fn path_attr_value(attrs: &[Attribute]) -> Option<String> {
         if path_to_string(attr.path()) != "path" {
             continue;
         }
-        if let syn::Meta::NameValue(name_value) = &attr.meta {
-            if let syn::Expr::Lit(expr_lit) = &name_value.value {
-                if let syn::Lit::Str(lit) = &expr_lit.lit {
-                    return Some(lit.value());
-                }
-            }
+        if let syn::Meta::NameValue(name_value) = &attr.meta
+            && let syn::Expr::Lit(expr_lit) = &name_value.value
+            && let syn::Lit::Str(lit) = &expr_lit.lit
+        {
+            return Some(lit.value());
         }
     }
     None

@@ -1,7 +1,29 @@
-[package]
-name = "rust-quality-lens"
+[workspace]
+resolver = "3"
+members = [".", "rust_helpers"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+unused_unsafe = "warn"
+non_ascii_idents = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+undocumented_unsafe_blocks = "warn"
+
+[package]
+name = "rust-quality-lens"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Reusable measurement JSON producers for Rust projects."
 
 [[bin]]
@@ -10,7 +32,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 hostname = "0.4"
 regex = "1.10"
@@ -19,3 +41,6 @@ serde_json = "1.0"
 tempfile = "3.10"
 toml = "0.8"
 walkdir = "2.5"
+
+[lints]
+workspace = true

@@ -25,7 +25,7 @@ pub(crate) fn resolve_config_path(path: PathBuf, config_dir: &Path) -> PathBuf {
     if path.is_absolute() {
         path
     } else {
-        absolutize(&config_dir.join(path))
+        absolutize(config_dir.join(path))
     }
 }
 
@@ -33,7 +33,7 @@ pub(crate) fn resolve_project_path(path: PathBuf, project_root: &Path) -> PathBu
     if path.is_absolute() {
         path
     } else {
-        absolutize(&project_root.join(path))
+        absolutize(project_root.join(path))
     }
 }
 
@@ -97,10 +97,11 @@ pub(crate) fn iter_rust_files(paths: &[String]) -> Vec<PathBuf> {
                 .filter_map(|entry| entry.ok())
             {
                 let entry_path = entry.path();
-                if entry_path.is_file() && entry_path.extension().is_some_and(|ext| ext == "rs") {
-                    if seen.insert(absolutize(entry_path)) {
-                        files.push(entry_path.to_path_buf());
-                    }
+                if entry_path.is_file()
+                    && entry_path.extension().is_some_and(|ext| ext == "rs")
+                    && seen.insert(absolutize(entry_path))
+                {
+                    files.push(entry_path.to_path_buf());
                 }
             }
         }
