@@ -22,6 +22,17 @@ fn run(args: &[&str]) -> std::process::Output {
 }
 
 fn read_json(path: impl AsRef<Path>) -> Value {
+    let value: Value =
+        serde_json::from_str(&fs::read_to_string(path).expect("json file should exist"))
+            .expect("json should parse");
+    value
+        .get("records")
+        .or_else(|| value.get("data"))
+        .cloned()
+        .unwrap_or(value)
+}
+
+fn read_document(path: impl AsRef<Path>) -> Value {
     serde_json::from_str(&fs::read_to_string(path).expect("json file should exist"))
         .expect("json should parse")
 }
@@ -331,7 +342,7 @@ fn node_data<'a>(payload: &'a Value, id: &str) -> &'a Value {
         .unwrap()
         .iter()
         .map(|node| &node["data"])
-        .find(|data| data["id"] == id)
+        .find(|data| data["id"] == id || data["module_key"] == id)
         .expect("node should exist")
 }
 
@@ -372,6 +383,10 @@ fn config_schema_prints_machine_readable_schema() {
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["title"], "rust-quality-lens config");
     assert_eq!(payload["properties"]["source_roots"]["type"], "array");
+    assert_eq!(
+        payload["properties"]["rust"]["properties"]["identity_resolution"]["enum"],
+        serde_json::json!(["auto", "required", "disabled"])
+    );
 }
 
 #[test]
@@ -390,6 +405,7 @@ fn artifact_schema_prints_known_output_contracts() {
         "rust_escape_hatches.json",
         "type_health.json",
         "correctness_review.json",
+        "coverage.json",
         "locality_metrics.json",
         "leverage_metrics.json",
         "map.json",
@@ -404,9 +420,9 @@ fn artifact_schema_prints_known_output_contracts() {
         String::from_utf8_lossy(&map_output.stderr)
     );
     let map_schema: Value = serde_json::from_slice(&map_output.stdout).unwrap();
-    assert_eq!(map_schema["title"], "map.json");
+    assert_eq!(map_schema["title"], "map.json artifact envelope");
     assert!(
-        map_schema["required"]
+        map_schema["properties"]["data"]["required"]
             .as_array()
             .unwrap()
             .iter()
@@ -485,9 +501,18 @@ fn generated_artifacts_keep_expected_top_level_shapes() {
     let hotspots = read_json(analysis.join("hotspots.json"));
     assert!(hotspots.as_array().unwrap().iter().all(|row| {
         row.get("module_key").is_some()
+            && row.get("kind").is_some()
             && row.get("score").is_some()
+            && row.get("score_components").is_some()
             && row.get("measurement_confidence").is_some()
     }));
+    assert!(
+        hotspots
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["kind"] == "function")
+    );
     let correctness = read_json(analysis.join("correctness_review.json"));
     for key in ["version", "generated_from", "summary", "tests"] {
         assert!(correctness.get(key).is_some(), "missing {key}");
@@ -498,6 +523,79 @@ fn generated_artifacts_keep_expected_top_level_shapes() {
     }
     assert!(map["graph"]["nodes"].as_array().is_some());
     assert!(map["graph"]["edges"].as_array().is_some());
+}
+
+#[test]
+fn generated_artifacts_match_envelope_conformance_snapshot() {
+    let output = run(&[
+        "measure",
+        "all",
+        "--config",
+        "tests/fixtures/mini_rust_project/rqlens.toml",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_str(include_str!("snapshots/artifact_envelopes.json"))
+        .expect("snapshot should parse");
+    let analysis = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
+    for (file, expected_keys) in expected.as_object().unwrap() {
+        let document = read_document(analysis.join(file));
+        let mut actual = document
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        actual.sort();
+        assert_eq!(
+            actual,
+            expected_keys
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|key| key.as_str().unwrap().to_string())
+                .collect::<Vec<_>>(),
+            "contract drift in {file}"
+        );
+        assert_eq!(document["schema_version"], 2);
+    }
+}
+
+#[test]
+fn normalized_measurements_match_golden_snapshot() {
+    let config = "tests/fixtures/mini_rust_project/rqlens.toml";
+    let output = run(&["measure", "all", "--config", config]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let analysis = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
+    let hotspots = read_json(analysis.join("hotspots.json"));
+    let map = read_json(analysis.join("map.json"));
+    let normalized = serde_json::json!({
+        "hotspots": hotspots.as_array().unwrap().iter()
+            .filter(|row| row["kind"] == "module")
+            .map(|row| serde_json::json!({
+            "module_key": row["module_key"],
+            "max_function_score": row["max_function_score"],
+            "p95_function_score": row["p95_function_score"],
+            "score": row["score"],
+        })).collect::<Vec<_>>(),
+        "dependency_edges": map["graph"]["edges"].as_array().unwrap().iter()
+            .filter(|edge| edge["data"]["kind"] == "dependency")
+            .map(|edge| serde_json::json!([
+                edge["data"]["source"],
+                edge["data"]["target"],
+            ]))
+            .collect::<Vec<_>>(),
+    });
+    let expected: Value = serde_json::from_str(include_str!("snapshots/mini_metrics.json"))
+        .expect("metric snapshot should parse");
+    assert_eq!(normalized, expected);
 }
 
 #[test]
@@ -529,6 +627,18 @@ fn type_health_keeps_same_named_types_separate() {
     assert_eq!(beta["method_count"], 2);
     assert!(rows.iter().any(|item| item["qualified_name"] == "domain::TupleConfig"
         && item["shape"] == "tuple"));
+    let domain = rows
+        .iter()
+        .find(|item| item["qualified_name"] == "domain::Config")
+        .unwrap();
+    assert_eq!(domain["method_count"], 1);
+    assert_eq!(domain["impl_file_count"], 1);
+    assert!(
+        domain["impl_files"][0]
+            .as_str()
+            .unwrap()
+            .ends_with("src/service.rs")
+    );
 }
 
 #[test]
@@ -553,11 +663,10 @@ fn map_captures_direct_module_path_dependency() {
         "rqlens.generic_layers"
     );
     let edges = payload["graph"]["edges"].as_array().unwrap();
-    assert!(
-        edges
-            .iter()
-            .any(|edge| { edge["data"]["source"] == "lib" && edge["data"]["target"] == "math" })
-    );
+    assert!(edges.iter().any(|edge| {
+        edge["data"]["source"] == "mini-rust-project::mini-rust-project::lib"
+            && edge["data"]["target"] == "mini-rust-project::mini-rust-project::math"
+    }));
 }
 
 #[test]
@@ -735,6 +844,82 @@ fn correctness_writes_review_and_test_catalog() {
     let catalog = read_json(root.join("test_catalog.json"));
     assert_eq!(review["summary"]["test_count"], 0);
     assert!(catalog.as_array().unwrap().is_empty());
+}
+
+#[test]
+fn correctness_attributes_inline_tests_to_production_modules() {
+    let output = run(&[
+        "measure",
+        "correctness",
+        "--config",
+        "tests/fixtures/golden_rust_project/rqlens.toml",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let review = read_json(
+        repo_root()
+            .join("tests/fixtures/golden_rust_project/target/analysis/correctness_review.json"),
+    );
+    let domain_test = review["tests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|test| test["name"] == "macro_case_test")
+        .expect("domain test should be discovered");
+    assert!(
+        domain_test["tested_modules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|module| module == "domain")
+    );
+    let integration_test = review["tests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|test| test["path"] == "tests/duplicate_a.rs")
+        .expect("integration test should be discovered");
+    assert!(
+        integration_test["tested_modules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|module| module == "alpha")
+    );
+}
+
+#[test]
+fn check_command_enforces_threshold_policy() {
+    let config = "tests/fixtures/mini_rust_project/rqlens.toml";
+    let measure = run(&["measure", "all", "--config", config]);
+    assert!(
+        measure.status.success(),
+        "{}",
+        String::from_utf8_lossy(&measure.stderr)
+    );
+    let check = run(&[
+        "check",
+        "--fail-on",
+        "threshold",
+        "--fail-on",
+        "regression",
+        "--baseline",
+        "tests/fixtures/mini_rust_project/target/analysis",
+        "--max-total-score",
+        "10000",
+        "--config",
+        config,
+    ]);
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let report: Value = serde_json::from_slice(&check.stdout).unwrap();
+    assert_eq!(report["passed"], true);
 }
 
 #[test]

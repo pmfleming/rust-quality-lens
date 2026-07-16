@@ -49,9 +49,25 @@ fn escape_row(
     let grouped = grouped_counts(&counts);
     let locations = escape_locations(fact, labels);
     let allow_count = grouped.allow_count;
+    let score_components = scoring_counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(kind, count)| {
+            json!({
+                "signal": kind,
+                "raw": count,
+                "weight": weights[kind.as_str()],
+                "contribution": round2(*count as f64 * weights[kind.as_str()]),
+            })
+        })
+        .collect::<Vec<_>>();
     Some(json!({
         "module_name": fact.module_key,
         "module_key": fact.module_key,
+        "module_id": fact.module_id,
+        "package_name": fact.package_name,
+        "target_name": fact.target_name,
+        "identity_backend": fact.identity_backend,
         "path": fact.path,
         "escape_hatch_score": escape_score(&scoring_counts, weights),
         "total_count": total_count,
@@ -72,6 +88,7 @@ fn escape_row(
         "locations": locations,
         "allow_locations": locations.iter().filter(|item| matches!(item["kind"].as_str(), Some("lint_suppression" | "clippy_suppression"))).collect::<Vec<_>>(),
         "signals": escape_signals(&counts, labels, allow_count),
+        "score_components": score_components,
         "measured_at": provenance.measured_at,
         "command": provenance.command,
         "host": provenance.host,

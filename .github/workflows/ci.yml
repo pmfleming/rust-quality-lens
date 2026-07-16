@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   rust:
@@ -15,7 +15,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          components: rustfmt, clippy
+          components: rustfmt, clippy, rust-analyzer
 
       - uses: Swatinem/rust-cache@v2
 
@@ -26,13 +26,19 @@ jobs:
         run: cargo check --workspace --all-targets
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
         run: cargo test --workspace
+
+      - name: Install coverage tool
+        run: cargo install cargo-llvm-cov --locked
 
       - name: Catalog
         run: cargo run --bin rqlens -- catalog
 
       - name: Measure
         run: cargo run --bin rqlens -- measure all
+
+      - name: Enforce measurement policy
+        run: cargo run --bin rqlens -- check --fail-on partial --fail-on test-failure

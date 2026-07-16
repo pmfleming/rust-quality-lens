@@ -3,17 +3,18 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
 pub(crate) fn write_json(path: &Path, payload: &Value) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(
-        path,
-        format!("{}\n", serde_json::to_string_pretty(payload)?),
-    )?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let mut temporary = NamedTempFile::new_in(parent)?;
+    writeln!(temporary, "{}", serde_json::to_string_pretty(payload)?)?;
+    temporary.as_file_mut().sync_all()?;
+    temporary.persist(path)?;
     Ok(())
 }
 

@@ -4,19 +4,22 @@ use std::fs;
 use std::path::PathBuf;
 
 mod artifacts;
+mod calibration;
 mod catalog;
 mod config;
 mod contracts;
 mod facts;
 mod measurement;
+mod policy;
 mod producers;
 mod review;
 mod risk_model;
+mod semantic;
 mod util;
 
 use catalog::print_catalog;
 use config::{LensConfig, config_schema, write_default_config};
-use contracts::artifact_schemas;
+use contracts::{artifact_document, artifact_schemas};
 use facts::RunContext;
 use util::write_json;
 
@@ -61,6 +64,24 @@ enum Commands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    Check {
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+        #[arg(long, value_enum)]
+        fail_on: Vec<policy::FailPolicy>,
+        #[arg(long, default_value_t = 600.0)]
+        max_total_score: f64,
+        #[arg(long, default_value_t = 0.0)]
+        max_regression: f64,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    Calibrate {
+        #[arg(long = "project", required = true)]
+        projects: Vec<String>,
+        #[arg(long, default_value = "target/calibration")]
+        output_dir: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -78,6 +99,7 @@ enum MeasureTool {
     Locality,
     Leverage,
     Map,
+    Coverage,
 }
 
 impl MeasureTool {
@@ -87,7 +109,7 @@ impl MeasureTool {
             Self::Clones,
             Self::EscapeHatches,
             Self::TypeHealth,
-            Self::Correctness,
+            Self::Coverage,
             Self::CorrectnessRun,
             Self::Locality,
             Self::Leverage,
@@ -107,6 +129,7 @@ impl MeasureTool {
             Self::Locality => "locality",
             Self::Leverage => "leverage",
             Self::Map => "map",
+            Self::Coverage => "coverage",
         }
     }
 
@@ -120,6 +143,7 @@ impl MeasureTool {
             Self::Locality => "locality_metrics.json",
             Self::Leverage => "leverage_metrics.json",
             Self::Map => "map.json",
+            Self::Coverage => "coverage.json",
             Self::All => unreachable!("all has no direct output file"),
         }
     }
@@ -155,6 +179,27 @@ fn main() -> Result<()> {
             println!("Wrote review data to {}", output.display());
             Ok(())
         }
+        Commands::Check {
+            baseline,
+            fail_on,
+            max_total_score,
+            max_regression,
+            config,
+        } => policy::run_check(
+            &LensConfig::load(config)?,
+            baseline,
+            &fail_on,
+            max_total_score,
+            max_regression,
+        ),
+        Commands::Calibrate {
+            projects,
+            output_dir,
+        } => {
+            let output = calibration::run(&projects, output_dir)?;
+            println!("Wrote calibration report to {}", output.display());
+            Ok(())
+        }
     }
 }
 
@@ -169,13 +214,16 @@ fn measure(tool: MeasureTool, config: LensConfig) -> Result<()> {
     for tool in tools {
         let output = config.output_dir.join(tool.output_file());
         let payload = producers::produce_measurement(&tool, &config, &context)?;
-        write_json(&output, &payload)?;
         if matches!(tool, MeasureTool::Correctness | MeasureTool::CorrectnessRun) {
             write_json(
                 &config.output_dir.join("test_catalog.json"),
                 &payload["tests"],
             )?;
         }
+        write_json(
+            &output,
+            &artifact_document(&tool, &config, &context, payload),
+        )?;
         println!(
             "Wrote {} visibility data to {}",
             tool.name(),

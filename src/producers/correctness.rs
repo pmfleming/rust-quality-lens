@@ -1,9 +1,10 @@
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fs;
 
 use crate::config::LensConfig;
-use crate::facts::{RunContext, TestFact, TestStatus, run_tests};
+use crate::facts::{FileFacts, RunContext, TestFact, TestStatus, resolve_dependency, run_tests};
 use crate::measurement::{
     RULESET_ID, RULESET_VERSION, classify_path, module_for_path, project_relative_path,
     source_confidence, test_kind_for_path, title_from_name,
@@ -18,14 +19,84 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> R
     } else {
         HashMap::new()
     };
-    let tests = facts
+    let source_modules = context
+        .source_facts
         .iter()
         .filter(|fact| fact.parse_status == "ok")
-        .flat_map(|fact| &fact.items.tests)
-        .map(|test| test_row(config, test, &statuses))
+        .map(|fact| fact.module_key.clone())
+        .collect::<BTreeSet<_>>();
+    let statuses_ref = &statuses;
+    let coverage_evidence = coverage_evidence(config);
+    let covered_modules = coverage_evidence
+        .iter()
+        .filter_map(|row| row["module_key"].as_str())
+        .collect::<BTreeSet<_>>();
+    let covered_module_ids = coverage_evidence
+        .iter()
+        .filter_map(|row| row["module_id"].as_str())
+        .collect::<BTreeSet<_>>();
+    let mut tests = facts
+        .iter()
+        .filter(|fact| fact.parse_status == "ok")
+        .flat_map(|fact| {
+            let tested_modules = tested_modules(config, fact, &source_modules);
+            let tested_module_ids = context
+                .source_facts
+                .iter()
+                .filter(|source| {
+                    source.package_name == fact.package_name
+                        && tested_modules.contains(&source.module_key)
+                })
+                .map(|source| source.module_id.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            fact.items.tests.iter().map(move |test| {
+                test_row(
+                    config,
+                    fact,
+                    test,
+                    &tested_modules,
+                    &tested_module_ids,
+                    statuses_ref,
+                )
+            })
+        })
         .collect::<Vec<_>>();
+    for test in &mut tests {
+        let observed = test["tested_modules"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter(|module| covered_modules.contains(module))
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if let Some(object) = test.as_object_mut() {
+            object.insert("coverage_observed_modules".to_string(), json!(observed));
+            let observed_ids = object
+                .get("tested_module_ids")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter(|module| covered_module_ids.contains(module))
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            object.insert(
+                "coverage_observed_module_ids".to_string(),
+                json!(observed_ids),
+            );
+        }
+    }
     let layers = layer_rows(&tests);
-    let summary = correctness_summary(&tests, &layers, &statuses);
+    let mut summary = correctness_summary(&tests, &layers, &statuses);
+    if let Some(object) = summary.as_object_mut() {
+        object.insert(
+            "coverage_module_count".to_string(),
+            Value::from(coverage_evidence.len()),
+        );
+    }
     Ok(json!({
         "version": 1,
         "generated_from": "rqlens",
@@ -34,10 +105,48 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> R
         "measurement_confidence": confidence,
         "layers": layers,
         "tests": tests,
+        "module_coverage_evidence": coverage_evidence,
+        "attribution_sources": ["syntax_dependencies", "aggregate_line_coverage"],
     }))
 }
 
-fn test_row(config: &LensConfig, test: &TestFact, statuses: &HashMap<String, TestStatus>) -> Value {
+fn coverage_evidence(config: &LensConfig) -> Vec<Value> {
+    let path = config.output_dir.join("coverage.json");
+    let Ok(text) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(document) = serde_json::from_str::<Value>(&text) else {
+        return Vec::new();
+    };
+    if document["measurement_confidence"]["complete"] != true {
+        return Vec::new();
+    }
+    let data = document.get("data").unwrap_or(&document);
+    data["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|file| file["lines"]["covered"].as_u64().unwrap_or(0) > 0)
+        .map(|file| {
+            json!({
+                "module_key": file["module_key"],
+                "module_id": file["module_id"],
+                "path": file["path"],
+                "line_coverage_percent": file["lines"]["percent"],
+                "source": "cargo_llvm_cov_aggregate",
+            })
+        })
+        .collect()
+}
+
+fn test_row(
+    config: &LensConfig,
+    fact: &FileFacts,
+    test: &TestFact,
+    tested_modules: &[String],
+    tested_module_ids: &[String],
+    statuses: &HashMap<String, TestStatus>,
+) -> Value {
     let path = project_relative_path(&config.project_root, &test.path);
     let name = test.name.clone();
     let qualified_name = test.qualified_name.clone();
@@ -59,13 +168,69 @@ fn test_row(config: &LensConfig, test: &TestFact, statuses: &HashMap<String, Tes
         "path": path,
         "line": test.line,
         "layer": classify_path(&path),
-        "module": if test.module_key.is_empty() { module_for_path(&test.path) } else { test.module_key.clone() },
+        "module": tested_modules.first().cloned().unwrap_or_else(|| if test.module_key.is_empty() { module_for_path(&test.path) } else { test.module_key.clone() }),
+        "tested_modules": tested_modules,
+        "tested_module_ids": tested_module_ids,
+        "defining_package": fact.package_name,
+        "defining_target": fact.target_name,
+        "identity_backend": fact.identity_backend,
         "description": title_from_name(&test.name),
         "kind": test_kind_for_path(&path),
         "last_status": last_status,
         "last_duration": last_duration,
         "command": format!("cargo test {}", test.name),
     })
+}
+
+fn tested_modules(
+    config: &LensConfig,
+    fact: &FileFacts,
+    source_modules: &BTreeSet<String>,
+) -> Vec<String> {
+    let module_keys = source_modules.iter().cloned().collect::<Vec<_>>();
+    let mut targets = BTreeSet::new();
+
+    if let Some(module) = nearest_source_module(&fact.module_key, source_modules) {
+        targets.insert(module);
+    }
+
+    let crate_names = crate_names(config);
+    for raw in &fact.graph.dependencies {
+        let normalized = crate_names
+            .iter()
+            .find_map(|name| raw.strip_prefix(&format!("{name}::")))
+            .unwrap_or(raw);
+        if let Some(module) = resolve_dependency(normalized, &fact.module_key, &module_keys) {
+            targets.insert(module);
+        }
+    }
+    targets.into_iter().collect()
+}
+
+fn crate_names(config: &LensConfig) -> BTreeSet<String> {
+    let mut names = BTreeSet::from([
+        config.project_name.clone(),
+        config.project_name.replace('-', "_"),
+    ]);
+    if let Ok(text) = std::fs::read_to_string(config.project_root.join("Cargo.toml"))
+        && let Ok(manifest) = text.parse::<toml::Value>()
+        && let Some(name) = manifest["package"]["name"].as_str()
+    {
+        names.insert(name.to_string());
+        names.insert(name.replace('-', "_"));
+    }
+    names
+}
+
+fn nearest_source_module(module: &str, source_modules: &BTreeSet<String>) -> Option<String> {
+    let mut candidate = module.to_string();
+    loop {
+        if source_modules.contains(&candidate) {
+            return Some(candidate);
+        }
+        let (parent, _) = candidate.rsplit_once("::")?;
+        candidate = parent.to_string();
+    }
 }
 
 fn status_keys(
@@ -119,6 +284,7 @@ fn correctness_summary(
     layers: &[Value],
     statuses: &HashMap<String, TestStatus>,
 ) -> Value {
+    let run_status = statuses.get("__run__").map(|status| status.status.as_str());
     json!({
         "test_count": tests.len(),
         "integration_count": tests.iter().filter(|t| t["kind"] == "integration").count(),
@@ -129,6 +295,8 @@ fn correctness_summary(
         "layers": layers.len(),
         "failed": tests.iter().filter(|t| t["last_status"] == "failed").count(),
         "unknown": tests.iter().filter(|t| t["last_status"] == "unknown").count(),
+        "run_failed": run_status.is_some_and(|status| status != "passed"),
+        "compile_failed": run_status == Some("compile_failed"),
         "last_run": statuses.get("__run__").map(|s| json!({"status": s.status, "duration": s.duration, "stdout_tail": s.stdout_tail, "stderr_tail": s.stderr_tail})),
     })
 }

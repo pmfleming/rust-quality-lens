@@ -11,8 +11,9 @@ use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::{
     Attribute, BinOp, ExprBinary, ExprCall, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprPath,
-    ExprRawAddr, ExprTry, ExprWhile, Fields, ForeignItem, ImplItem, Item, ItemEnum, ItemFn,
-    ItemForeignMod, ItemImpl, ItemStatic, ItemStruct, ItemUse, ReturnType, Type, TypePath, UseTree,
+    ExprRawAddr, ExprTry, ExprWhile, Fields, ForeignItem, ImplItem, ImplItemFn, Item, ItemEnum,
+    ItemFn, ItemForeignMod, ItemImpl, ItemStatic, ItemStruct, ItemUse, ReturnType, Type, TypePath,
+    UseTree,
 };
 
 #[derive(Serialize)]
@@ -24,6 +25,7 @@ struct FileFacts {
     is_entrypoint: bool,
     parse_status: String,
     dependencies: Vec<String>,
+    dependency_references: Vec<DependencyReferenceFact>,
     child_modules: Vec<String>,
     module_files: Vec<ModuleFileFact>,
     unsupported_patterns: Vec<String>,
@@ -33,11 +35,10 @@ struct FileFacts {
     source_nonblank_line_count: usize,
     source_comment_line_count: usize,
     function_count: usize,
-    cognitive_complexity: usize,
-    cyclomatic_complexity: usize,
     types: Vec<TypeFact>,
     impls: Vec<ImplFact>,
     tests: Vec<TestFact>,
+    functions: Vec<FunctionFact>,
     escape_counts: BTreeMap<String, usize>,
     escape_locations: Vec<LocationFact>,
 }
@@ -60,6 +61,7 @@ struct TypeFact {
 #[derive(Serialize)]
 struct ImplFact {
     type_name: String,
+    qualified_type_name: String,
     module_key: String,
     path: String,
     line: usize,
@@ -74,6 +76,27 @@ struct TestFact {
     line: usize,
     attribute: String,
     module_key: String,
+}
+
+#[derive(Serialize)]
+struct FunctionFact {
+    name: String,
+    qualified_name: String,
+    module_key: String,
+    path: String,
+    start_line: usize,
+    end_line: usize,
+    source_line_count: usize,
+    branch_pressure: usize,
+    path_pressure: usize,
+    max_nesting_depth: usize,
+}
+
+#[derive(Serialize)]
+struct DependencyReferenceFact {
+    raw_path: String,
+    line: usize,
+    column: usize,
 }
 
 #[derive(Serialize)]
@@ -93,6 +116,7 @@ struct FactVisitor {
     path: String,
     module_key: String,
     dependencies: Vec<String>,
+    dependency_references: Vec<DependencyReferenceFact>,
     child_modules: Vec<String>,
     module_files: Vec<ModuleFileFact>,
     unsupported_patterns: Vec<String>,
@@ -103,11 +127,10 @@ struct FactVisitor {
     source_nonblank_line_count: usize,
     source_comment_line_count: usize,
     function_count: usize,
-    cognitive_complexity: usize,
-    cyclomatic_complexity: usize,
     types: Vec<TypeFact>,
     impls: Vec<ImplFact>,
     tests: Vec<TestFact>,
+    functions: Vec<FunctionFact>,
     escape_counts: BTreeMap<String, usize>,
     escape_locations: Vec<LocationFact>,
 }
@@ -127,6 +150,7 @@ impl FactVisitor {
             path: normalize_path(path),
             module_key: module_key_for_path(path),
             dependencies: Vec::new(),
+            dependency_references: Vec::new(),
             child_modules: Vec::new(),
             module_files: Vec::new(),
             unsupported_patterns: Vec::new(),
@@ -137,11 +161,10 @@ impl FactVisitor {
             source_nonblank_line_count,
             source_comment_line_count,
             function_count: 0,
-            cognitive_complexity: 0,
-            cyclomatic_complexity: 1,
             types: Vec::new(),
             impls: Vec::new(),
             tests: Vec::new(),
+            functions: Vec::new(),
             escape_counts: BTreeMap::new(),
             escape_locations: Vec::new(),
         }
@@ -153,6 +176,18 @@ impl FactVisitor {
         let is_entrypoint = entrypoint_kind.is_some();
         self.dependencies.sort();
         self.dependencies.dedup();
+        self.dependency_references.sort_by(|left, right| {
+            (&left.raw_path, left.line, left.column).cmp(&(
+                &right.raw_path,
+                right.line,
+                right.column,
+            ))
+        });
+        self.dependency_references.dedup_by(|left, right| {
+            left.raw_path == right.raw_path
+                && left.line == right.line
+                && left.column == right.column
+        });
         self.child_modules.sort();
         self.child_modules.dedup();
         self.module_files
@@ -167,6 +202,7 @@ impl FactVisitor {
             is_entrypoint,
             parse_status: "ok".to_string(),
             dependencies: self.dependencies,
+            dependency_references: self.dependency_references,
             child_modules: self.child_modules,
             module_files: self.module_files,
             unsupported_patterns: self.unsupported_patterns,
@@ -176,11 +212,10 @@ impl FactVisitor {
             source_nonblank_line_count: self.source_nonblank_line_count,
             source_comment_line_count: self.source_comment_line_count,
             function_count: self.function_count,
-            cognitive_complexity: self.cognitive_complexity,
-            cyclomatic_complexity: self.cyclomatic_complexity,
             types: self.types,
             impls: self.impls,
             tests: self.tests,
+            functions: self.functions,
             escape_counts: self.escape_counts,
             escape_locations: self.escape_locations,
         }
@@ -194,9 +229,35 @@ impl FactVisitor {
         });
     }
 
-    fn add_dependency(&mut self, path: String) {
-        if !path.is_empty() {
-            self.dependencies.push(path);
+    fn add_dependency_at(&mut self, path: String, span: Span) {
+        if path.is_empty() {
+            return;
+        }
+        let start = span.start();
+        self.dependencies.push(path.clone());
+        self.dependency_references.push(DependencyReferenceFact {
+            raw_path: path,
+            line: start.line,
+            column: start.column,
+        });
+    }
+
+    fn add_expression_dependency(&mut self, path: &syn::Path) {
+        let first = path
+            .segments
+            .first()
+            .map(|segment| segment.ident.to_string());
+        if path.leading_colon.is_some()
+            || path.segments.len() > 1
+            || first
+                .as_deref()
+                .is_some_and(|name| matches!(name, "crate" | "self" | "super"))
+        {
+            let span = path
+                .segments
+                .last()
+                .map_or_else(|| path.span(), |segment| segment.ident.span());
+            self.add_dependency_at(path_to_string(path), span);
         }
     }
 
@@ -269,9 +330,98 @@ impl FactVisitor {
         }
     }
 
-    fn bump_branch(&mut self) {
-        self.cognitive_complexity += 1;
-        self.cyclomatic_complexity += 1;
+    fn record_function_metrics(
+        &mut self,
+        name: String,
+        qualified_name: String,
+        span: proc_macro2::Span,
+        body: &syn::Block,
+    ) {
+        let mut complexity = FunctionComplexity {
+            path_pressure: 1,
+            ..FunctionComplexity::default()
+        };
+        complexity.visit_block(body);
+        let start_line = span.start().line;
+        let end_line = body.brace_token.span.close().end().line;
+        self.functions.push(FunctionFact {
+            name,
+            qualified_name,
+            module_key: self.current_module_key(),
+            path: self.path.clone(),
+            start_line,
+            end_line,
+            source_line_count: end_line.saturating_sub(start_line) + 1,
+            branch_pressure: complexity.branch_pressure,
+            path_pressure: complexity.path_pressure,
+            max_nesting_depth: complexity.max_nesting_depth,
+        });
+    }
+}
+
+#[derive(Default)]
+struct FunctionComplexity {
+    branch_pressure: usize,
+    path_pressure: usize,
+    nesting_depth: usize,
+    max_nesting_depth: usize,
+}
+
+impl FunctionComplexity {
+    fn enter_branch(&mut self, path_increment: usize) {
+        self.branch_pressure += 1 + self.nesting_depth;
+        self.path_pressure += path_increment;
+        self.nesting_depth += 1;
+        self.max_nesting_depth = self.max_nesting_depth.max(self.nesting_depth);
+    }
+
+    fn leave_branch(&mut self) {
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
+    }
+}
+
+impl<'ast> Visit<'ast> for FunctionComplexity {
+    fn visit_expr_if(&mut self, expression: &'ast ExprIf) {
+        self.enter_branch(1);
+        visit::visit_expr_if(self, expression);
+        self.leave_branch();
+    }
+
+    fn visit_expr_match(&mut self, expression: &'ast ExprMatch) {
+        self.enter_branch(expression.arms.len().saturating_sub(1).max(1));
+        visit::visit_expr_match(self, expression);
+        self.leave_branch();
+    }
+
+    fn visit_expr_for_loop(&mut self, expression: &'ast ExprForLoop) {
+        self.enter_branch(1);
+        visit::visit_expr_for_loop(self, expression);
+        self.leave_branch();
+    }
+
+    fn visit_expr_while(&mut self, expression: &'ast ExprWhile) {
+        self.enter_branch(1);
+        visit::visit_expr_while(self, expression);
+        self.leave_branch();
+    }
+
+    fn visit_expr_loop(&mut self, expression: &'ast ExprLoop) {
+        self.enter_branch(1);
+        visit::visit_expr_loop(self, expression);
+        self.leave_branch();
+    }
+
+    fn visit_expr_binary(&mut self, expression: &'ast ExprBinary) {
+        if matches!(expression.op, BinOp::And(_) | BinOp::Or(_)) {
+            self.branch_pressure += 1;
+            self.path_pressure += 1;
+        }
+        visit::visit_expr_binary(self, expression);
+    }
+
+    fn visit_expr_try(&mut self, expression: &'ast ExprTry) {
+        self.branch_pressure += 1;
+        visit::visit_expr_try(self, expression);
     }
 }
 
@@ -332,56 +482,18 @@ impl<'ast> Visit<'ast> for FactVisitor {
 
     fn visit_expr_call(&mut self, i: &'ast ExprCall) {
         if let syn::Expr::Path(path) = i.func.as_ref() {
-            let value = path_to_string(&path.path);
             if path_ends_with(&path.path, "transmute")
                 || path_ends_with(&path.path, "transmute_copy")
             {
                 self.bump_escape("transmute", path.path.span());
             }
-            self.add_dependency(value);
+            self.add_expression_dependency(&path.path);
         }
         visit::visit_expr_call(self, i);
     }
 
-    fn visit_expr_if(&mut self, i: &'ast ExprIf) {
-        self.bump_branch();
-        visit::visit_expr_if(self, i);
-    }
-
-    fn visit_expr_match(&mut self, i: &'ast ExprMatch) {
-        self.bump_branch();
-        visit::visit_expr_match(self, i);
-    }
-
-    fn visit_expr_for_loop(&mut self, i: &'ast ExprForLoop) {
-        self.bump_branch();
-        visit::visit_expr_for_loop(self, i);
-    }
-
-    fn visit_expr_while(&mut self, i: &'ast ExprWhile) {
-        self.bump_branch();
-        visit::visit_expr_while(self, i);
-    }
-
-    fn visit_expr_loop(&mut self, i: &'ast ExprLoop) {
-        self.bump_branch();
-        visit::visit_expr_loop(self, i);
-    }
-
-    fn visit_expr_try(&mut self, i: &'ast ExprTry) {
-        self.cognitive_complexity += 1;
-        visit::visit_expr_try(self, i);
-    }
-
-    fn visit_expr_binary(&mut self, i: &'ast ExprBinary) {
-        if matches!(i.op, BinOp::And(_) | BinOp::Or(_)) {
-            self.bump_branch();
-        }
-        visit::visit_expr_binary(self, i);
-    }
-
     fn visit_expr_path(&mut self, i: &'ast ExprPath) {
-        self.add_dependency(path_to_string(&i.path));
+        self.add_expression_dependency(&i.path);
         visit::visit_expr_path(self, i);
     }
 
@@ -397,16 +509,17 @@ impl<'ast> Visit<'ast> for FactVisitor {
 
     fn visit_macro(&mut self, i: &'ast syn::Macro) {
         let path = path_to_string(&i.path);
-        self.add_dependency(path.clone());
+        self.add_dependency_at(
+            path.clone(),
+            i.path
+                .segments
+                .last()
+                .map_or(i.path.span(), |segment| segment.ident.span()),
+        );
         if path == "asm" || path == "global_asm" {
             self.bump_escape("asm_macro", i.path.span());
         }
         visit::visit_macro(self, i);
-    }
-
-    fn visit_path(&mut self, i: &'ast syn::Path) {
-        self.add_dependency(path_to_string(i));
-        visit::visit_path(self, i);
     }
 
     fn visit_type_path(&mut self, i: &'ast TypePath) {
@@ -417,9 +530,17 @@ impl<'ast> Visit<'ast> for FactVisitor {
         if let Some(qself) = &i.qself
             && let Some(value) = type_dependency_string(&qself.ty)
         {
-            self.add_dependency(value);
+            self.add_dependency_at(value, qself.ty.span());
         }
-        self.add_dependency(path);
+        if i.path.leading_colon.is_some() || i.path.segments.len() > 1 {
+            self.add_dependency_at(
+                path,
+                i.path
+                    .segments
+                    .last()
+                    .map_or_else(|| i.path.span(), |segment| segment.ident.span()),
+            );
+        }
         visit::visit_type_path(self, i);
     }
 }
@@ -469,6 +590,13 @@ impl FactVisitor {
             self.bump_escape("container_ref_return", item.sig.output.span());
         }
         self.maybe_record_test(item);
+        let name = item.sig.ident.to_string();
+        self.record_function_metrics(
+            name.clone(),
+            format!("{}::{name}", self.current_module_key()),
+            item.sig.fn_token.span,
+            &item.block,
+        );
     }
 
     fn record_foreign_mod(&mut self, item: &ItemForeignMod) {
@@ -499,9 +627,21 @@ impl FactVisitor {
             .iter()
             .filter(|child| matches!(child, ImplItem::Fn(_)))
             .count();
-        if let Some(type_name) = impl_type_name(&item.self_ty) {
+        let owner = impl_type_path(&item.self_ty).unwrap_or_else(|| "unknown".to_string());
+        for child in &item.items {
+            if let ImplItem::Fn(method) = child {
+                self.record_method_metrics(&owner, method);
+            }
+        }
+        if let Some(qualified_type_name) = impl_type_path(&item.self_ty) {
+            let type_name = qualified_type_name
+                .rsplit("::")
+                .next()
+                .unwrap_or(&qualified_type_name)
+                .to_string();
             self.impls.push(ImplFact {
                 type_name,
+                qualified_type_name,
                 module_key: self.current_module_key(),
                 path: self.path.clone(),
                 line: span_start_line(item.impl_token.span),
@@ -510,10 +650,27 @@ impl FactVisitor {
         }
     }
 
+    fn record_method_metrics(&mut self, owner: &str, method: &ImplItemFn) {
+        let name = method.sig.ident.to_string();
+        self.record_function_metrics(
+            name.clone(),
+            format!("{}::{owner}::{name}", self.current_module_key()),
+            method.sig.fn_token.span,
+            &method.block,
+        );
+    }
+
     fn record_item_macro(&mut self, item: &syn::ItemMacro) {
         self.scan_attrs(&item.attrs);
         let path = path_to_string(&item.mac.path);
-        self.add_dependency(path.clone());
+        self.add_dependency_at(
+            path.clone(),
+            item.mac
+                .path
+                .segments
+                .last()
+                .map_or_else(|| item.mac.path.span(), |segment| segment.ident.span()),
+        );
         let tokens = item.mac.tokens.to_string();
         if path == "include" || tokens.contains("mod ") || tokens.contains("mod\n") {
             self.unsupported_patterns.push(format!(
@@ -601,10 +758,14 @@ impl FactVisitor {
 
     fn record_use(&mut self, item: &ItemUse) {
         self.scan_attrs(&item.attrs);
+        if is_public(&item.vis) {
+            self.public_api_count += 1;
+        }
         collect_use_tree(
             "",
             &item.tree,
             &mut self.dependencies,
+            &mut self.dependency_references,
             &mut self.escape_counts,
             &mut self.escape_locations,
         );
@@ -665,6 +826,7 @@ fn failed_record(path: &str, parse_status: String) -> FileFacts {
         is_entrypoint: entrypoint_kind_for_path(path).is_some(),
         parse_status,
         dependencies: Vec::new(),
+        dependency_references: Vec::new(),
         child_modules: Vec::new(),
         module_files: Vec::new(),
         unsupported_patterns: Vec::new(),
@@ -674,11 +836,10 @@ fn failed_record(path: &str, parse_status: String) -> FileFacts {
         source_nonblank_line_count: 0,
         source_comment_line_count: 0,
         function_count: 0,
-        cognitive_complexity: 0,
-        cyclomatic_complexity: 0,
         types: Vec::new(),
         impls: Vec::new(),
         tests: Vec::new(),
+        functions: Vec::new(),
         escape_counts: BTreeMap::new(),
         escape_locations: Vec::new(),
     }
@@ -714,6 +875,7 @@ fn collect_use_tree(
     prefix: &str,
     tree: &UseTree,
     dependencies: &mut Vec<String>,
+    dependency_references: &mut Vec<DependencyReferenceFact>,
     escape_counts: &mut BTreeMap<String, usize>,
     escape_locations: &mut Vec<LocationFact>,
 ) {
@@ -721,18 +883,33 @@ fn collect_use_tree(
         UseTree::Path(path) => {
             let next = join_path(prefix, &path.ident.to_string());
             dependencies.push(next.clone());
+            push_dependency_reference(dependency_references, next.clone(), path.ident.span());
             collect_use_tree(
                 &next,
                 &path.tree,
                 dependencies,
+                dependency_references,
                 escape_counts,
                 escape_locations,
             );
         }
-        UseTree::Name(name) => dependencies.push(join_path(prefix, &name.ident.to_string())),
-        UseTree::Rename(rename) => dependencies.push(join_path(prefix, &rename.ident.to_string())),
+        UseTree::Name(name) => {
+            let path = join_path(prefix, &name.ident.to_string());
+            dependencies.push(path.clone());
+            push_dependency_reference(dependency_references, path, name.ident.span());
+        }
+        UseTree::Rename(rename) => {
+            let path = join_path(prefix, &rename.ident.to_string());
+            dependencies.push(path.clone());
+            push_dependency_reference(dependency_references, path, rename.ident.span());
+        }
         UseTree::Glob(glob) => {
             dependencies.push(format!("{prefix}::*"));
+            push_dependency_reference(
+                dependency_references,
+                format!("{prefix}::*"),
+                glob.star_token.span,
+            );
             *escape_counts.entry("glob_import".to_string()).or_insert(0) += 1;
             escape_locations.push(LocationFact {
                 kind: "glob_import".to_string(),
@@ -741,10 +918,30 @@ fn collect_use_tree(
         }
         UseTree::Group(group) => {
             for child in &group.items {
-                collect_use_tree(prefix, child, dependencies, escape_counts, escape_locations);
+                collect_use_tree(
+                    prefix,
+                    child,
+                    dependencies,
+                    dependency_references,
+                    escape_counts,
+                    escape_locations,
+                );
             }
         }
     }
+}
+
+fn push_dependency_reference(
+    references: &mut Vec<DependencyReferenceFact>,
+    raw_path: String,
+    span: Span,
+) {
+    let start = span.start();
+    references.push(DependencyReferenceFact {
+        raw_path,
+        line: start.line,
+        column: start.column,
+    });
 }
 
 fn join_path(prefix: &str, next: &str) -> String {
@@ -811,14 +1008,10 @@ fn path_attr_value(attrs: &[Attribute]) -> Option<String> {
     None
 }
 
-fn impl_type_name(ty: &Type) -> Option<String> {
+fn impl_type_path(ty: &Type) -> Option<String> {
     match ty {
-        Type::Path(path) => path
-            .path
-            .segments
-            .last()
-            .map(|segment| segment.ident.to_string()),
-        Type::Reference(reference) => impl_type_name(&reference.elem),
+        Type::Path(path) => Some(path_to_string(&path.path)),
+        Type::Reference(reference) => impl_type_path(&reference.elem),
         _ => None,
     }
 }
@@ -919,4 +1112,73 @@ fn span_line_span(span: Span) -> usize {
 
 fn print_usage() {
     eprintln!("Usage: rust_facts <paths_file>");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FactVisitor;
+    use syn::visit::Visit;
+
+    fn facts(source: &str) -> super::FileFacts {
+        let Ok(file) = syn::parse_file(source) else {
+            panic!("test source should parse");
+        };
+        let mut visitor = FactVisitor::new("src/lib.rs", source);
+        visitor.visit_file(&file);
+        visitor.into_facts()
+    }
+
+    #[test]
+    fn local_identifiers_do_not_become_module_dependencies() {
+        let facts = facts(
+            r#"
+mod service;
+fn local() {
+    let service = 1;
+    let _ = service;
+    crate::service::run();
+}
+"#,
+        );
+        assert!(
+            facts
+                .dependencies
+                .iter()
+                .any(|dependency| dependency == "crate::service::run")
+        );
+        assert!(
+            !facts
+                .dependencies
+                .iter()
+                .any(|dependency| dependency == "service")
+        );
+    }
+
+    #[test]
+    fn public_reexports_contribute_to_api_surface() {
+        let facts = facts("pub use crate::service::run;");
+        assert_eq!(facts.public_api_count, 1);
+    }
+
+    #[test]
+    fn function_metrics_preserve_nesting_and_paths() {
+        let facts = facts(
+            r#"
+fn nested(left: bool, right: bool) {
+    if left && right {
+        while left {
+            if right { break; }
+        }
+    }
+}
+"#,
+        );
+        let Some(function) = facts.functions.first() else {
+            panic!("function fact should exist");
+        };
+        assert_eq!(function.name, "nested");
+        assert_eq!(function.max_nesting_depth, 3);
+        assert!(function.branch_pressure >= 6);
+        assert!(function.path_pressure >= 4);
+    }
 }

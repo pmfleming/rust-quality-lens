@@ -15,6 +15,9 @@ pub(crate) struct CorrectnessFacts {
     pub(crate) failed_count: usize,
     pub(crate) unknown_count: usize,
     pub(crate) skipped_count: usize,
+    pub(crate) run_failed: bool,
+    pub(crate) compile_failed: bool,
+    pub(crate) line_coverage_percent: Option<f64>,
 }
 
 impl CorrectnessFacts {
@@ -24,6 +27,9 @@ impl CorrectnessFacts {
             "failed_count": self.failed_count,
             "unknown_count": self.unknown_count,
             "skipped_count": self.skipped_count,
+            "run_failed": self.run_failed,
+            "compile_failed": self.compile_failed,
+            "line_coverage_percent": self.line_coverage_percent,
         })
     }
 }
@@ -51,6 +57,7 @@ pub(crate) struct ArchitectureRiskScores {
     pub(crate) quality_risk: Option<f64>,
     pub(crate) total_score: Option<f64>,
     pub(crate) unknown_metrics: Vec<String>,
+    pub(crate) score_components: serde_json::Value,
 }
 
 pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> ArchitectureRiskScores {
@@ -93,7 +100,22 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
             } + (correctness.failed_count as f64 * 45.0).min(120.0)
                 + (correctness.unknown_count as f64 * 4.0).min(80.0)
                 + (correctness.skipped_count as f64 * 10.0).min(40.0)
-                + if correctness.test_count > 0 {
+                + if correctness.compile_failed {
+                    180.0
+                } else if correctness.run_failed && correctness.failed_count == 0 {
+                    140.0
+                } else {
+                    0.0
+                }
+                + correctness
+                    .line_coverage_percent
+                    .map(|coverage| ((70.0 - coverage).max(0.0) * 1.5).min(105.0))
+                    .unwrap_or(0.0)
+                + if correctness.test_count > 0
+                    || correctness
+                        .line_coverage_percent
+                        .is_some_and(|coverage| coverage > 0.0)
+                {
                     0.0
                 } else {
                     90.0
@@ -130,20 +152,187 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
             unknown_metrics.push(name.to_string());
         }
     }
-    let total_score = match (
-        maintainability_risk,
-        change_risk,
-        correctness_risk,
-        quality_risk,
-    ) {
-        (Some(maintainability), Some(change), Some(correctness), Some(quality)) => Some(round2(
-            maintainability + change + correctness + quality + architectural_risk,
-        )),
+    let total_score = match (change_risk, correctness_risk, quality_risk) {
+        (Some(change), Some(correctness), Some(quality)) => {
+            Some(round2(change + correctness + quality + architectural_risk))
+        }
         _ => {
             unknown_metrics.push("total_score".to_string());
             None
         }
     };
+    let maintainability_components = inputs.complexity_score.map(|complexity| {
+        serde_json::json!([
+            component("complexity_score", complexity, complexity),
+            component("sloc", inputs.sloc, (inputs.sloc as f64 * 0.12).min(70.0)),
+            component(
+                "public_api_count",
+                inputs.public_api_count,
+                (inputs.public_api_count as f64 * 2.5).min(30.0)
+            ),
+            component(
+                "outbound_dependencies",
+                scored_outbound_dependencies,
+                (scored_outbound_dependencies as f64 * 4.0).min(35.0)
+            ),
+            component(
+                "inbound_dependencies",
+                inputs.inbound_dependencies,
+                (inputs.inbound_dependencies as f64)
+                    .min((35.0 - scored_outbound_dependencies as f64 * 4.0).max(0.0))
+            ),
+        ])
+    });
+    let change_components = inputs.change.as_ref().map(|change| {
+        serde_json::json!([
+            component(
+                "churn",
+                change.churn,
+                (change.churn as f64 / 12.0).min(160.0)
+            ),
+            component(
+                "commit_count",
+                change.commit_count,
+                (change.commit_count as f64 * 2.5).min(100.0)
+            ),
+            component(
+                "contributor_count",
+                change.contributor_count,
+                (change.contributor_count as f64 * 14.0).min(80.0)
+            ),
+            component(
+                "defect_commit_count",
+                change.defect_commit_count,
+                (change.defect_commit_count as f64 * 18.0).min(90.0)
+            ),
+            component(
+                "missing_test_evidence",
+                !change.has_test_evidence,
+                if change.has_test_evidence { 0.0 } else { 90.0 }
+            ),
+        ])
+    });
+    let correctness_components = inputs.correctness.as_ref().map(|correctness| {
+        let run_failure = if correctness.compile_failed {
+            180.0
+        } else if correctness.run_failed && correctness.failed_count == 0 {
+            140.0
+        } else {
+            0.0
+        };
+        let coverage = correctness
+            .line_coverage_percent
+            .map(|coverage| ((70.0 - coverage).max(0.0) * 1.5).min(105.0))
+            .unwrap_or(0.0);
+        let missing_evidence = if correctness.test_count > 0
+            || correctness
+                .line_coverage_percent
+                .is_some_and(|coverage| coverage > 0.0)
+        {
+            0.0
+        } else {
+            90.0
+        };
+        serde_json::json!([
+            component(
+                "any_failed_tests",
+                correctness.failed_count > 0,
+                if correctness.failed_count > 0 {
+                    140.0
+                } else {
+                    0.0
+                }
+            ),
+            component(
+                "failed_test_count",
+                correctness.failed_count,
+                (correctness.failed_count as f64 * 45.0).min(120.0)
+            ),
+            component(
+                "unknown_test_count",
+                correctness.unknown_count,
+                (correctness.unknown_count as f64 * 4.0).min(80.0)
+            ),
+            component(
+                "skipped_test_count",
+                correctness.skipped_count,
+                (correctness.skipped_count as f64 * 10.0).min(40.0)
+            ),
+            component("test_run_failure", correctness.run_failed, run_failure),
+            component(
+                "line_coverage_below_70",
+                correctness.line_coverage_percent,
+                coverage
+            ),
+            component(
+                "missing_test_evidence",
+                missing_evidence > 0.0,
+                missing_evidence
+            ),
+        ])
+    });
+    let architectural_components = serde_json::json!([
+        component(
+            "outbound_dependencies",
+            scored_outbound_dependencies,
+            (scored_outbound_dependencies as f64 * 10.0).min(120.0)
+        ),
+        component(
+            "inbound_dependencies",
+            inputs.inbound_dependencies,
+            (inputs.inbound_dependencies as f64 * 8.0).min(120.0)
+        ),
+        component(
+            "layer_violations",
+            scored_layer_violations,
+            (scored_layer_violations as f64 * 32.0).min(120.0)
+        ),
+        component(
+            "cycle_membership",
+            inputs.in_cycle,
+            if inputs.in_cycle { 110.0 } else { 0.0 }
+        ),
+        component(
+            "large_module",
+            inputs.sloc,
+            if inputs.sloc >= 250 { 60.0 } else { 0.0 }
+        ),
+    ]);
+    let quality_components = serde_json::json!([
+        component(
+            "maintainability_risk",
+            maintainability_risk,
+            maintainability_risk.unwrap_or(0.0)
+        ),
+        component(
+            "locality_risk",
+            inputs.locality_risk,
+            inputs.locality_risk.unwrap_or(0.0)
+        ),
+        component(
+            "leverage_pressure",
+            inputs.leverage_pressure,
+            inputs.leverage_pressure.unwrap_or(0.0)
+        ),
+    ]);
+    let total_components = serde_json::json!([
+        component("quality_risk", quality_risk, quality_risk.unwrap_or(0.0)),
+        component("change_risk", change_risk, change_risk.unwrap_or(0.0)),
+        component(
+            "correctness_risk",
+            correctness_risk,
+            correctness_risk.unwrap_or(0.0)
+        ),
+        component("architectural_risk", architectural_risk, architectural_risk),
+    ]);
+    let score_components = serde_json::json!({
+        "maintainability_risk": maintainability_components,
+        "change_risk": change_components,
+        "correctness_risk": correctness_components,
+        "architectural_risk": architectural_components,
+        "quality_risk": quality_components,
+        "total_score": total_components,
+    });
     ArchitectureRiskScores {
         maintainability_risk,
         change_risk,
@@ -152,12 +341,23 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
         quality_risk,
         total_score,
         unknown_metrics,
+        score_components,
     }
+}
+
+fn component(signal: &str, raw: impl serde::Serialize, contribution: f64) -> serde_json::Value {
+    serde_json::json!({
+        "signal": signal,
+        "raw": raw,
+        "contribution": round2(contribution),
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ArchitectureRiskInputs, ChangeFacts, CorrectnessFacts, architecture_risk_scores};
+    use super::{
+        ArchitectureRiskInputs, ChangeFacts, CorrectnessFacts, architecture_risk_scores, round2,
+    };
 
     #[test]
     fn total_is_unknown_until_required_scores_are_known() {
@@ -204,6 +404,9 @@ mod tests {
                 failed_count: 0,
                 unknown_count: 0,
                 skipped_count: 0,
+                run_failed: false,
+                compile_failed: false,
+                line_coverage_percent: None,
             }),
             locality_risk: Some(2.0),
             leverage_pressure: Some(3.0),
@@ -213,6 +416,25 @@ mod tests {
         assert!(scored.total_score.is_some());
         assert!(scored.unknown_metrics.is_empty());
         assert_eq!(scored.architectural_risk, 160.0);
+        let (Some(total), Some(change), Some(correctness), Some(quality)) = (
+            scored.total_score,
+            scored.change_risk,
+            scored.correctness_risk,
+            scored.quality_risk,
+        ) else {
+            panic!("complete inputs should produce complete scores");
+        };
+        assert_eq!(
+            total,
+            round2(change + correctness + quality + scored.architectural_risk)
+        );
+        let explained_total = scored.score_components["total_score"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|component| component["contribution"].as_f64())
+            .sum::<f64>();
+        assert_eq!(total, round2(explained_total));
     }
 
     #[test]
@@ -236,6 +458,9 @@ mod tests {
                 failed_count: 0,
                 unknown_count: 0,
                 skipped_count: 0,
+                run_failed: false,
+                compile_failed: false,
+                line_coverage_percent: None,
             }),
             locality_risk: Some(2.0),
             leverage_pressure: Some(3.0),
@@ -279,6 +504,6 @@ mod tests {
         });
 
         assert!(entrypoint.architectural_risk < normal.architectural_risk);
-        assert!(entrypoint.maintainability_risk.unwrap() < normal.maintainability_risk.unwrap());
+        assert!(entrypoint.maintainability_risk < normal.maintainability_risk);
     }
 }

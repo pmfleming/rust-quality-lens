@@ -2,7 +2,7 @@ use crate::util::{
     absolutize, normalize_slashes, repo_root, resolve_config_path, resolve_project_path,
 };
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,19 @@ struct RawConfig {
 #[derive(Debug, Deserialize)]
 struct RawRustConfig {
     helper_manifest: Option<PathBuf>,
+    identity_resolution: Option<SemanticIdentityMode>,
+    rust_analyzer: Option<PathBuf>,
+    identity_timeout_seconds: Option<u64>,
+    identity_offline: Option<bool>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SemanticIdentityMode {
+    #[default]
+    Auto,
+    Required,
+    Disabled,
 }
 
 #[derive(Clone, Debug)]
@@ -30,6 +43,10 @@ pub(crate) struct LensConfig {
     pub(crate) source_roots: Vec<String>,
     pub(crate) output_dir: PathBuf,
     pub(crate) helper_manifest: PathBuf,
+    pub(crate) identity_resolution: SemanticIdentityMode,
+    pub(crate) rust_analyzer: PathBuf,
+    pub(crate) identity_timeout_seconds: u64,
+    pub(crate) identity_offline: bool,
 }
 
 impl LensConfig {
@@ -70,12 +87,30 @@ impl LensConfig {
             &project_root,
         );
         let default_helper_manifest = repo_root()?.join("rust_helpers").join("Cargo.toml");
+        let rust = raw.rust;
         let helper_manifest = resolve_project_path(
-            raw.rust
-                .and_then(|rust| rust.helper_manifest)
+            rust.as_ref()
+                .and_then(|rust| rust.helper_manifest.clone())
                 .unwrap_or(default_helper_manifest),
             &project_root,
         );
+        let identity_resolution = rust
+            .as_ref()
+            .and_then(|rust| rust.identity_resolution)
+            .unwrap_or_default();
+        let rust_analyzer = rust
+            .as_ref()
+            .and_then(|rust| rust.rust_analyzer.clone())
+            .unwrap_or_else(|| PathBuf::from("rust-analyzer"));
+        let identity_timeout_seconds = rust
+            .as_ref()
+            .and_then(|rust| rust.identity_timeout_seconds)
+            .unwrap_or(60)
+            .max(1);
+        let identity_offline = rust
+            .as_ref()
+            .and_then(|rust| rust.identity_offline)
+            .unwrap_or(true);
         let project_name = raw.project_name.unwrap_or_else(|| {
             project_root
                 .file_name()
@@ -89,6 +124,10 @@ impl LensConfig {
             source_roots,
             output_dir,
             helper_manifest,
+            identity_resolution,
+            rust_analyzer,
+            identity_timeout_seconds,
+            identity_offline,
         })
     }
 }
@@ -150,6 +189,10 @@ output_dir = "target/analysis"
 
 [rust]
 helper_manifest = "{helper_manifest}"
+identity_resolution = "auto"
+rust_analyzer = "rust-analyzer"
+identity_timeout_seconds = 60
+identity_offline = true
 "#
         ),
     )?;
@@ -176,7 +219,11 @@ pub(crate) fn config_schema() -> Value {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                    "helper_manifest": {"type": "string"}
+                    "helper_manifest": {"type": "string"},
+                    "identity_resolution": {"type": "string", "enum": ["auto", "required", "disabled"], "default": "auto"},
+                    "rust_analyzer": {"type": "string", "default": "rust-analyzer"},
+                    "identity_timeout_seconds": {"type": "integer", "minimum": 1, "default": 60},
+                    "identity_offline": {"type": "boolean", "default": true}
                 }
             }
         }

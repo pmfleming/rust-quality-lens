@@ -30,8 +30,26 @@ pub(crate) fn source_confidence(paths: &[String], facts: &[FileFacts]) -> Value 
     if !files.is_empty() && facts.is_empty() {
         missing.push("Rust syntax fact extraction returned no files");
     }
-    let unsupported = unsupported_patterns(facts);
+    let mut unsupported = unsupported_patterns(facts);
+    let identity_fallback_files = facts
+        .iter()
+        .filter(|fact| {
+            !matches!(
+                fact.identity_backend.as_str(),
+                "cargo_metadata" | "cargo_manifest"
+            )
+        })
+        .count();
+    if identity_fallback_files > 0 {
+        unsupported.push(format!(
+            "{identity_fallback_files} files used path-based identity fallback"
+        ));
+    }
     let complete = missing.is_empty() && unsupported.is_empty();
+    let cargo_metadata_identity_files = facts
+        .iter()
+        .filter(|fact| fact.identity_backend == "cargo_metadata")
+        .count();
     json!({
         "complete": complete,
         "partial": !complete,
@@ -40,6 +58,9 @@ pub(crate) fn source_confidence(paths: &[String], facts: &[FileFacts]) -> Value 
         "observed_inputs": {
             "rust_source_files": files.len(),
             "rust_syntax_fact_files": facts.len(),
+            "cargo_metadata_identity_files": cargo_metadata_identity_files,
+            "cargo_manifest_identity_files": facts.iter().filter(|fact| fact.identity_backend == "cargo_manifest").count(),
+            "identity_fallback_files": identity_fallback_files,
         },
         "missing_input": missing,
         "stale_input": [],

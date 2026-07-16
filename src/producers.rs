@@ -7,6 +7,7 @@ use crate::facts::RunContext;
 
 mod clones;
 mod correctness;
+mod coverage;
 mod escape_hatches;
 mod hotspots;
 mod map;
@@ -28,6 +29,7 @@ pub(crate) fn produce_measurement(
         MeasureTool::Locality => topology::locality(context),
         MeasureTool::Leverage => topology::leverage(context),
         MeasureTool::Map => map::produce(config, context),
+        MeasureTool::Coverage => coverage::produce(config, context),
         MeasureTool::All => unreachable!(),
     }
 }

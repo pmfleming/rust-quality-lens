@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use crate::config::LensConfig;
 use crate::facts::FileFacts;
-use crate::measurement::{module_for_path, source_confidence};
+use crate::measurement::{MODEL_VERSION, module_for_path, source_confidence};
 use crate::util::{iter_rust_files, normalize_slashes};
 
 mod history;
@@ -31,6 +31,7 @@ pub(crate) struct MapArtifacts {
     pub(crate) correctness: Option<CorrectnessIndex>,
     pub(crate) locality: Option<BTreeMap<String, f64>>,
     pub(crate) leverage: Option<BTreeMap<String, f64>>,
+    pub(crate) coverage: Option<BTreeMap<String, f64>>,
     reads: Vec<ArtifactRead>,
 }
 
@@ -40,6 +41,7 @@ impl MapArtifacts {
         let correctness_read = read_artifact(config, "correctness_review.json", true);
         let locality_read = read_artifact(config, "locality_metrics.json", true);
         let leverage_read = read_artifact(config, "leverage_metrics.json", true);
+        let coverage_read = read_artifact(config, "coverage.json", false);
         let hotspots = hotspot_read.value.as_ref().map(indices::hotspot_index);
         let correctness = correctness_read
             .value
@@ -53,12 +55,20 @@ impl MapArtifacts {
             .value
             .as_ref()
             .map(|value| indices::metric_index(value, &["pressure_score", "leverage_pressure"]));
+        let coverage = coverage_read.value.as_ref().map(indices::coverage_index);
         Self {
             hotspots,
             correctness,
             locality,
             leverage,
-            reads: vec![hotspot_read, correctness_read, locality_read, leverage_read],
+            coverage,
+            reads: vec![
+                hotspot_read,
+                correctness_read,
+                locality_read,
+                leverage_read,
+                coverage_read,
+            ],
         }
     }
 
@@ -107,14 +117,25 @@ fn read_artifact(config: &LensConfig, file_name: &'static str, required: bool) -
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
     {
-        Some(value) => ArtifactRead {
-            name: file_name,
+        Some(value) if artifact_contract_error(&value).is_some() => artifact_read(
+            file_name,
             path,
             required,
-            status: "available",
-            reason: None,
-            value: Some(value),
-        },
+            "incompatible",
+            artifact_contract_error(&value).unwrap_or("artifact contract is incompatible"),
+        ),
+        Some(value) => {
+            let partial = value["measurement_confidence"]["partial"] == true;
+            ArtifactRead {
+                name: file_name,
+                path,
+                required,
+                status: if partial { "partial" } else { "available" },
+                reason: partial
+                    .then(|| "artifact reports partial measurement confidence".to_string()),
+                value: Some(value),
+            }
+        }
         None => artifact_read(
             file_name,
             path,
@@ -123,6 +144,29 @@ fn read_artifact(config: &LensConfig, file_name: &'static str, required: bool) -
             "artifact is not valid JSON",
         ),
     }
+}
+
+fn artifact_contract_error(value: &Value) -> Option<&'static str> {
+    let version = value.get("schema_version")?.as_u64();
+    if version != Some(2) {
+        return Some("unsupported artifact schema version");
+    }
+    if value.get("risk_model_version").and_then(Value::as_u64) != Some(MODEL_VERSION) {
+        return Some("artifact uses a different risk model version");
+    }
+    if value.get("measurement_confidence").is_none()
+        || (value.get("records").is_none() && value.get("data").is_none())
+    {
+        return Some("version 2 artifact is missing required envelope fields");
+    }
+    None
+}
+
+pub(super) fn artifact_payload(value: &Value) -> &Value {
+    value
+        .get("records")
+        .or_else(|| value.get("data"))
+        .unwrap_or(value)
 }
 
 fn artifact_read(
@@ -184,8 +228,18 @@ pub(crate) fn map_measurement_confidence(
             .filter(|read| read.status == "stale")
             .map(|read| read.name),
     );
+    let has_partial_artifact = push_artifact_inputs(
+        object,
+        "unsupported_pattern",
+        artifacts
+            .reads
+            .iter()
+            .filter(|read| read.status == "partial" && read.required)
+            .map(|read| read.name),
+    );
     let partial = has_missing
         || has_stale
+        || has_partial_artifact
         || object["unsupported_pattern"]
             .as_array()
             .is_some_and(|items| !items.is_empty());
@@ -222,8 +276,9 @@ fn push_git_missing(
 }
 
 pub(super) fn module_from_record(row: &Value) -> Option<String> {
-    row["module_key"]
+    row["module_id"]
         .as_str()
+        .or_else(|| row["module_key"].as_str())
         .or_else(|| row["module"].as_str())
         .map(str::to_string)
         .or_else(|| {

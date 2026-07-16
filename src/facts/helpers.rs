@@ -22,6 +22,13 @@ pub(super) fn rust_facts_for_paths(
         fact.target_kind = metadata.target_kind;
         fact.entrypoint_kind = metadata.entrypoint_kind;
         fact.is_entrypoint = fact.entrypoint_kind.is_some();
+        fact.package_name = metadata.package_name;
+        fact.target_name = metadata.target_name;
+        fact.module_id = format!(
+            "{}::{}::{}",
+            fact.package_name, fact.target_name, fact.module_key
+        );
+        fact.identity_backend = metadata.identity_backend;
     }
     Ok(facts)
 }
@@ -165,22 +172,64 @@ fn canonical_or_original(path: &Path) -> PathBuf {
 struct TargetMetadata {
     target_kind: String,
     entrypoint_kind: Option<String>,
+    package_name: String,
+    target_name: String,
+    identity_backend: String,
+}
+
+struct CargoTarget {
+    src_path: PathBuf,
+    manifest_dir: PathBuf,
+    package_name: String,
+    target_name: String,
+    kind: String,
+    identity_backend: String,
 }
 
 fn target_metadata(
     config: &LensConfig,
     path: &str,
-    cargo_targets: &[(PathBuf, &'static str)],
+    cargo_targets: &[CargoTarget],
 ) -> TargetMetadata {
     let absolute = path_key(resolve_project_path(
         PathBuf::from(path),
         &config.project_root,
     ));
-    if let Some((_, kind)) = cargo_targets
+    if let Some(target) = cargo_targets
         .iter()
-        .find(|(target_path, _)| path_key(target_path) == absolute)
+        .find(|target| path_key(&target.src_path) == absolute)
     {
-        return target_metadata_for_kind(kind);
+        return target_metadata_for_target(target, &target.kind);
+    }
+    let absolute_path = canonical_or_original(&resolve_project_path(
+        PathBuf::from(path),
+        &config.project_root,
+    ));
+    if let Some(package) = cargo_targets
+        .iter()
+        .filter(|target| absolute_path.starts_with(&target.manifest_dir))
+        .max_by_key(|target| target.manifest_dir.components().count())
+    {
+        let candidate_targets = cargo_targets
+            .iter()
+            .filter(|target| target.package_name == package.package_name)
+            .filter(|target| {
+                target
+                    .src_path
+                    .parent()
+                    .is_some_and(|parent| absolute_path.starts_with(parent))
+            })
+            .collect::<Vec<_>>();
+        let target_name = if candidate_targets.len() == 1 {
+            candidate_targets[0].target_name.clone()
+        } else {
+            "shared".to_string()
+        };
+        let mut metadata = target_metadata_for_kind("module");
+        metadata.package_name = package.package_name.clone();
+        metadata.target_name = target_name;
+        metadata.identity_backend = package.identity_backend.clone();
+        return metadata;
     }
 
     let relative = relative_project_path(config, path);
@@ -203,58 +252,140 @@ fn target_metadata_for_kind(kind: &'static str) -> TargetMetadata {
     TargetMetadata {
         target_kind: kind.to_string(),
         entrypoint_kind,
+        package_name: "unknown".to_string(),
+        target_name: "shared".to_string(),
+        identity_backend: "path_fallback".to_string(),
     }
 }
 
-fn cargo_targets(config: &LensConfig) -> Vec<(PathBuf, &'static str)> {
-    let cargo = config.project_root.join("Cargo.toml");
-    let Ok(text) = std::fs::read_to_string(cargo) else {
-        return Vec::new();
-    };
-    let Ok(value) = text.parse::<toml::Value>() else {
-        return Vec::new();
-    };
-    let mut targets = Vec::new();
-    if let Some(path) = value
-        .get("lib")
-        .and_then(|lib| lib.get("path"))
-        .and_then(toml::Value::as_str)
-    {
-        targets.push((
-            resolve_project_path(PathBuf::from(path), &config.project_root),
-            "lib",
-        ));
+fn target_metadata_for_target(target: &CargoTarget, kind: &str) -> TargetMetadata {
+    let entrypoint_kind =
+        matches!(kind, "bin" | "test" | "bench" | "example").then(|| kind.to_string());
+    TargetMetadata {
+        target_kind: kind.to_string(),
+        entrypoint_kind,
+        package_name: target.package_name.clone(),
+        target_name: target.target_name.clone(),
+        identity_backend: target.identity_backend.clone(),
     }
-    for (key, kind) in [
-        ("bin", "bin"),
-        ("test", "test"),
-        ("bench", "bench"),
-        ("example", "example"),
-    ] {
-        targets.extend(cargo_target_paths(&value, key, kind, &config.project_root));
+}
+
+fn cargo_targets(config: &LensConfig) -> Vec<CargoTarget> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(&config.project_root)
+        .output();
+    let Ok(output) = output else {
+        return manifest_targets(config);
+    };
+    if !output.status.success() {
+        return manifest_targets(config);
+    }
+    let Ok(metadata) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return Vec::new();
+    };
+    metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|package| {
+            let package_name = package["name"].as_str().unwrap_or("unknown").to_string();
+            let manifest_dir = package["manifest_path"]
+                .as_str()
+                .and_then(|path| Path::new(path).parent())
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| config.project_root.clone());
+            package["targets"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(move |target| {
+                    Some(CargoTarget {
+                        src_path: PathBuf::from(target["src_path"].as_str()?),
+                        manifest_dir: manifest_dir.clone(),
+                        package_name: package_name.clone(),
+                        target_name: target["name"].as_str()?.to_string(),
+                        kind: cargo_target_kind(&target["kind"]),
+                        identity_backend: "cargo_metadata".to_string(),
+                    })
+                })
+        })
+        .collect()
+}
+
+fn manifest_targets(config: &LensConfig) -> Vec<CargoTarget> {
+    let manifest_path = config.project_root.join("Cargo.toml");
+    let Ok(contents) = std::fs::read_to_string(&manifest_path) else {
+        return Vec::new();
+    };
+    let Ok(manifest) = toml::from_str::<toml::Value>(&contents) else {
+        return Vec::new();
+    };
+    let package_name = manifest["package"]["name"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let mut targets = Vec::new();
+    for (kind, default_path) in [("lib", "src/lib.rs"), ("bin", "src/main.rs")] {
+        let path = config.project_root.join(default_path);
+        if path.is_file() {
+            targets.push(CargoTarget {
+                src_path: path,
+                manifest_dir: config.project_root.clone(),
+                package_name: package_name.clone(),
+                target_name: package_name.clone(),
+                kind: kind.to_string(),
+                identity_backend: "cargo_manifest".to_string(),
+            });
+        }
+    }
+    for kind in ["bin", "test", "bench", "example"] {
+        for target in manifest
+            .get(kind)
+            .and_then(toml::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(path) = target.get("path").and_then(toml::Value::as_str) else {
+                continue;
+            };
+            targets.push(CargoTarget {
+                src_path: config.project_root.join(path),
+                manifest_dir: config.project_root.clone(),
+                package_name: package_name.clone(),
+                target_name: target
+                    .get("name")
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or(kind)
+                    .to_string(),
+                kind: kind.to_string(),
+                identity_backend: "cargo_manifest".to_string(),
+            });
+        }
     }
     targets
 }
 
-fn cargo_target_paths(
-    value: &toml::Value,
-    key: &str,
-    kind: &'static str,
-    project_root: &Path,
-) -> Vec<(PathBuf, &'static str)> {
-    value
-        .get(key)
-        .and_then(toml::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|item| item.get("path").and_then(toml::Value::as_str))
-        .map(|path| {
-            (
-                resolve_project_path(PathBuf::from(path), project_root),
-                kind,
-            )
-        })
-        .collect()
+fn cargo_target_kind(kinds: &Value) -> String {
+    for candidate in ["lib", "bin", "test", "bench", "example"] {
+        if kinds
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|kind| kind == candidate)
+        {
+            return candidate.to_string();
+        }
+    }
+    if kinds.as_array().into_iter().flatten().any(|kind| {
+        matches!(
+            kind.as_str(),
+            Some("proc-macro" | "rlib" | "cdylib" | "dylib" | "staticlib")
+        )
+    }) {
+        return "lib".to_string();
+    }
+    "module".to_string()
 }
 
 fn relative_project_path(config: &LensConfig, path: &str) -> String {

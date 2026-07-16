@@ -79,7 +79,7 @@ pub(crate) fn run_tests(config: &LensConfig) -> Result<HashMap<String, TestStatu
     statuses.insert(
         "__run__".to_string(),
         TestStatus {
-            status: run_status(output.status.success()),
+            status: run_status(output.status.success(), &stdout, &stderr),
             duration: Some(duration),
             stdout_tail: Some(tail(&stdout, 40)),
             stderr_tail: Some(tail(&stderr, 40)),
@@ -88,8 +88,15 @@ pub(crate) fn run_tests(config: &LensConfig) -> Result<HashMap<String, TestStatu
     Ok(statuses)
 }
 
-fn run_status(success: bool) -> String {
-    if success { "passed" } else { "failed" }.to_string()
+fn run_status(success: bool, stdout: &str, stderr: &str) -> String {
+    if success {
+        "passed"
+    } else if stdout.contains("could not compile") || stderr.contains("could not compile") {
+        "compile_failed"
+    } else {
+        "failed"
+    }
+    .to_string()
 }
 
 fn parse_cargo_test_statuses(stdout: &str) -> HashMap<String, TestStatus> {
@@ -152,8 +159,8 @@ fn test_status(status: &str) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::correctness_paths;
-    use crate::config::LensConfig;
+    use super::{correctness_paths, run_status};
+    use crate::config::{LensConfig, SemanticIdentityMode};
     use crate::util::normalize_slashes;
     use std::path::PathBuf;
 
@@ -191,6 +198,10 @@ path = "tests/integration.rs"
             source_roots: vec![root.path().join("src").to_string_lossy().to_string()],
             output_dir: root.path().join("target/analysis"),
             helper_manifest: PathBuf::from("unused"),
+            identity_resolution: SemanticIdentityMode::Disabled,
+            rust_analyzer: PathBuf::from("rust-analyzer"),
+            identity_timeout_seconds: 1,
+            identity_offline: true,
         };
         let paths = correctness_paths(&config);
         assert!(
@@ -218,5 +229,15 @@ path = "tests/integration.rs"
                 .iter()
                 .any(|path| normalize_slashes(path).contains("not-a-rust-target.rs"))
         );
+    }
+
+    #[test]
+    fn run_status_distinguishes_compilation_failure() {
+        assert_eq!(run_status(true, "", ""), "passed");
+        assert_eq!(
+            run_status(false, "", "error: could not compile `demo`"),
+            "compile_failed"
+        );
+        assert_eq!(run_status(false, "test failed", ""), "failed");
     }
 }

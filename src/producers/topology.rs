@@ -45,8 +45,13 @@ pub(super) fn locality(context: &RunContext) -> Result<Value> {
                 } else {
                     vec!["stable"]
                 };
+                let identity_backends = dependency_identity_backends(&graph, &module.key);
                 json!({
-                    "module_key": module.key,
+                    "module_key": module.module_key,
+                    "module_id": module.id,
+                    "package_name": module.package_name,
+                    "target_name": module.target_name,
+                    "identity_backend": module.identity_backend,
                     "path": module.path,
                     "target_kind": module.target_kind,
                     "entrypoint_kind": module.entrypoint_kind,
@@ -57,6 +62,11 @@ pub(super) fn locality(context: &RunContext) -> Result<Value> {
                     "locality_risk": round2(risk),
                     "locality_score": round2(100.0 - risk),
                     "signals": signals,
+                    "dependency_identity_backends": identity_backends,
+                    "score_components": [
+                        {"signal": "outbound_over_allowance", "raw": counts.outbound.saturating_sub(outbound_free), "contribution": (counts.outbound.saturating_sub(outbound_free) * 3) as f64},
+                        {"signal": "inbound_over_12", "raw": counts.inbound.saturating_sub(12), "contribution": round2(counts.inbound.saturating_sub(12) as f64 * 0.75)},
+                    ],
                     "risk_model_id": MODEL_ID,
                     "risk_model_version": MODEL_VERSION,
                     "risk_calibration": "locality",
@@ -78,8 +88,13 @@ pub(super) fn leverage(context: &RunContext) -> Result<Value> {
                 let score = (68.0 + counts.inbound as f64 * 2.5
                     - counts.outbound as f64 * outbound_weight)
                     .clamp(0.0, 100.0);
+                let identity_backends = dependency_identity_backends(&graph, &module.key);
                 json!({
-                    "module_key": module.key,
+                    "module_key": module.module_key,
+                    "module_id": module.id,
+                    "package_name": module.package_name,
+                    "target_name": module.target_name,
+                    "identity_backend": module.identity_backend,
                     "path": module.path,
                     "target_kind": module.target_kind,
                     "entrypoint_kind": module.entrypoint_kind,
@@ -90,6 +105,12 @@ pub(super) fn leverage(context: &RunContext) -> Result<Value> {
                     "leverage_score": round2(score),
                     "pressure_score": round2(100.0 - score),
                     "signals": if score >= 68.0 { vec!["high leverage"] } else { vec!["pressure"] },
+                    "dependency_identity_backends": identity_backends,
+                    "score_components": [
+                        {"signal": "base", "raw": 68.0, "contribution": 68.0},
+                        {"signal": "inbound_reach", "raw": counts.inbound, "contribution": round2(counts.inbound as f64 * 2.5)},
+                        {"signal": "outbound_pressure", "raw": counts.outbound, "contribution": round2(-(counts.outbound as f64 * outbound_weight))},
+                    ],
                     "risk_model_id": MODEL_ID,
                     "risk_model_version": MODEL_VERSION,
                     "risk_calibration": "leverage",
@@ -99,10 +120,21 @@ pub(super) fn leverage(context: &RunContext) -> Result<Value> {
     ))
 }
 
+fn dependency_identity_backends(graph: &ModuleGraph, source: &str) -> Vec<String> {
+    graph
+        .dependency_provenance
+        .iter()
+        .filter(|((edge_source, _), _)| edge_source == source)
+        .flat_map(|(_, backends)| backends.iter().cloned())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 fn module_layer(module: &ModuleInfo) -> &'static str {
     if module.is_entrypoint {
         "Entrypoint"
     } else {
-        classify_module(&module.key)
+        classify_module(&module.module_key)
     }
 }

@@ -43,7 +43,12 @@ impl GitHistoryIndex {
             defect_commit_count: facts
                 .map(|facts| facts.defect_commits.len())
                 .unwrap_or_default(),
-            has_test_evidence: correctness.is_some_and(|facts| facts.test_count > 0),
+            has_test_evidence: correctness.is_some_and(|facts| {
+                facts.test_count > 0
+                    || facts
+                        .line_coverage_percent
+                        .is_some_and(|coverage| coverage > 0.0)
+            }),
         })
     }
 
@@ -89,7 +94,7 @@ pub(crate) fn git_history_facts(config: &LensConfig, graph: &ModuleGraph) -> Git
         _ => return unavailable("git log could not be read"),
     };
     GitHistoryIndex {
-        by_module: parse_git_history(&String::from_utf8_lossy(&output.stdout), graph),
+        by_module: parse_git_history(config, &String::from_utf8_lossy(&output.stdout), graph),
         status: "available",
         reason: None,
     }
@@ -118,26 +123,34 @@ fn git_log(config: &LensConfig, graph: &ModuleGraph) -> std::io::Result<std::pro
     command
         .arg("log")
         .arg("--numstat")
+        .arg("--no-renames")
         .arg("--format=commit:%H%x09%an%x09%s")
         .arg("--");
-    for root in module_source_roots(graph) {
+    for root in module_source_roots(config, graph) {
         command.arg(root);
     }
     command.current_dir(&config.project_root).output()
 }
 
-fn parse_git_history(text: &str, graph: &ModuleGraph) -> BTreeMap<String, ModuleGitFacts> {
+fn parse_git_history(
+    config: &LensConfig,
+    text: &str,
+    graph: &ModuleGraph,
+) -> BTreeMap<String, ModuleGitFacts> {
     let mut by_module = BTreeMap::new();
     let mut current = CommitAccumulator::default();
-    for line in text.lines().chain(std::iter::once("")) {
-        if line.starts_with("commit:") || line.is_empty() {
-            current.flush_into(&mut by_module);
+    for line in text.lines() {
+        if line.starts_with("commit:") {
+            std::mem::take(&mut current).flush_into(&mut by_module);
             current = CommitAccumulator::from_header(line);
-        } else if let Some(module) = changed_module(line, graph) {
+        } else if !line.is_empty()
+            && let Some(module) = changed_module(config, line, graph)
+        {
             current.modules.insert(module.name);
             by_module.entry(module.name_for_churn).or_default().churn += module.churn;
         }
     }
+    current.flush_into(&mut by_module);
     by_module
 }
 
@@ -147,12 +160,12 @@ struct ChangedModule {
     churn: u64,
 }
 
-fn changed_module(line: &str, graph: &ModuleGraph) -> Option<ChangedModule> {
+fn changed_module(config: &LensConfig, line: &str, graph: &ModuleGraph) -> Option<ChangedModule> {
     let parts = line.split('\t').collect::<Vec<_>>();
     if parts.len() < 3 {
         return None;
     }
-    let module = git_path_to_module(parts[2], graph)?;
+    let module = git_path_to_module(config, parts[2], graph)?;
     let added = parts[0].parse::<u64>().unwrap_or(0);
     let deleted = parts[1].parse::<u64>().unwrap_or(0);
     Some(ChangedModule {
@@ -202,26 +215,45 @@ impl CommitAccumulator {
 }
 
 fn is_defect_subject(subject: &str) -> bool {
-    let lower = subject.to_lowercase();
-    [
-        "bug",
-        "fix",
-        "fixed",
-        "defect",
-        "regression",
-        "panic",
-        "crash",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
+    subject
+        .to_lowercase()
+        .split(|character: char| !character.is_alphanumeric())
+        .any(|word| {
+            matches!(
+                word,
+                "bug"
+                    | "bugs"
+                    | "bugfix"
+                    | "fix"
+                    | "fixes"
+                    | "fixed"
+                    | "defect"
+                    | "defects"
+                    | "regression"
+                    | "regressions"
+                    | "panic"
+                    | "crash"
+            )
+        })
 }
 
-fn module_source_roots(graph: &ModuleGraph) -> Vec<String> {
+fn module_source_roots(config: &LensConfig, graph: &ModuleGraph) -> Vec<String> {
     let mut roots = BTreeSet::new();
     for module in graph.modules.values() {
-        if let Some(first) = normalize_slashes(&module.path).split('/').next() {
+        if let Some(first) = relative_to_project_root(&module.path, config)
+            .split('/')
+            .find(|part| !part.is_empty())
+        {
             roots.insert(first.to_string());
         }
+    }
+    if roots.is_empty() {
+        roots.extend(config.source_roots.iter().filter_map(|root| {
+            normalize_slashes(Path::new(root))
+                .split('/')
+                .find(|part| !part.is_empty())
+                .map(str::to_string)
+        }));
     }
     if roots.is_empty() {
         roots.insert("src".to_string());
@@ -229,15 +261,67 @@ fn module_source_roots(graph: &ModuleGraph) -> Vec<String> {
     roots.into_iter().collect()
 }
 
-fn git_path_to_module(path: &str, graph: &ModuleGraph) -> Option<String> {
+fn git_path_to_module(config: &LensConfig, path: &str, graph: &ModuleGraph) -> Option<String> {
     let normalized = normalize_slashes(Path::new(path));
     graph
         .modules
         .values()
-        .find(|module| normalize_slashes(&module.path) == normalized)
+        .find(|module| relative_to_project_root(&module.path, config) == normalized)
         .map(|module| module.key.clone())
         .or_else(|| {
             let module = module_for_path(&normalized);
             graph.modules.contains_key(&module).then_some(module)
         })
+}
+
+fn relative_to_project_root(path: &Path, config: &LensConfig) -> String {
+    let relative = path.strip_prefix(&config.project_root).unwrap_or(path);
+    normalize_slashes(relative)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_defect_subject, parse_git_history};
+    use crate::config::{LensConfig, SemanticIdentityMode};
+    use crate::facts::module_graph;
+    use std::path::PathBuf;
+
+    #[test]
+    fn blank_line_between_header_and_numstat_keeps_commit_attribution() {
+        let config = LensConfig {
+            project_name: "history".to_string(),
+            project_root: PathBuf::from("/project"),
+            source_roots: vec!["/project/src".to_string()],
+            output_dir: PathBuf::from("/project/target/analysis"),
+            helper_manifest: PathBuf::from("unused"),
+            identity_resolution: SemanticIdentityMode::Disabled,
+            rust_analyzer: PathBuf::from("rust-analyzer"),
+            identity_timeout_seconds: 1,
+            identity_offline: true,
+        };
+        let facts = vec![crate::facts::FileFacts::test_fact(
+            "/project/src/lib.rs",
+            "lib",
+        )];
+        let graph = module_graph(&facts);
+        let history = parse_git_history(
+            &config,
+            "commit:abc\tAda\tfix parser\n\n10\t2\tsrc/lib.rs\n",
+            &graph,
+        );
+        let Some(facts) = history.get("test::shared::lib") else {
+            panic!("lib history should exist");
+        };
+        assert_eq!(facts.churn, 12);
+        assert_eq!(facts.commits.len(), 1);
+        assert_eq!(facts.contributors.len(), 1);
+        assert_eq!(facts.defect_commits.len(), 1);
+    }
+
+    #[test]
+    fn defect_subject_matching_uses_words_not_substrings() {
+        assert!(is_defect_subject("fix parser crash"));
+        assert!(!is_defect_subject("refresh fixture snapshots"));
+        assert!(!is_defect_subject("prefix command output"));
+    }
 }

@@ -1,0 +1,19 @@
+{
+  "dependency_edges": [
+    ["mini-rust-project::mini-rust-project::lib", "mini-rust-project::mini-rust-project::math"]
+  ],
+  "hotspots": [
+    {
+      "max_function_score": 34.94,
+      "module_key": "math",
+      "p95_function_score": 34.94,
+      "score": 30.75
+    },
+    {
+      "max_function_score": 6.38,
+      "module_key": "lib",
+      "p95_function_score": 6.38,
+      "score": 6.14
+    }
+  ]
+}

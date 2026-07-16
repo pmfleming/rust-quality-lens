@@ -8,18 +8,19 @@ vendor dashboard code or project-specific scripts.
 
 ## What It Measures
 
-- complexity hotspots
+- function- and module-level complexity hotspots with score explanations
 - token, AST, module-responsibility, and test-body duplication groups
 - Rust escape hatches such as unsafe, FFI, raw memory, globals, and lint suppressions
 - type health for broad structs, large enums, and wide impl surfaces
 - code locality and hidden coupling
 - architecture leverage and style pressure
-- Cargo target and tool entrypoint awareness
-- correctness catalog coverage
+- Cargo-qualified package, target, and module identities
+- correctness catalog and aggregate coverage attribution
 - architecture risk map data
 
 The architecture map uses a versioned risk model so raw facts and derived risk
-scores remain separate. See `docs/risk-model-v1.md` for the current weights.
+scores remain separate. See `docs/risk-model-v4.md` for the current weights and
+empirical calibration.
 Recent extractor and scoring upgrades are summarized in
 `docs/measurement-upgrades.md`.
 
@@ -32,6 +33,12 @@ project_name = "my-rust-project"
 project_root = "."
 source_roots = ["src"]
 output_dir = "target/analysis"
+
+[rust]
+identity_resolution = "auto"
+rust_analyzer = "rust-analyzer"
+identity_timeout_seconds = 60
+identity_offline = true
 ```
 
 Or scaffold one:
@@ -57,7 +64,32 @@ cargo run --bin rqlens -- measure correctness-run --config rqlens.toml
 cargo run --bin rqlens -- measure locality --config rqlens.toml
 cargo run --bin rqlens -- measure leverage --config rqlens.toml
 cargo run --bin rqlens -- measure map --config rqlens.toml
+cargo run --bin rqlens -- measure coverage --config rqlens.toml
 ```
+
+Coverage uses `cargo-llvm-cov`. If it is not installed, `coverage.json` is
+still written with partial confidence and an explicit missing-input reason.
+The Nix development shell and CI both include the coverage tool.
+
+Apply CI policies to generated artifacts:
+
+```powershell
+cargo run --bin rqlens -- check --fail-on partial --fail-on test-failure --config rqlens.toml
+cargo run --bin rqlens -- check --baseline baseline/analysis --fail-on regression --max-regression 5 --config rqlens.toml
+```
+
+Calibrate score distributions against multiple local checkouts:
+
+```powershell
+cargo run --bin rqlens -- calibrate \
+  --project app=/path/to/app \
+  --project library=/path/to/library \
+  --output-dir target/calibration
+```
+
+The report contains per-project and pooled percentiles, identity coverage, and
+top function/module hotspots. Percentile bands are triage aids, not defect
+probabilities.
 
 Print the task catalog:
 
@@ -93,6 +125,13 @@ measurements. Review scope also reports changed tool entrypoints in
 
 ## Reading Outputs
 
+Generated artifacts use a versioned envelope. Array-oriented measurements are
+stored under `records`; structured measurements such as correctness, coverage,
+and the architecture map are stored under `data`. Every envelope carries
+artifact-level `measurement_confidence`, a summary, tool identity, and risk
+model identity, so an empty result remains distinguishable from incomplete
+extraction. Artifact schema version `2` is the current contract.
+
 `clones.json` reports multiple clone and duplication engines:
 
 - `token`: normalized token-window repeats
@@ -105,6 +144,17 @@ Syntax-backed outputs include target metadata when available:
 - `target_kind`: `lib`, `bin`, `test`, `bench`, `example`, or `module`
 - `entrypoint_kind`: runnable target kind for tool/test/example/bench entrypoints
 - `is_entrypoint`: whether the module is a runnable tool-style entrypoint
+- `module_id`: collision-safe `package::target::module` identity used by map nodes and edges
+
+Architecture measurements resolve internal dependency references through one
+bounded rust-analyzer LSP session. `identity_resolution` accepts `auto`
+(semantic results with explicit fallback), `required` (fail unless every
+candidate resolves), or `disabled` (Cargo/syntax identities only). Results are
+cached in `semantic_identity_cache.json` using analyzer version and source
+fingerprints. Offline projects that cannot load a complete Cargo graph receive
+a generated `rust-project.json` with local targets, platform cfgs, and declared
+features; inactive platform or macro-generated references remain labeled
+`syntax_fallback`.
 
 Map, locality, leverage, clone responsibility rows, and review output preserve
 this metadata. Entrypoints remain visible in the architecture map, but outbound
@@ -137,7 +187,7 @@ itself:
 ```powershell
 cargo fmt
 cargo check --all-targets
-cargo clippy --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test
 cargo test --manifest-path rust_helpers/Cargo.toml
 cargo run --bin rqlens -- measure all

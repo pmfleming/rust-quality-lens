@@ -9,16 +9,32 @@ pub(crate) fn type_risk(
     method_count: usize,
     impl_block_count: usize,
     impl_file_count: usize,
-) -> (f64, Vec<String>) {
+) -> (f64, Vec<String>, Value) {
     let risk = round2(type_pressure(
         ty,
         method_count,
         impl_block_count,
         impl_file_count,
     ));
+    let field_pressure = over_free(ty.field_count as f64, 8.0, 2.5, 35.0);
+    let variant_pressure = over_free(ty.variant_count as f64, 8.0, 1.8, 28.0);
+    let payload_pressure = over_free(ty.variant_field_count as f64, 10.0, 1.4, 18.0);
+    let method_pressure = over_free(method_count as f64, 12.0, 0.85, 32.0);
+    let impl_pressure = ((impl_file_count.saturating_sub(2) as f64 * 4.5)
+        + (impl_block_count.saturating_sub(4) as f64 * 1.2))
+        .min(24.0);
+    let declaration_pressure = over_free(ty.declaration_span as f64, 30.0, 0.35, 12.0);
     (
         risk,
         type_signals(ty, method_count, impl_block_count, impl_file_count),
+        json!([
+            {"signal": "fields_over_8", "raw": ty.field_count, "contribution": round2(field_pressure)},
+            {"signal": "variants_over_8", "raw": ty.variant_count, "contribution": round2(variant_pressure)},
+            {"signal": "variant_fields_over_10", "raw": ty.variant_field_count, "contribution": round2(payload_pressure)},
+            {"signal": "methods_over_12", "raw": method_count, "contribution": round2(method_pressure)},
+            {"signal": "impl_spread", "raw": {"files": impl_file_count, "blocks": impl_block_count}, "contribution": round2(impl_pressure)},
+            {"signal": "declaration_lines_over_30", "raw": ty.declaration_span, "contribution": round2(declaration_pressure)},
+        ]),
     )
 }
 
@@ -144,6 +160,9 @@ pub(crate) fn risk_model_weights() -> Value {
             "failed_test_count": {"weight": 45.0, "cap": 120.0},
             "unknown_test_count": {"weight": 4.0, "cap": 80.0},
             "skipped_test_count": {"weight": 10.0, "cap": 40.0},
+            "test_command_failure_without_failed_test": 140.0,
+            "test_compile_failure": 180.0,
+            "line_coverage_below_70_percent": {"weight": 1.5, "cap": 105.0},
             "missing_test_evidence": 90.0
         },
         "quality": {
@@ -170,7 +189,23 @@ pub(crate) fn risk_model_tool_scores() -> Value {
         "type_health": {"score_cap": 100.0},
         "locality": {"score_cap": 100.0},
         "leverage": {"score_cap": 100.0},
-        "hotspots": {"quality_multiplier": 1.12},
+        "hotspots": {
+            "function": {
+                "branch_pressure_weight": 3.7,
+                "path_pressure_over_1_weight": 2.0,
+                "nesting_over_2_weight": 3.0,
+                "lines_over_20_weight": 0.25,
+                "quality_multiplier": 1.12,
+                "empirical_bands": {"watch": 19.15, "high": 32.98, "extreme": 80.08}
+            },
+            "module": {
+                "max_function_weight": 0.55,
+                "p95_function_weight": 0.25,
+                "mean_function_weight": 0.10,
+                "size_pressure_weight": 0.50,
+                "empirical_bands": {"watch": 67.30, "high": 95.51, "extreme": 139.94}
+            }
+        },
         "clones_token": {"window_tokens": 50, "minimum_line_span": 5, "instance_weight": 5.0},
         "clones_ast": {"minimum_ast_nodes": 6, "cross_file_factor": 1.5},
         "clones_module_responsibility": {"includes_target_kind": true, "minimum_responsibility_lines": 8},
@@ -180,9 +215,13 @@ pub(crate) fn risk_model_tool_scores() -> Value {
 
 pub(crate) fn risk_model_classification() -> Value {
     json!({
-        "warn_total_score": 300.0,
-        "bad_total_score": 600.0,
-        "warn_color_score": 350.0,
-        "bad_color_score": 700.0
+        "basis": "four_project_semantic_identity_percentiles_2026-07-13",
+        "watch_total_score_p90": 712.99,
+        "high_total_score_p95": 838.64,
+        "extreme_total_score_p99": 1028.20,
+        "warn_total_score": 712.99,
+        "bad_total_score": 838.64,
+        "warn_color_score": 712.99,
+        "bad_color_score": 838.64
     })
 }

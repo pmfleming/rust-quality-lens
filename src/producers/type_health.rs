@@ -28,7 +28,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
             fact.items
                 .types
                 .iter()
-                .map(|ty| type_row(ty, &impls, &metadata, &provenance, &confidence))
+                .map(|ty| type_row(fact, ty, &impls, &metadata, &provenance, &confidence))
         })
         .collect::<Vec<_>>();
 
@@ -46,10 +46,18 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
     Ok(Value::Array(rows))
 }
 
-fn impl_index(facts: &[FileFacts]) -> BTreeMap<(String, String), ImplSummary> {
-    let mut impls = BTreeMap::<(String, String), ImplSummary>::new();
+fn impl_index(facts: &[FileFacts]) -> BTreeMap<String, ImplSummary> {
+    let definitions = facts
+        .iter()
+        .flat_map(|fact| &fact.items.types)
+        .map(|ty| ty.qualified_name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut impls = BTreeMap::<String, ImplSummary>::new();
     for imp in facts.iter().flat_map(|fact| &fact.items.impls) {
-        let entry = impls.entry(impl_key(imp)).or_default();
+        let Some(identity) = impl_identity(imp, &definitions) else {
+            continue;
+        };
+        let entry = impls.entry(identity).or_default();
         entry.method_count += imp.method_count;
         entry.block_count += 1;
         entry.files.insert(imp.path.clone());
@@ -57,23 +65,56 @@ fn impl_index(facts: &[FileFacts]) -> BTreeMap<(String, String), ImplSummary> {
     impls
 }
 
-fn impl_key(imp: &ImplFact) -> (String, String) {
-    (imp.module_key.clone(), imp.type_name.clone())
+fn impl_identity(imp: &ImplFact, definitions: &BTreeSet<String>) -> Option<String> {
+    let raw = if imp.qualified_type_name.is_empty() {
+        imp.type_name.as_str()
+    } else {
+        imp.qualified_type_name.as_str()
+    };
+    let candidate = if let Some(rest) = raw.strip_prefix("crate::") {
+        rest.to_string()
+    } else if let Some(rest) = raw.strip_prefix("self::") {
+        format!("{}::{rest}", imp.module_key)
+    } else if raw.starts_with("super::") {
+        resolve_super_type(raw, &imp.module_key)
+    } else if raw.contains("::") {
+        raw.to_string()
+    } else {
+        format!("{}::{raw}", imp.module_key)
+    };
+    if definitions.contains(&candidate) {
+        return Some(candidate);
+    }
+    let suffix = format!("::{raw}");
+    let mut matches = definitions.iter().filter(|name| name.ends_with(&suffix));
+    let first = matches.next()?.clone();
+    matches.next().is_none().then_some(first)
+}
+
+fn resolve_super_type(raw: &str, module: &str) -> String {
+    let mut base = module.split("::").collect::<Vec<_>>();
+    let mut remainder = raw;
+    while let Some(rest) = remainder.strip_prefix("super::") {
+        base.pop();
+        remainder = rest;
+    }
+    base.into_iter()
+        .chain(std::iter::once(remainder))
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 fn type_row(
+    fact: &FileFacts,
     ty: &TypeFact,
-    impls: &BTreeMap<(String, String), ImplSummary>,
+    impls: &BTreeMap<String, ImplSummary>,
     metadata: &crate::measurement::ToolScoreMetadata,
     provenance: &crate::measurement::Provenance,
     confidence: &Value,
 ) -> Value {
-    let summary = impls
-        .get(&(ty.module_key.clone(), ty.type_name.clone()))
-        .cloned()
-        .unwrap_or_default();
+    let summary = impls.get(&ty.qualified_name).cloned().unwrap_or_default();
     let impl_files_vec = summary.files.into_iter().collect::<Vec<_>>();
-    let (risk, signals) = type_risk(
+    let (risk, signals, score_components) = type_risk(
         ty,
         summary.method_count,
         summary.block_count,
@@ -83,6 +124,10 @@ fn type_row(
         "type_name": ty.type_name,
         "qualified_name": ty.qualified_name,
         "module_key": ty.module_key,
+        "module_id": fact.module_id,
+        "package_name": fact.package_name,
+        "target_name": fact.target_name,
+        "identity_backend": fact.identity_backend,
         "path": ty.path,
         "line": ty.line,
         "kind": ty.kind,
@@ -98,6 +143,7 @@ fn type_row(
         "structural_risk": risk,
         "structural_score": round2(100.0 - risk),
         "signals": signals,
+        "score_components": score_components,
         "measured_at": provenance.measured_at,
         "command": provenance.command,
         "host": provenance.host,

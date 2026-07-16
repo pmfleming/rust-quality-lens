@@ -4,12 +4,70 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::MeasureTool;
+use crate::config::LensConfig;
+use crate::facts::RunContext;
+use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ArtifactEnvelope<T: Serialize> {
     pub(crate) version: u64,
     pub(crate) generated_from: &'static str,
     pub(crate) payload: T,
+}
+
+pub(crate) fn artifact_document(
+    tool: &MeasureTool,
+    config: &LensConfig,
+    context: &RunContext,
+    payload: Value,
+) -> Value {
+    let mut confidence = payload
+        .get("measurement_confidence")
+        .cloned()
+        .unwrap_or_else(|| source_confidence(&config.source_roots, &context.source_facts));
+    if matches!(
+        tool,
+        MeasureTool::Locality | MeasureTool::Leverage | MeasureTool::Map
+    ) && let Some(object) = confidence.as_object_mut()
+    {
+        object.insert(
+            "semantic_identity".to_string(),
+            context.identity_resolution.to_json(),
+        );
+    }
+    let mut document = json!({
+        "schema_version": 2,
+        "generated_from": "rqlens",
+        "tool": tool.name(),
+        "risk_model_id": MODEL_ID,
+        "risk_model_version": MODEL_VERSION,
+        "measurement_confidence": confidence,
+        "summary": artifact_summary(&payload),
+    });
+    if let Some(object) = document.as_object_mut() {
+        object.insert(
+            if payload.is_array() {
+                "records"
+            } else {
+                "data"
+            }
+            .to_string(),
+            payload,
+        );
+    }
+    document
+}
+
+fn artifact_summary(payload: &Value) -> Value {
+    if let Some(records) = payload.as_array() {
+        json!({"record_count": records.len()})
+    } else {
+        payload
+            .get("summary")
+            .or_else(|| payload.get("meta").and_then(|meta| meta.get("summary")))
+            .cloned()
+            .unwrap_or_else(|| json!({}))
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -61,7 +119,6 @@ pub(crate) fn artifact_schemas(tool: &MeasureTool) -> Value {
         MeasureTool::All => {
             let schemas = MeasureTool::all_tools()
                 .into_iter()
-                .filter(|tool| !matches!(tool, MeasureTool::CorrectnessRun))
                 .map(|tool| {
                     (
                         tool.output_file().to_string(),
@@ -81,21 +138,30 @@ pub(crate) fn artifact_schemas(tool: &MeasureTool) -> Value {
 }
 
 fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
-    match tool {
+    let payload = match tool {
         MeasureTool::Hotspots => array_schema(
             "hotspots.json",
             &[
                 "name",
+                "kind",
                 "module_key",
                 "score",
                 "quality_score",
+                "score_components",
                 "measurement_confidence",
             ],
             json!({
                 "name": {"type": "string"},
+                "kind": {"type": "string", "enum": ["module", "function"]},
                 "module_key": {"type": "string"},
+                "module_id": {"type": "string"},
+                "package_name": {"type": "string"},
+                "target_name": {"type": "string"},
+                "identity_backend": {"type": "string"},
                 "score": {"type": "number"},
                 "quality_score": {"type": "number"},
+                "risk_level": {"type": "string", "enum": ["normal", "watch", "high", "extreme"]},
+                "score_components": {"type": "array", "items": {"type": "object"}},
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
@@ -209,8 +275,53 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
+        MeasureTool::Coverage => object_schema(
+            "coverage.json",
+            &["summary", "files", "measurement_confidence"],
+            json!({
+                "summary": {"type": "object"},
+                "files": {"type": "array", "items": {"type": "object"}},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
+        ),
         MeasureTool::All => unreachable!(),
-    }
+    };
+    envelope_schema(tool, payload)
+}
+
+fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
+    let array_payload = payload["type"] == "array";
+    let payload_key = if array_payload { "records" } else { "data" };
+    let mut properties = serde_json::Map::new();
+    properties.insert(
+        "schema_version".to_string(),
+        json!({"type": "integer", "const": 2}),
+    );
+    properties.insert("generated_from".to_string(), json!({"type": "string"}));
+    properties.insert(
+        "tool".to_string(),
+        if matches!(tool, MeasureTool::Correctness | MeasureTool::CorrectnessRun) {
+            json!({"type": "string", "enum": ["correctness", "correctness-run"]})
+        } else {
+            json!({"type": "string", "const": tool.name()})
+        },
+    );
+    properties.insert("risk_model_id".to_string(), json!({"type": "string"}));
+    properties.insert("risk_model_version".to_string(), json!({"type": "integer"}));
+    properties.insert(
+        "measurement_confidence".to_string(),
+        measurement_confidence_schema(),
+    );
+    properties.insert("summary".to_string(), json!({"type": "object"}));
+    properties.insert(payload_key.to_string(), payload);
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": format!("{} artifact envelope", tool.output_file()),
+        "type": "object",
+        "required": ["schema_version", "generated_from", "tool", "measurement_confidence", "summary", payload_key],
+        "properties": properties,
+        "additionalProperties": false,
+    })
 }
 
 fn array_schema(title: &str, required: &[&str], properties: Value) -> Value {

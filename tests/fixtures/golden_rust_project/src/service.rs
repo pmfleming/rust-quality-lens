@@ -1,5 +1,11 @@
 use crate::domain::Config;
 
+impl crate::domain::Config {
+    pub fn service_visible_value(&self) -> i32 {
+        self.value
+    }
+}
+
 pub mod local;
 
 pub fn run_service() -> i32 {

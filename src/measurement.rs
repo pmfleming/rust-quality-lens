@@ -17,7 +17,7 @@ pub(crate) use scoring::{
 };
 
 pub(crate) const MODEL_ID: &str = "rqlens.architecture_risk";
-pub(crate) const MODEL_VERSION: u64 = 1;
+pub(crate) const MODEL_VERSION: u64 = 4;
 pub(crate) const RULESET_ID: &str = "rqlens.generic_layers";
 pub(crate) const RULESET_VERSION: u64 = 1;
 

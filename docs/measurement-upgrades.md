@@ -3,6 +3,27 @@
 This note summarizes the lens upgrades that make `rust-quality-lens` more
 portable, explicit, and trustworthy across Rust projects.
 
+## Artifact Contract v2
+
+All generated measurement files now use a versioned envelope. Record-oriented
+outputs use `records`, structured outputs use `data`, and every artifact has
+top-level confidence and summary fields. Readers remain compatible with legacy
+unenveloped artifacts. A checked-in conformance snapshot guards the envelope
+surface.
+
+Correctness records now include `tested_modules`, derived from source-module
+ancestry and syntax dependencies. Test-command and compilation failures are
+preserved separately from individual test results and feed correctness risk.
+
+Git history parsing now retains commit identity across the blank separator in
+normal `git log --numstat` output. Cross-module impl blocks are joined to types
+using resolved full type paths rather than physical-module plus short-name
+matching.
+
+Coverage is available through `measure coverage` using `cargo-llvm-cov`.
+`rqlens check` supports partial-input, test-failure, absolute-threshold, and
+baseline-regression policies for CI.
+
 ## Extraction
 
 Rust source extraction now flows through a `syn`-backed helper instead of
@@ -61,7 +82,17 @@ counts and artifact status.
 
 Raw facts and derived risk are separated. The versioned model lives in
 `src/risk_model.rs`, is documented in
-`docs/risk-model-v1.md`, and is emitted into `map.json` metadata.
+`docs/risk-model-v4.md`, and is emitted into `map.json` metadata.
+
+Version 3 adds function-level hotspot rows, per-score component explanations,
+Cargo-qualified graph identities, baseline improvement/regression deltas,
+aggregate coverage evidence on correctness attribution, and an empirical
+multi-project calibration runner.
+
+Version 4 adds positioned dependency references and compiler-assisted
+definition resolution through rust-analyzer. Map edges now expose semantic
+symbol identities and per-edge backend provenance, with cached and bounded
+fallback behavior for offline, inactive, and macro-generated code.
 
 Architecture map scoring now calls the shared `architecture_risk_scores(...)`
 function instead of carrying local weight math. Producer tools that emit scores
