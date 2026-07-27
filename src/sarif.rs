@@ -46,6 +46,13 @@ fn add_reliability_results(
         let Some(rule_id) = finding["rule_id"].as_str() else {
             continue;
         };
+        if config
+            .policy
+            .active_waiver(rule_id, finding["path"].as_str())
+            .is_some()
+        {
+            continue;
+        }
         let message = finding["message"].as_str().unwrap_or(rule_id);
         rules.entry(rule_id.to_string()).or_insert_with(|| {
             json!({
@@ -100,6 +107,9 @@ fn add_practice_results(
         let Some(rule_id) = check["rule_id"].as_str() else {
             continue;
         };
+        if config.policy.active_waiver(rule_id, None).is_some() {
+            continue;
+        }
         let title = check["title"].as_str().unwrap_or(rule_id);
         rules.entry(rule_id.to_string()).or_insert_with(|| {
             json!({
@@ -188,6 +198,7 @@ mod tests {
             identity_timeout_seconds: 1,
             identity_offline: true,
             verification: Default::default(),
+            policy: Default::default(),
         };
         let output = write(&config, None)?;
         let document: serde_json::Value = serde_json::from_slice(&std::fs::read(output)?)?;

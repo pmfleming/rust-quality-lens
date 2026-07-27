@@ -161,6 +161,7 @@ mod tests {
             identity_timeout_seconds: 1,
             identity_offline: true,
             verification: Default::default(),
+            policy: Default::default(),
         };
         let mut fact = FileFacts::test_fact("/project/src/domain.rs", "domain");
         fact.module_id = "demo::demo::domain".to_string();

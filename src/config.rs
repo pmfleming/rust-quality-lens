@@ -17,6 +17,7 @@ struct RawConfig {
     output_dir: Option<PathBuf>,
     rust: Option<RawRustConfig>,
     verification: Option<RawVerificationConfig>,
+    policy: Option<PolicyConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +40,10 @@ struct RawVerificationConfig {
     exclude: Option<Vec<String>>,
     audit: Option<bool>,
     deny: Option<bool>,
+    semver: Option<bool>,
+    semver_baseline_rev: Option<String>,
+    feature_matrix: Option<bool>,
+    miri: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +57,10 @@ pub(crate) struct VerificationConfig {
     pub(crate) exclude: Vec<String>,
     pub(crate) audit: bool,
     pub(crate) deny: bool,
+    pub(crate) semver: bool,
+    pub(crate) semver_baseline_rev: Option<String>,
+    pub(crate) feature_matrix: bool,
+    pub(crate) miri: bool,
 }
 
 impl Default for VerificationConfig {
@@ -66,6 +75,10 @@ impl Default for VerificationConfig {
             exclude: Vec::new(),
             audit: false,
             deny: false,
+            semver: false,
+            semver_baseline_rev: None,
+            feature_matrix: false,
+            miri: false,
         }
     }
 }
@@ -109,6 +122,72 @@ impl VerificationConfig {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub(crate) struct PolicyConfig {
+    #[serde(default)]
+    pub(crate) waivers: Vec<PolicyWaiver>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct PolicyWaiver {
+    pub(crate) rule_id: String,
+    #[serde(default)]
+    pub(crate) path: Option<String>,
+    pub(crate) reason: String,
+    pub(crate) owner: String,
+    pub(crate) expires: String,
+}
+
+impl PolicyConfig {
+    pub(crate) fn active_waiver(&self, rule_id: &str, path: Option<&str>) -> Option<&PolicyWaiver> {
+        self.waivers
+            .iter()
+            .find(|waiver| waiver.matches(rule_id, path) && !waiver.expired())
+    }
+
+    pub(crate) fn expired_waivers(&self) -> Vec<&PolicyWaiver> {
+        self.waivers
+            .iter()
+            .filter(|waiver| waiver.expired())
+            .collect()
+    }
+
+    fn validate(&self) -> Result<()> {
+        for waiver in &self.waivers {
+            if waiver.rule_id.trim().is_empty()
+                || waiver.reason.trim().is_empty()
+                || waiver.owner.trim().is_empty()
+            {
+                bail!("policy waivers require non-empty rule_id, reason, and owner");
+            }
+            chrono::NaiveDate::parse_from_str(&waiver.expires, "%Y-%m-%d").with_context(|| {
+                format!(
+                    "policy waiver {} has invalid expiry {}; expected YYYY-MM-DD",
+                    waiver.rule_id, waiver.expires
+                )
+            })?;
+        }
+        Ok(())
+    }
+}
+
+impl PolicyWaiver {
+    fn matches(&self, rule_id: &str, path: Option<&str>) -> bool {
+        self.rule_id == rule_id
+            && self.path.as_deref().is_none_or(|pattern| {
+                let path = path.unwrap_or_default().replace('\\', "/");
+                pattern
+                    .strip_suffix("/**")
+                    .map_or(path == pattern, |prefix| path.starts_with(prefix))
+            })
+    }
+
+    fn expired(&self) -> bool {
+        chrono::NaiveDate::parse_from_str(&self.expires, "%Y-%m-%d")
+            .map_or(true, |expiry| expiry < chrono::Utc::now().date_naive())
+    }
+}
+
 impl From<Option<RawVerificationConfig>> for VerificationConfig {
     fn from(raw: Option<RawVerificationConfig>) -> Self {
         let raw = raw.unwrap_or_default();
@@ -128,6 +207,10 @@ impl From<Option<RawVerificationConfig>> for VerificationConfig {
             exclude: raw.exclude.unwrap_or_default(),
             audit: raw.audit.unwrap_or_default(),
             deny: raw.deny.unwrap_or_default(),
+            semver: raw.semver.unwrap_or_default(),
+            semver_baseline_rev: raw.semver_baseline_rev,
+            feature_matrix: raw.feature_matrix.unwrap_or_default(),
+            miri: raw.miri.unwrap_or_default(),
         }
     }
 }
@@ -153,6 +236,7 @@ pub(crate) struct LensConfig {
     pub(crate) identity_timeout_seconds: u64,
     pub(crate) identity_offline: bool,
     pub(crate) verification: VerificationConfig,
+    pub(crate) policy: PolicyConfig,
 }
 
 impl LensConfig {
@@ -175,6 +259,7 @@ impl LensConfig {
                 output_dir: None,
                 rust: None,
                 verification: None,
+                policy: None,
             },
         };
         let project_root =
@@ -222,6 +307,8 @@ impl LensConfig {
             .unwrap_or(60)
             .max(1);
         let verification = VerificationConfig::from(raw.verification);
+        let policy = raw.policy.unwrap_or_default();
+        policy.validate()?;
         let project_name = raw.project_name.unwrap_or_else(|| {
             project_root
                 .file_name()
@@ -240,6 +327,7 @@ impl LensConfig {
             identity_timeout_seconds,
             identity_offline,
             verification,
+            policy,
         })
     }
 }
@@ -376,6 +464,16 @@ all_targets = true
 all_features = false
 audit = false
 deny = false
+semver = false
+feature_matrix = false
+miri = false
+
+# Temporary exceptions must be owned, justified, and time-bounded:
+# [[policy.waivers]]
+# rule_id = "rust.project.license"
+# reason = "Owner license decision is pending"
+# owner = "project-maintainers"
+# expires = "2026-12-31"
 "#
         ),
     )?;
@@ -421,7 +519,33 @@ pub(crate) fn config_schema() -> Value {
                     "features": {"type": "array", "items": {"type": "string"}, "default": []},
                     "exclude": {"type": "array", "items": {"type": "string"}, "default": []},
                     "audit": {"type": "boolean", "default": false},
-                    "deny": {"type": "boolean", "default": false}
+                    "deny": {"type": "boolean", "default": false},
+                    "semver": {"type": "boolean", "default": false},
+                    "semver_baseline_rev": {"type": "string"},
+                    "feature_matrix": {"type": "boolean", "default": false},
+                    "miri": {"type": "boolean", "default": false}
+                }
+            },
+            "policy": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "waivers": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["rule_id", "reason", "owner", "expires"],
+                            "properties": {
+                                "rule_id": {"type": "string"},
+                                "path": {"type": "string"},
+                                "reason": {"type": "string"},
+                                "owner": {"type": "string"},
+                                "expires": {"type": "string", "format": "date"}
+                            }
+                        },
+                        "default": []
+                    }
                 }
             }
         }
@@ -430,8 +554,37 @@ pub(crate) fn config_schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::metadata_source_roots;
+    use super::{PolicyConfig, PolicyWaiver, metadata_source_roots};
     use serde_json::json;
+
+    #[test]
+    fn policy_waivers_are_scoped_and_time_bounded() {
+        let policy = PolicyConfig {
+            waivers: vec![
+                PolicyWaiver {
+                    rule_id: "rust.project.license".to_string(),
+                    path: None,
+                    reason: "decision pending".to_string(),
+                    owner: "maintainers".to_string(),
+                    expires: "2099-12-31".to_string(),
+                },
+                PolicyWaiver {
+                    rule_id: "rust.reliability.unwrap".to_string(),
+                    path: Some("src/generated/**".to_string()),
+                    reason: "generated code".to_string(),
+                    owner: "codegen-team".to_string(),
+                    expires: "2000-01-01".to_string(),
+                },
+            ],
+        };
+        assert!(policy.active_waiver("rust.project.license", None).is_some());
+        assert!(
+            policy
+                .active_waiver("rust.reliability.unwrap", Some("src/generated/model.rs"))
+                .is_none()
+        );
+        assert_eq!(policy.expired_waivers().len(), 1);
+    }
 
     #[test]
     fn cargo_metadata_discovers_local_package_source_roots() -> anyhow::Result<()> {

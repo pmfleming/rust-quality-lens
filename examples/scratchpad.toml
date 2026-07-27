@@ -13,5 +13,12 @@ timeout_seconds = 1200
 workspace = true
 all_targets = false
 all_features = true
-audit = false
+audit = true
 deny = false
+feature_matrix = true
+
+[[policy.waivers]]
+rule_id = "rust.project.license"
+reason = "Repository owner must choose and approve the distribution license"
+owner = "pmfleming"
+expires = "2026-10-31"

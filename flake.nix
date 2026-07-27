@@ -33,6 +33,8 @@
               cargo-watch
               cargo-audit
               cargo-deny
+              cargo-hack
+              cargo-semver-checks
             ];
 
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";

@@ -48,9 +48,13 @@ timeout_seconds = 600
 workspace = true
 all_targets = true
 all_features = false
-# Optional supply-chain gates:
+# Optional project-specific gates:
 audit = false
 deny = false
+semver = false
+# semver_baseline_rev = "v1.2.3"
+feature_matrix = false
+miri = false
 ```
 
 Or scaffold one:
@@ -81,6 +85,20 @@ cargo run --bin rqlens -- sarif --config rqlens.toml
 ```
 
 This writes `target/analysis/rqlens.sarif` by default.
+
+Temporary policy exceptions must be explicit and expiring:
+
+```toml
+[[policy.waivers]]
+rule_id = "rust.project.license"
+reason = "Repository owner license decision is pending"
+owner = "project-maintainers"
+expires = "2026-12-31"
+# Optional path scope; `/**` performs a prefix match.
+# path = "src/generated/**"
+```
+
+Active waivers are recorded in `policy_report.json` and omitted from SARIF. Expired waivers remain visible and no longer suppress findings.
 
 Run one producer:
 

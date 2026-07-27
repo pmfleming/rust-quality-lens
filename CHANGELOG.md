@@ -10,7 +10,9 @@ All notable changes to this project will be documented here. The format follows 
 - Safety-contract and explicit panic-path findings.
 - Automatic local Cargo package source discovery.
 - Bundled helper materialization for packaged installations.
-- Configurable verification scope and optional `cargo-audit` and `cargo-deny` gates.
+- Configurable verification scope and optional `cargo-audit`, `cargo-deny`, cargo-semver-checks, cargo-hack, and Miri gates.
+- Selected-dependency MSRV compatibility evidence.
+- Owned, reasoned, expiring policy waivers with path scoping and SARIF suppression.
 
 ### Changed
 

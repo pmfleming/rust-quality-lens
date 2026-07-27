@@ -299,6 +299,7 @@ mod tests {
             identity_timeout_seconds: 1,
             identity_offline: true,
             verification: Default::default(),
+            policy: Default::default(),
         };
         let facts = vec![crate::facts::FileFacts::test_fact(
             "/project/src/lib.rs",

@@ -387,6 +387,14 @@ fn config_schema_prints_machine_readable_schema() {
         payload["properties"]["rust"]["properties"]["identity_resolution"]["enum"],
         serde_json::json!(["auto", "required", "disabled"])
     );
+    assert_eq!(
+        payload["properties"]["policy"]["properties"]["waivers"]["items"]["required"],
+        serde_json::json!(["rule_id", "reason", "owner", "expires"])
+    );
+    assert_eq!(
+        payload["properties"]["verification"]["properties"]["feature_matrix"]["default"],
+        false
+    );
 }
 
 #[test]
@@ -453,6 +461,11 @@ fn verify_writes_structured_practice_evidence() {
             && matches!(check["status"].as_str(), Some("passed" | "failed"))
     }));
     assert!(checks.iter().all(|check| check["source"].is_string()));
+    assert!(
+        checks
+            .iter()
+            .any(|check| check["rule_id"] == "rust.project.msrv-compatible")
+    );
     assert_eq!(
         report["measurement_confidence"]["confidence_scope"],
         "verified_practices"

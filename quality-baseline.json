@@ -1,8 +1,8 @@
 {
   "max_function_hotspot_score": 100.0,
-  "max_rust_source_lines": 11366,
+  "max_rust_source_lines": 11751,
   "max_ast_clone_records": 0,
-  "max_token_clone_records": 162,
+  "max_token_clone_records": 167,
   "min_map_locality_score": 85.0,
   "min_map_leverage_score": 38.0
 }

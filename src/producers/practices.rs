@@ -98,6 +98,74 @@ pub(super) fn produce(config: &LensConfig) -> Result<Value> {
             "https://embarkstudios.github.io/cargo-deny/",
         ));
     }
+    if config.verification.semver {
+        let mut arguments = vec!["semver-checks".to_string(), "check-release".to_string()];
+        if let Some(revision) = &config.verification.semver_baseline_rev {
+            arguments.extend(["--baseline-rev".to_string(), revision.clone()]);
+        }
+        checks.push(cargo_check(
+            config,
+            "rust.api.semver",
+            "Public API is compatible with the configured baseline",
+            arguments,
+            "https://github.com/obi1kenobi/cargo-semver-checks",
+            BTreeMap::new(),
+        ));
+    } else {
+        checks.push(skipped_check(
+            "rust.api.semver",
+            "Public API compatibility",
+            "enable verification.semver for release-oriented libraries",
+            "https://github.com/obi1kenobi/cargo-semver-checks",
+        ));
+    }
+    if config.verification.feature_matrix {
+        let mut arguments = vec![
+            "hack".to_string(),
+            "check".to_string(),
+            "--feature-powerset".to_string(),
+        ];
+        if config.verification.workspace {
+            arguments.push("--workspace".to_string());
+        }
+        if config.verification.all_targets {
+            arguments.push("--all-targets".to_string());
+        }
+        checks.push(cargo_check(
+            config,
+            "rust.features.matrix",
+            "Configured Cargo feature combinations compile",
+            arguments,
+            "https://github.com/taiki-e/cargo-hack",
+            BTreeMap::new(),
+        ));
+    } else {
+        checks.push(skipped_check(
+            "rust.features.matrix",
+            "Cargo feature compatibility matrix",
+            "enable verification.feature_matrix to require cargo-hack",
+            "https://github.com/taiki-e/cargo-hack",
+        ));
+    }
+    if config.verification.miri {
+        let mut arguments = vec!["miri".to_string()];
+        arguments.extend(config.verification.cargo_arguments("test", false, false));
+        checks.push(cargo_check(
+            config,
+            "rust.safety.miri",
+            "Miri finds no undefined behavior in executed tests",
+            arguments,
+            "https://github.com/rust-lang/miri",
+            BTreeMap::new(),
+        ));
+    } else {
+        checks.push(skipped_check(
+            "rust.safety.miri",
+            "Miri undefined-behavior checks",
+            "enable verification.miri on a toolchain with the Miri component",
+            "https://github.com/rust-lang/miri",
+        ));
+    }
 
     checks.extend(project_evidence(config));
     let failed_errors = count(&checks, "failed", "error");
@@ -220,7 +288,7 @@ fn project_evidence(config: &LensConfig) -> Vec<Value> {
             .iter()
             .any(|name| config.project_root.join(name).is_file())
     };
-    vec![
+    let mut evidence = vec![
         evidence_check(
             "rust.project.msrv-declared",
             "Minimum supported Rust version is declared",
@@ -270,7 +338,93 @@ fn project_evidence(config: &LensConfig) -> Vec<Value> {
             files(&["CHANGELOG.md", "CHANGES.md"]),
             "https://keepachangelog.com/",
         ),
-    ]
+    ];
+    evidence.insert(1, msrv_dependency_check(config, manifest.as_ref(), package));
+    evidence
+}
+
+fn msrv_dependency_check(
+    config: &LensConfig,
+    manifest: Option<&toml::Value>,
+    package: Option<&toml::Value>,
+) -> Value {
+    let declared = package
+        .and_then(|package| package.get("rust-version"))
+        .and_then(toml::Value::as_str)
+        .or_else(|| {
+            manifest
+                .and_then(|manifest| manifest.get("workspace"))
+                .and_then(|workspace| workspace.get("package"))
+                .and_then(|package| package.get("rust-version"))
+                .and_then(toml::Value::as_str)
+        });
+    let Some(declared) = declared else {
+        return skipped_check(
+            "rust.project.msrv-compatible",
+            "Selected dependencies support the declared Rust version",
+            "rust-version is not declared",
+            "https://doc.rust-lang.org/cargo/reference/rust-version.html",
+        );
+    };
+    let arguments = ["metadata", "--format-version", "1", "--offline"]
+        .map(str::to_string)
+        .to_vec();
+    let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
+    request.timeout = Duration::from_secs(config.verification.timeout_seconds);
+    let outcome = run(request);
+    if outcome.status != CommandStatus::Passed {
+        return json!({
+            "rule_id": "rust.project.msrv-compatible",
+            "title": "Selected dependencies support the declared Rust version",
+            "category": "verified-gate",
+            "severity": "warning",
+            "status": "unavailable",
+            "source": "https://doc.rust-lang.org/cargo/reference/rust-version.html",
+            "evidence": outcome,
+        });
+    }
+    let metadata = serde_json::from_str::<Value>(&outcome.stdout).unwrap_or_else(|_| json!({}));
+    let maximum = metadata["packages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|package| {
+            Some((
+                parse_rust_version(package["rust_version"].as_str()?)?,
+                package["name"].as_str()?.to_string(),
+            ))
+        })
+        .max_by_key(|(version, _)| *version);
+    let declared_version = parse_rust_version(declared);
+    let compatible = declared_version
+        .zip(maximum.as_ref().map(|(version, _)| *version))
+        .is_some_and(|(declared, required)| declared >= required);
+    json!({
+        "rule_id": "rust.project.msrv-compatible",
+        "title": "Selected dependencies support the declared Rust version",
+        "category": "static-finding",
+        "severity": "warning",
+        "status": if compatible { "passed" } else { "failed" },
+        "source": "https://doc.rust-lang.org/cargo/reference/rust-version.html",
+        "evidence": {
+            "declared_rust_version": declared,
+            "maximum_selected_dependency_rust_version": maximum.as_ref().map(|(version, _)| format_rust_version(*version)),
+            "maximum_dependency": maximum.map(|(_, package)| package),
+        },
+    })
+}
+
+fn parse_rust_version(value: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = value.split('.').map(|part| part.parse::<u64>().ok());
+    Some((
+        parts.next()??,
+        parts.next().flatten().unwrap_or(0),
+        parts.next().flatten().unwrap_or(0),
+    ))
+}
+
+fn format_rust_version(version: (u64, u64, u64)) -> String {
+    format!("{}.{}.{}", version.0, version.1, version.2)
 }
 
 fn evidence_check(rule_id: &str, title: &str, present: bool, source: &str) -> Value {
@@ -302,4 +456,17 @@ fn count(checks: &[Value], status: &str, severity: &str) -> usize {
         .iter()
         .filter(|check| check["status"] == status && check["severity"] == severity)
         .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_rust_version, parse_rust_version};
+
+    #[test]
+    fn rust_versions_compare_as_numeric_components() {
+        assert!(parse_rust_version("1.100") > parse_rust_version("1.99.9"));
+        assert_eq!(parse_rust_version("1.95"), Some((1, 95, 0)));
+        assert_eq!(format_rust_version((1, 95, 0)), "1.95.0");
+        assert_eq!(parse_rust_version("stable"), None);
+    }
 }

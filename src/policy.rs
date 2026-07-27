@@ -29,8 +29,35 @@ pub(crate) fn run_check(
     let documents = measurement_documents(config)?;
     let partial_artifacts = partial_artifacts(&documents);
     let test_failures = test_failures(&documents);
-    let practice_failures = practice_failures(&documents);
-    let reliability_findings = reliability_findings(&documents);
+    let (active_practices, mut waived_findings) =
+        apply_waivers(config, practice_findings(&documents));
+    let practice_failures = active_practices
+        .iter()
+        .filter(|finding| finding["severity"] == "error")
+        .cloned()
+        .collect::<Vec<_>>();
+    let practice_warnings = active_practices
+        .into_iter()
+        .filter(|finding| finding["severity"] != "error")
+        .collect::<Vec<_>>();
+    let (active_reliability, reliability_waivers) =
+        apply_waivers(config, reliability_findings(&documents));
+    let reliability_findings = active_reliability
+        .iter()
+        .filter(|finding| finding["severity"] == "error")
+        .cloned()
+        .collect::<Vec<_>>();
+    let reliability_warnings = active_reliability
+        .into_iter()
+        .filter(|finding| finding["severity"] != "error")
+        .collect::<Vec<_>>();
+    waived_findings.extend(reliability_waivers);
+    let expired_waivers = config
+        .policy
+        .expired_waivers()
+        .into_iter()
+        .map(|waiver| serde_json::to_value(waiver).unwrap_or_else(|_| json!({})))
+        .collect::<Vec<_>>();
     let current_map = documents.get("map.json").map(artifact_payload);
     let threshold_violations = current_map
         .map(|map| threshold_violations(map, max_total_score))
@@ -78,7 +105,11 @@ pub(crate) fn run_check(
         "partial_artifacts": partial_artifacts,
         "test_failures": test_failures,
         "practice_failures": practice_failures,
+        "practice_warnings": practice_warnings,
         "reliability_findings": reliability_findings,
+        "reliability_warnings": reliability_warnings,
+        "waived_findings": waived_findings,
+        "expired_waivers": expired_waivers,
         "threshold_violations": threshold_violations,
         "regressions": regressions,
         "score_deltas": score_deltas,
@@ -162,7 +193,7 @@ fn test_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
     }
 }
 
-fn practice_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
+fn practice_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
     let Some(document) = documents.get("rust_practices.json") else {
         return vec![json!({"reason": "rust_practices.json is missing"})];
     };
@@ -172,11 +203,10 @@ fn practice_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
         .into_iter()
         .flatten()
         .filter(|check| {
-            check["severity"] == "error"
-                && matches!(
-                    check["status"].as_str(),
-                    Some("failed" | "unavailable" | "timed-out")
-                )
+            matches!(
+                check["status"].as_str(),
+                Some("failed" | "unavailable" | "timed-out")
+            )
         })
         .cloned()
         .collect()
@@ -190,9 +220,27 @@ fn reliability_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|finding| finding["severity"] == "error" && finding["scope"] == "production")
+        .filter(|finding| finding["severity"] != "advisory" && finding["scope"] == "production")
         .cloned()
         .collect()
+}
+
+fn apply_waivers(config: &LensConfig, findings: Vec<Value>) -> (Vec<Value>, Vec<Value>) {
+    let mut active = Vec::new();
+    let mut waived = Vec::new();
+    for finding in findings {
+        let waiver = finding["rule_id"].as_str().and_then(|rule_id| {
+            config
+                .policy
+                .active_waiver(rule_id, finding["path"].as_str())
+        });
+        if let Some(waiver) = waiver {
+            waived.push(json!({"finding": finding, "waiver": waiver}));
+        } else {
+            active.push(finding);
+        }
+    }
+    (active, waived)
 }
 
 fn threshold_violations(map: &Value, maximum: f64) -> Vec<Value> {

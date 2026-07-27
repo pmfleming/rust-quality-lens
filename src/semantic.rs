@@ -987,6 +987,7 @@ mod tests {
             identity_timeout_seconds: 1,
             identity_offline: true,
             verification: Default::default(),
+            policy: Default::default(),
         };
         let source_path = root.path().join("src/lib.rs").to_string_lossy().to_string();
         let mut fact = FileFacts::test_fact(&source_path, "lib");
@@ -1032,6 +1033,7 @@ mod tests {
             identity_timeout_seconds: 20,
             identity_offline: true,
             verification: Default::default(),
+            policy: Default::default(),
         };
         let library_path = root.path().join("src/lib.rs").to_string_lossy().to_string();
         let mut library = FileFacts::test_fact(&library_path, "lib");

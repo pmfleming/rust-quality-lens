@@ -25,10 +25,14 @@ The Rust Foundation supports the ecosystem but does not mandate one coding stand
 ## Interpretation
 
 - Verification commands use the project's configured workspace, targets, and features. `--all-features` is opt-in because features can be mutually exclusive.
-- Optional tools report `skipped` unless enabled. Once enabled, unavailable tools make measurement confidence partial.
+- Optional tools report `skipped` unless enabled. Once enabled, unavailable tools make measurement confidence partial. Optional gates include RustSec, cargo-deny, cargo-semver-checks, cargo-hack feature matrices, and Miri.
 - Unsafe findings check for reviewable contracts such as `// SAFETY:` rationale and `# Safety` documentation. Presence of text is evidence, not proof of soundness.
 - Panic-path findings are warnings in production code and advisory in test code. `unwrap`, `expect`, and `panic!` can be valid when an invariant is clear.
 - Architecture percentile bands are empirical triage aids from a limited corpus, not defect probabilities or ecosystem-wide standards.
+
+## Waivers
+
+Policy waivers are reserved for accepted, temporary exceptions. Every waiver requires a stable rule ID, reason, owner, and `YYYY-MM-DD` expiry, and can optionally target an exact path or a `/**` path prefix. Active waivers remain visible in the policy report and are omitted from SARIF; expired waivers stop suppressing findings. A waiver does not turn a failed measurement into a pass or alter the underlying artifact.
 
 ## Rule stability
 

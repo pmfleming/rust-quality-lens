@@ -161,6 +161,7 @@ fn calibration_config(
         identity_timeout_seconds: 90,
         identity_offline: true,
         verification: Default::default(),
+        policy: Default::default(),
     })
 }
 
