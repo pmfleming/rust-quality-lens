@@ -2,7 +2,7 @@ use crate::util::{absolutize, bundled_helper_manifest, resolve_config_path, reso
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -125,7 +125,31 @@ impl VerificationConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct PolicyConfig {
     #[serde(default)]
+    pub(crate) rules: BTreeMap<String, PolicyRule>,
+    #[serde(default)]
     pub(crate) waivers: Vec<PolicyWaiver>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum PolicyRuleLevel {
+    Off,
+    Advisory,
+    Warning,
+    #[default]
+    Error,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub(crate) struct PolicyRule {
+    #[serde(default)]
+    pub(crate) level: PolicyRuleLevel,
+    #[serde(default)]
+    pub(crate) max: usize,
+    #[serde(default)]
+    pub(crate) exclude_paths: Vec<String>,
+    #[serde(default)]
+    pub(crate) exclude_packages: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -153,6 +177,19 @@ impl PolicyConfig {
     }
 
     fn validate(&self) -> Result<()> {
+        for (rule_id, rule) in &self.rules {
+            if rule_id.trim().is_empty() {
+                bail!("policy rule IDs must not be empty");
+            }
+            if rule
+                .exclude_paths
+                .iter()
+                .chain(&rule.exclude_packages)
+                .any(|value| value.trim().is_empty())
+            {
+                bail!("policy rule {rule_id} has an empty exclusion");
+            }
+        }
         for waiver in &self.waivers {
             if waiver.rule_id.trim().is_empty()
                 || waiver.reason.trim().is_empty()
@@ -171,21 +208,53 @@ impl PolicyConfig {
     }
 }
 
+impl PolicyRule {
+    pub(crate) fn includes(&self, path: Option<&str>, package: Option<&str>) -> bool {
+        !self
+            .exclude_paths
+            .iter()
+            .any(|pattern| path_pattern_matches(pattern, path))
+            && !self
+                .exclude_packages
+                .iter()
+                .any(|excluded| Some(excluded.as_str()) == package)
+    }
+}
+
+impl PolicyRuleLevel {
+    pub(crate) fn as_str(self) -> &'static str {
+        const LEVEL_NAMES: [&str; 4] = ["off", "advisory", "warning", "error"];
+        LEVEL_NAMES[self as usize]
+    }
+}
+
 impl PolicyWaiver {
     fn matches(&self, rule_id: &str, path: Option<&str>) -> bool {
         self.rule_id == rule_id
-            && self.path.as_deref().is_none_or(|pattern| {
-                let path = path.unwrap_or_default().replace('\\', "/");
-                pattern
-                    .strip_suffix("/**")
-                    .map_or(path == pattern, |prefix| path.starts_with(prefix))
-            })
+            && self
+                .path
+                .as_deref()
+                .is_none_or(|pattern| path_pattern_matches(pattern, path))
     }
 
     fn expired(&self) -> bool {
         chrono::NaiveDate::parse_from_str(&self.expires, "%Y-%m-%d")
             .map_or(true, |expiry| expiry < chrono::Utc::now().date_naive())
     }
+}
+
+fn path_pattern_matches(pattern: &str, path: Option<&str>) -> bool {
+    let pattern = pattern.replace('\\', "/");
+    let path = path.unwrap_or_default().replace('\\', "/");
+    pattern
+        .strip_suffix("/**")
+        .map_or(path == pattern, |prefix| {
+            let prefix = prefix.trim_end_matches('/');
+            path == prefix
+                || path
+                    .strip_prefix(prefix)
+                    .is_some_and(|remainder| remainder.starts_with('/'))
+        })
 }
 
 impl From<Option<RawVerificationConfig>> for VerificationConfig {
@@ -468,6 +537,13 @@ semver = false
 feature_matrix = false
 miri = false
 
+# Stable rule limits prevent new findings while allowing an explicit baseline:
+# [policy.rules."rust.reliability.expect"]
+# level = "error"
+# max = 0
+# exclude_paths = ["src/generated/**"]
+# exclude_packages = ["generated-bindings"]
+
 # Temporary exceptions must be owned, justified, and time-bounded:
 # [[policy.waivers]]
 # rule_id = "rust.project.license"
@@ -530,6 +606,20 @@ pub(crate) fn config_schema() -> Value {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                    "rules": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "level": {"type": "string", "enum": ["off", "advisory", "warning", "error"], "default": "error"},
+                                "max": {"type": "integer", "minimum": 0, "default": 0},
+                                "exclude_paths": {"type": "array", "items": {"type": "string"}, "default": []},
+                                "exclude_packages": {"type": "array", "items": {"type": "string"}, "default": []}
+                            }
+                        },
+                        "default": {}
+                    },
                     "waivers": {
                         "type": "array",
                         "items": {
@@ -554,12 +644,14 @@ pub(crate) fn config_schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{PolicyConfig, PolicyWaiver, metadata_source_roots};
+    use super::{PolicyConfig, PolicyRule, PolicyRuleLevel, PolicyWaiver, metadata_source_roots};
     use serde_json::json;
+    use std::collections::BTreeMap;
 
     #[test]
     fn policy_waivers_are_scoped_and_time_bounded() {
         let policy = PolicyConfig {
+            rules: BTreeMap::new(),
             waivers: vec![
                 PolicyWaiver {
                     rule_id: "rust.project.license".to_string(),
@@ -584,6 +676,20 @@ mod tests {
                 .is_none()
         );
         assert_eq!(policy.expired_waivers().len(), 1);
+    }
+
+    #[test]
+    fn policy_rules_support_path_and_package_exclusions() {
+        let rule = PolicyRule {
+            level: PolicyRuleLevel::Error,
+            max: 0,
+            exclude_paths: vec!["src/generated/**".to_string()],
+            exclude_packages: vec!["generated-bindings".to_string()],
+        };
+        assert!(!rule.includes(Some("src/generated/model.rs"), Some("application")));
+        assert!(rule.includes(Some("src/generated_code.rs"), Some("application")));
+        assert!(!rule.includes(Some("src/lib.rs"), Some("generated-bindings")));
+        assert!(rule.includes(Some("src/lib.rs"), Some("application")));
     }
 
     #[test]

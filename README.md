@@ -86,6 +86,18 @@ cargo run --bin rqlens -- sarif --config rqlens.toml
 
 This writes `target/analysis/rqlens.sarif` by default.
 
+Stable rule limits can preserve an accepted baseline while preventing regressions:
+
+```toml
+[policy.rules."rust.reliability.expect"]
+level = "error"
+max = 3
+exclude_paths = ["src/generated/**"]
+exclude_packages = ["generated-bindings"]
+```
+
+Every configured rule is reported in `policy_rule_evaluations`; exceeding an `error` limit fails `rqlens check`. `warning` and `advisory` limits remain visible without failing, and `off` disables the limit.
+
 Temporary policy exceptions must be explicit and expiring:
 
 ```toml

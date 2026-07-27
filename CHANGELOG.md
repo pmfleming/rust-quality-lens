@@ -13,6 +13,7 @@ All notable changes to this project will be documented here. The format follows 
 - Configurable verification scope and optional `cargo-audit`, `cargo-deny`, cargo-semver-checks, cargo-hack, and Miri gates.
 - Selected-dependency MSRV compatibility evidence.
 - Owned, reasoned, expiring policy waivers with path scoping and SARIF suppression.
+- Stable per-rule finding limits with severity and path/package exclusions.
 
 ### Changed
 

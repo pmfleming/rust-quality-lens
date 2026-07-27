@@ -392,6 +392,11 @@ fn config_schema_prints_machine_readable_schema() {
         serde_json::json!(["rule_id", "reason", "owner", "expires"])
     );
     assert_eq!(
+        payload["properties"]["policy"]["properties"]["rules"]["additionalProperties"]["properties"]
+            ["level"]["enum"],
+        serde_json::json!(["off", "advisory", "warning", "error"])
+    );
+    assert_eq!(
         payload["properties"]["verification"]["properties"]["feature_matrix"]["default"],
         false
     );

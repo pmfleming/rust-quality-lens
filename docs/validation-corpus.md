@@ -14,7 +14,7 @@ Observed on 2026-07-27:
 - rustfmt, Cargo check, Clippy, tests, doctests, and warning-free rustdoc passed under Scratchpad's configured all-feature profile.
 - The first rustdoc run found a bare URL in `src/app/ui/scrolling/mod.rs`; the structured evidence drove a documentation fix.
 - RustSec initially found vulnerable `crossbeam-epoch` and `quick-xml` versions. Compatible transitive updates removed those advisories; two advisories for an unrelated crates.io package also named `scratchpad` are documented in Scratchpad's `.cargo/audit.toml`.
-- Reliability classification now reports 57 production panic-path findings and 234 test-scope advisories.
+- Reliability-driven refactoring reduced production panic-path findings from 57 to 49 while preserving 479 passing tests. Configured rules now hold application code to 14 `expect` findings and 3 explicit panic paths, excluding profiling utilities.
 - A safety-contract finding on `unsafe impl GlobalAlloc` drove a nearby invariant comment; no production safety-contract errors remain.
 - API health emitted 92 module rows. These are documentation inventory signals, not correctness failures.
 - Cargo metadata established Rust 1.95 as the selected dependency graph's effective minimum, matching Scratchpad's pinned toolchain and declared `rust-version`.

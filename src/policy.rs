@@ -29,29 +29,23 @@ pub(crate) fn run_check(
     let documents = measurement_documents(config)?;
     let partial_artifacts = partial_artifacts(&documents);
     let test_failures = test_failures(&documents);
-    let (active_practices, mut waived_findings) =
-        apply_waivers(config, practice_findings(&documents));
-    let practice_failures = active_practices
+    let practices = classify_findings(config, practice_findings(&documents));
+    let reliability = classify_findings(config, reliability_findings(&documents));
+    let policy_rule_evaluations = evaluate_policy_rules(
+        &config.policy,
+        practices.active.iter().chain(&reliability.active),
+    );
+    let policy_rule_violations = policy_rule_evaluations
         .iter()
-        .filter(|finding| finding["severity"] == "error")
+        .filter(|evaluation| evaluation["status"] == "exceeded")
         .cloned()
         .collect::<Vec<_>>();
-    let practice_warnings = active_practices
-        .into_iter()
-        .filter(|finding| finding["severity"] != "error")
-        .collect::<Vec<_>>();
-    let (active_reliability, reliability_waivers) =
-        apply_waivers(config, reliability_findings(&documents));
-    let reliability_findings = active_reliability
+    let policy_rule_errors = policy_rule_violations
         .iter()
-        .filter(|finding| finding["severity"] == "error")
-        .cloned()
-        .collect::<Vec<_>>();
-    let reliability_warnings = active_reliability
-        .into_iter()
-        .filter(|finding| finding["severity"] != "error")
-        .collect::<Vec<_>>();
-    waived_findings.extend(reliability_waivers);
+        .filter(|evaluation| evaluation["level"] == "error")
+        .count();
+    let mut waived_findings = practices.waived;
+    waived_findings.extend(reliability.waived);
     let expired_waivers = config
         .policy
         .expired_waivers()
@@ -84,32 +78,41 @@ pub(crate) fn run_check(
         .cloned()
         .collect::<Vec<_>>();
 
-    let failed_policies = fail_on
+    let mut failed_policies = failed_cli_policies(
+        fail_on,
+        &partial_artifacts,
+        &test_failures,
+        &practices.errors,
+        &reliability.errors,
+        &regressions,
+        &threshold_violations,
+    );
+    if policy_rule_errors > 0 {
+        failed_policies.push("configured-rules".to_string());
+    }
+    let mut enabled_policies = fail_on
         .iter()
-        .filter(|policy| match policy {
-            FailPolicy::Partial => !partial_artifacts.is_empty(),
-            FailPolicy::TestFailure => !test_failures.is_empty(),
-            FailPolicy::PracticeFailure => !practice_failures.is_empty(),
-            FailPolicy::ReliabilityFinding => !reliability_findings.is_empty(),
-            FailPolicy::Regression => !regressions.is_empty(),
-            FailPolicy::Threshold => !threshold_violations.is_empty(),
-        })
-        .map(FailPolicy::as_str)
+        .map(|policy| policy.as_str().to_string())
         .collect::<Vec<_>>();
+    if !config.policy.rules.is_empty() {
+        enabled_policies.push("configured-rules".to_string());
+    }
     let report = json!({
-        "version": 1,
+        "version": 2,
         "generated_from": "rqlens",
         "passed": failed_policies.is_empty(),
-        "enabled_policies": fail_on.iter().map(FailPolicy::as_str).collect::<Vec<_>>(),
+        "enabled_policies": enabled_policies,
         "failed_policies": failed_policies,
         "partial_artifacts": partial_artifacts,
         "test_failures": test_failures,
-        "practice_failures": practice_failures,
-        "practice_warnings": practice_warnings,
-        "reliability_findings": reliability_findings,
-        "reliability_warnings": reliability_warnings,
+        "practice_failures": practices.errors,
+        "practice_warnings": practices.warnings,
+        "reliability_findings": reliability.errors,
+        "reliability_warnings": reliability.warnings,
         "waived_findings": waived_findings,
         "expired_waivers": expired_waivers,
+        "policy_rule_evaluations": policy_rule_evaluations,
+        "policy_rule_violations": policy_rule_violations,
         "threshold_violations": threshold_violations,
         "regressions": regressions,
         "score_deltas": score_deltas,
@@ -125,6 +128,29 @@ pub(crate) fn run_check(
         );
     }
     Ok(())
+}
+
+fn failed_cli_policies(
+    fail_on: &[FailPolicy],
+    partial_artifacts: &[String],
+    test_failures: &[Value],
+    practice_failures: &[Value],
+    reliability_findings: &[Value],
+    regressions: &[Value],
+    threshold_violations: &[Value],
+) -> Vec<String> {
+    fail_on
+        .iter()
+        .filter(|policy| match policy {
+            FailPolicy::Partial => !partial_artifacts.is_empty(),
+            FailPolicy::TestFailure => !test_failures.is_empty(),
+            FailPolicy::PracticeFailure => !practice_failures.is_empty(),
+            FailPolicy::ReliabilityFinding => !reliability_findings.is_empty(),
+            FailPolicy::Regression => !regressions.is_empty(),
+            FailPolicy::Threshold => !threshold_violations.is_empty(),
+        })
+        .map(|policy| policy.as_str().to_string())
+        .collect()
 }
 
 impl FailPolicy {
@@ -225,6 +251,27 @@ fn reliability_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
         .collect()
 }
 
+struct FindingClassification {
+    active: Vec<Value>,
+    errors: Vec<Value>,
+    warnings: Vec<Value>,
+    waived: Vec<Value>,
+}
+
+fn classify_findings(config: &LensConfig, findings: Vec<Value>) -> FindingClassification {
+    let (active, waived) = apply_waivers(config, findings);
+    let (errors, warnings) = active
+        .iter()
+        .cloned()
+        .partition(|finding| finding["severity"] == "error");
+    FindingClassification {
+        active,
+        errors,
+        warnings,
+        waived,
+    }
+}
+
 fn apply_waivers(config: &LensConfig, findings: Vec<Value>) -> (Vec<Value>, Vec<Value>) {
     let mut active = Vec::new();
     let mut waived = Vec::new();
@@ -241,6 +288,45 @@ fn apply_waivers(config: &LensConfig, findings: Vec<Value>) -> (Vec<Value>, Vec<
         }
     }
     (active, waived)
+}
+
+fn evaluate_policy_rules<'a>(
+    policy: &crate::config::PolicyConfig,
+    findings: impl Iterator<Item = &'a Value> + Clone,
+) -> Vec<Value> {
+    policy
+        .rules
+        .iter()
+        .map(|(rule_id, rule)| {
+            let matching = findings
+                .clone()
+                .filter(|finding| finding["rule_id"].as_str() == Some(rule_id))
+                .collect::<Vec<_>>();
+            let observed = matching
+                .iter()
+                .filter(|finding| {
+                    rule.includes(finding["path"].as_str(), finding["package_name"].as_str())
+                })
+                .count();
+            let excluded = matching.len().saturating_sub(observed);
+            let exceeded = observed > rule.max && rule.level != crate::config::PolicyRuleLevel::Off;
+            json!({
+                "rule_id": rule_id,
+                "level": rule.level.as_str(),
+                "maximum": rule.max,
+                "observed": observed,
+                "excess": observed.saturating_sub(rule.max),
+                "excluded": excluded,
+                "status": if rule.level == crate::config::PolicyRuleLevel::Off {
+                    "disabled"
+                } else if exceeded {
+                    "exceeded"
+                } else {
+                    "passed"
+                },
+            })
+        })
+        .collect()
 }
 
 fn threshold_violations(map: &Value, maximum: f64) -> Vec<Value> {
@@ -330,4 +416,37 @@ fn artifact_payload(value: &Value) -> &Value {
         .get("data")
         .or_else(|| value.get("records"))
         .unwrap_or(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::evaluate_policy_rules;
+    use crate::config::{PolicyConfig, PolicyRule, PolicyRuleLevel};
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn configured_rules_enforce_limits_after_exclusions() {
+        let policy = PolicyConfig {
+            rules: BTreeMap::from([(
+                "rust.reliability.expect".to_string(),
+                PolicyRule {
+                    level: PolicyRuleLevel::Error,
+                    max: 1,
+                    exclude_paths: vec!["src/generated/**".to_string()],
+                    exclude_packages: Vec::new(),
+                },
+            )]),
+            waivers: Vec::new(),
+        };
+        let findings = [
+            json!({"rule_id": "rust.reliability.expect", "path": "src/lib.rs", "package_name": "app"}),
+            json!({"rule_id": "rust.reliability.expect", "path": "src/main.rs", "package_name": "app"}),
+            json!({"rule_id": "rust.reliability.expect", "path": "src/generated/model.rs", "package_name": "app"}),
+        ];
+        let evaluations = evaluate_policy_rules(&policy, findings.iter());
+        assert_eq!(evaluations[0]["observed"], 2);
+        assert_eq!(evaluations[0]["excluded"], 1);
+        assert_eq!(evaluations[0]["status"], "exceeded");
+    }
 }

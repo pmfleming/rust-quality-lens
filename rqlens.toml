@@ -1,0 +1,46 @@
+project_name = "rust-quality-lens"
+project_root = "."
+output_dir = "target/analysis"
+
+[rust]
+identity_resolution = "auto"
+identity_offline = true
+
+[verification]
+timeout_seconds = 600
+workspace = true
+all_targets = true
+all_features = false
+audit = false
+deny = false
+semver = false
+feature_matrix = false
+miri = false
+
+[policy.rules."rust.safety.undocumented-unsafe"]
+level = "error"
+max = 0
+
+[policy.rules."rust.safety.missing-safety-docs"]
+level = "error"
+max = 0
+
+[policy.rules."rust.reliability.unwrap"]
+level = "error"
+max = 0
+
+[policy.rules."rust.reliability.expect"]
+level = "error"
+max = 0
+
+[policy.rules."rust.reliability.panic"]
+level = "error"
+max = 0
+
+[policy.rules."rust.reliability.todo"]
+level = "error"
+max = 0
+
+[policy.rules."rust.reliability.unimplemented"]
+level = "error"
+max = 0

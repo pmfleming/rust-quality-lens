@@ -37,3 +37,5 @@ Policy waivers are reserved for accepted, temporary exceptions. Every waiver req
 ## Rule stability
 
 Machine-readable rules use stable IDs such as `rust.official.clippy` and `rust.safety.undocumented-unsafe`. Rule meaning, source, severity, command, scope, and evidence are emitted in artifacts. Material rule changes require tests and release notes.
+
+Configured `[policy.rules."<rule-id>"]` entries evaluate absolute finding limits after active waivers and explicit path/package exclusions. An exceeded `error` limit fails policy; `warning` and `advisory` limits provide non-blocking regression visibility. Heuristic architecture thresholds remain separate.
