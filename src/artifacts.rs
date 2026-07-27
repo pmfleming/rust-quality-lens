@@ -5,17 +5,18 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use crate::config::LensConfig;
-use crate::facts::FileFacts;
+use crate::facts::{FileFacts, ModuleGraph};
 use crate::measurement::{MODEL_VERSION, module_for_path, source_confidence};
+use crate::risk_model::{ChangeFacts, CorrectnessFacts};
 use crate::util::{iter_rust_files, normalize_slashes};
 
 mod history;
 mod indices;
 mod topology;
 
-pub(crate) use history::{GitHistoryIndex, git_history_facts};
+use history::{GitHistoryIndex, git_history_facts};
 pub(crate) use indices::CorrectnessIndex;
-pub(crate) use topology::{cycle_modules, is_layer_violation, layer_violations};
+use topology::{cycle_modules, is_layer_violation, layer_violations};
 
 pub(super) struct ArtifactRead {
     name: &'static str,
@@ -24,6 +25,59 @@ pub(super) struct ArtifactRead {
     status: &'static str,
     reason: Option<String>,
     value: Option<Value>,
+}
+
+pub(crate) struct MapEvidence {
+    pub(crate) artifacts: MapArtifacts,
+    git_history: GitHistoryIndex,
+    cycle_modules: std::collections::BTreeSet<String>,
+    layer_violations: BTreeMap<String, usize>,
+}
+
+impl MapEvidence {
+    pub(crate) fn load(config: &LensConfig, graph: &ModuleGraph) -> Self {
+        Self {
+            artifacts: MapArtifacts::load(config),
+            git_history: git_history_facts(config, graph),
+            cycle_modules: cycle_modules(&graph.dependencies),
+            layer_violations: layer_violations(graph),
+        }
+    }
+
+    pub(crate) fn status_json(&self) -> Value {
+        self.artifacts.status_json(&self.git_history)
+    }
+
+    pub(crate) fn measurement_confidence(&self, paths: &[String], facts: &[FileFacts]) -> Value {
+        map_measurement_confidence(paths, facts, &self.artifacts, &self.git_history)
+    }
+
+    pub(crate) fn change_for(
+        &self,
+        module: &str,
+        correctness: Option<&CorrectnessFacts>,
+    ) -> Option<ChangeFacts> {
+        self.git_history.for_module(module, correctness)
+    }
+
+    pub(crate) fn history_for(&self, module: &str) -> Value {
+        self.git_history.raw_for_module(module)
+    }
+
+    pub(crate) fn in_cycle(&self, module: &str) -> bool {
+        self.cycle_modules.contains(module)
+    }
+
+    pub(crate) fn violation_count(&self, module: &str) -> usize {
+        self.layer_violations
+            .get(module)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn is_layer_violation(&self, source: &str, target: &str) -> bool {
+        is_layer_violation(source, target)
+    }
 }
 
 pub(crate) struct MapArtifacts {

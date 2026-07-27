@@ -71,66 +71,20 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
     } else {
         inputs.layer_violations
     };
-    let maintainability_risk = inputs.complexity_score.map(|complexity| {
-        round2(
-            (complexity
-                + (inputs.sloc as f64 * 0.12).min(70.0)
-                + (inputs.public_api_count as f64 * 2.5).min(30.0)
-                + (scored_outbound_dependencies as f64 * 4.0 + inputs.inbound_dependencies as f64)
-                    .min(35.0))
-            .min(400.0),
-        )
-    });
-    let change_risk = inputs.change.as_ref().map(|change| {
-        round2(
-            ((change.churn as f64 / 12.0).min(160.0)
-                + (change.commit_count as f64 * 2.5).min(100.0)
-                + (change.contributor_count as f64 * 14.0).min(80.0)
-                + (change.defect_commit_count as f64 * 18.0).min(90.0)
-                + if change.has_test_evidence { 0.0 } else { 90.0 })
-            .min(520.0),
-        )
-    });
-    let correctness_risk = inputs.correctness.as_ref().map(|correctness| {
-        round2(
-            (if correctness.failed_count > 0 {
-                140.0
-            } else {
-                0.0
-            } + (correctness.failed_count as f64 * 45.0).min(120.0)
-                + (correctness.unknown_count as f64 * 4.0).min(80.0)
-                + (correctness.skipped_count as f64 * 10.0).min(40.0)
-                + if correctness.compile_failed {
-                    180.0
-                } else if correctness.run_failed && correctness.failed_count == 0 {
-                    140.0
-                } else {
-                    0.0
-                }
-                + correctness
-                    .line_coverage_percent
-                    .map(|coverage| ((70.0 - coverage).max(0.0) * 1.5).min(105.0))
-                    .unwrap_or(0.0)
-                + if correctness.test_count > 0
-                    || correctness
-                        .line_coverage_percent
-                        .is_some_and(|coverage| coverage > 0.0)
-                {
-                    0.0
-                } else {
-                    90.0
-                })
-            .min(470.0),
-        )
-    });
-    let architectural_risk = round2(
-        ((scored_outbound_dependencies as f64 * 10.0).min(120.0)
-            + (inputs.inbound_dependencies as f64 * 8.0).min(120.0)
-            + (scored_layer_violations as f64 * 32.0).min(120.0)
-            + if inputs.in_cycle { 110.0 } else { 0.0 }
-            + if inputs.sloc >= 250 { 60.0 } else { 0.0 })
-        .min(530.0),
+    let maintainability = inputs
+        .complexity_score
+        .map(|complexity| maintainability_score(&inputs, scored_outbound_dependencies, complexity));
+    let change = inputs.change.as_ref().map(change_score);
+    let correctness = inputs.correctness.as_ref().map(correctness_score);
+    let architecture = architecture_score(
+        &inputs,
+        scored_outbound_dependencies,
+        scored_layer_violations,
     );
+    let maintainability_risk = maintainability.as_ref().map(|score| score.0);
+    let change_risk = change.as_ref().map(|score| score.0);
+    let correctness_risk = correctness.as_ref().map(|score| score.0);
+    let architectural_risk = architecture.0;
     let quality_risk = match (
         maintainability_risk,
         inputs.locality_risk,
@@ -161,143 +115,10 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
             None
         }
     };
-    let maintainability_components = inputs.complexity_score.map(|complexity| {
-        serde_json::json!([
-            component("complexity_score", complexity, complexity),
-            component("sloc", inputs.sloc, (inputs.sloc as f64 * 0.12).min(70.0)),
-            component(
-                "public_api_count",
-                inputs.public_api_count,
-                (inputs.public_api_count as f64 * 2.5).min(30.0)
-            ),
-            component(
-                "outbound_dependencies",
-                scored_outbound_dependencies,
-                (scored_outbound_dependencies as f64 * 4.0).min(35.0)
-            ),
-            component(
-                "inbound_dependencies",
-                inputs.inbound_dependencies,
-                (inputs.inbound_dependencies as f64)
-                    .min((35.0 - scored_outbound_dependencies as f64 * 4.0).max(0.0))
-            ),
-        ])
-    });
-    let change_components = inputs.change.as_ref().map(|change| {
-        serde_json::json!([
-            component(
-                "churn",
-                change.churn,
-                (change.churn as f64 / 12.0).min(160.0)
-            ),
-            component(
-                "commit_count",
-                change.commit_count,
-                (change.commit_count as f64 * 2.5).min(100.0)
-            ),
-            component(
-                "contributor_count",
-                change.contributor_count,
-                (change.contributor_count as f64 * 14.0).min(80.0)
-            ),
-            component(
-                "defect_commit_count",
-                change.defect_commit_count,
-                (change.defect_commit_count as f64 * 18.0).min(90.0)
-            ),
-            component(
-                "missing_test_evidence",
-                !change.has_test_evidence,
-                if change.has_test_evidence { 0.0 } else { 90.0 }
-            ),
-        ])
-    });
-    let correctness_components = inputs.correctness.as_ref().map(|correctness| {
-        let run_failure = if correctness.compile_failed {
-            180.0
-        } else if correctness.run_failed && correctness.failed_count == 0 {
-            140.0
-        } else {
-            0.0
-        };
-        let coverage = correctness
-            .line_coverage_percent
-            .map(|coverage| ((70.0 - coverage).max(0.0) * 1.5).min(105.0))
-            .unwrap_or(0.0);
-        let missing_evidence = if correctness.test_count > 0
-            || correctness
-                .line_coverage_percent
-                .is_some_and(|coverage| coverage > 0.0)
-        {
-            0.0
-        } else {
-            90.0
-        };
-        serde_json::json!([
-            component(
-                "any_failed_tests",
-                correctness.failed_count > 0,
-                if correctness.failed_count > 0 {
-                    140.0
-                } else {
-                    0.0
-                }
-            ),
-            component(
-                "failed_test_count",
-                correctness.failed_count,
-                (correctness.failed_count as f64 * 45.0).min(120.0)
-            ),
-            component(
-                "unknown_test_count",
-                correctness.unknown_count,
-                (correctness.unknown_count as f64 * 4.0).min(80.0)
-            ),
-            component(
-                "skipped_test_count",
-                correctness.skipped_count,
-                (correctness.skipped_count as f64 * 10.0).min(40.0)
-            ),
-            component("test_run_failure", correctness.run_failed, run_failure),
-            component(
-                "line_coverage_below_70",
-                correctness.line_coverage_percent,
-                coverage
-            ),
-            component(
-                "missing_test_evidence",
-                missing_evidence > 0.0,
-                missing_evidence
-            ),
-        ])
-    });
-    let architectural_components = serde_json::json!([
-        component(
-            "outbound_dependencies",
-            scored_outbound_dependencies,
-            (scored_outbound_dependencies as f64 * 10.0).min(120.0)
-        ),
-        component(
-            "inbound_dependencies",
-            inputs.inbound_dependencies,
-            (inputs.inbound_dependencies as f64 * 8.0).min(120.0)
-        ),
-        component(
-            "layer_violations",
-            scored_layer_violations,
-            (scored_layer_violations as f64 * 32.0).min(120.0)
-        ),
-        component(
-            "cycle_membership",
-            inputs.in_cycle,
-            if inputs.in_cycle { 110.0 } else { 0.0 }
-        ),
-        component(
-            "large_module",
-            inputs.sloc,
-            if inputs.sloc >= 250 { 60.0 } else { 0.0 }
-        ),
-    ]);
+    let maintainability_components = maintainability.map(|score| score.1);
+    let change_components = change.map(|score| score.1);
+    let correctness_components = correctness.map(|score| score.1);
+    let architectural_components = architecture.1;
     let quality_components = serde_json::json!([
         component(
             "maintainability_risk",
@@ -343,6 +164,136 @@ pub(crate) fn architecture_risk_scores(inputs: ArchitectureRiskInputs) -> Archit
         unknown_metrics,
         score_components,
     }
+}
+
+type Score = (f64, serde_json::Value);
+
+fn maintainability_score(
+    inputs: &ArchitectureRiskInputs,
+    outbound: usize,
+    complexity: f64,
+) -> Score {
+    let sloc = (inputs.sloc as f64 * 0.12).min(70.0);
+    let public_api = (inputs.public_api_count as f64 * 2.5).min(30.0);
+    let outbound_risk = (outbound as f64 * 4.0).min(35.0);
+    let inbound_risk = (inputs.inbound_dependencies as f64).min((35.0 - outbound_risk).max(0.0));
+    let total = capped_sum(
+        [complexity, sloc, public_api, outbound_risk, inbound_risk],
+        400.0,
+    );
+    (
+        total,
+        serde_json::json!([
+            component("complexity_score", complexity, complexity),
+            component("sloc", inputs.sloc, sloc),
+            component("public_api_count", inputs.public_api_count, public_api),
+            component("outbound_dependencies", outbound, outbound_risk),
+            component(
+                "inbound_dependencies",
+                inputs.inbound_dependencies,
+                inbound_risk
+            ),
+        ]),
+    )
+}
+
+fn change_score(change: &ChangeFacts) -> Score {
+    let risks = [
+        (change.churn as f64 / 12.0).min(160.0),
+        (change.commit_count as f64 * 2.5).min(100.0),
+        (change.contributor_count as f64 * 14.0).min(80.0),
+        (change.defect_commit_count as f64 * 18.0).min(90.0),
+        if change.has_test_evidence { 0.0 } else { 90.0 },
+    ];
+    (
+        capped_sum(risks, 520.0),
+        serde_json::json!([
+            component("churn", change.churn, risks[0]),
+            component("commit_count", change.commit_count, risks[1]),
+            component("contributor_count", change.contributor_count, risks[2]),
+            component("defect_commit_count", change.defect_commit_count, risks[3]),
+            component("missing_test_evidence", !change.has_test_evidence, risks[4]),
+        ]),
+    )
+}
+
+fn correctness_score(correctness: &CorrectnessFacts) -> Score {
+    let run_failure = if correctness.compile_failed {
+        180.0
+    } else if correctness.run_failed && correctness.failed_count == 0 {
+        140.0
+    } else {
+        0.0
+    };
+    let coverage = correctness
+        .line_coverage_percent
+        .map(|coverage| ((70.0 - coverage).max(0.0) * 1.5).min(105.0))
+        .unwrap_or_default();
+    let has_evidence = correctness.test_count > 0
+        || correctness
+            .line_coverage_percent
+            .is_some_and(|coverage| coverage > 0.0);
+    let risks = [
+        if correctness.failed_count > 0 {
+            140.0
+        } else {
+            0.0
+        },
+        (correctness.failed_count as f64 * 45.0).min(120.0),
+        (correctness.unknown_count as f64 * 4.0).min(80.0),
+        (correctness.skipped_count as f64 * 10.0).min(40.0),
+        run_failure,
+        coverage,
+        if has_evidence { 0.0 } else { 90.0 },
+    ];
+    (
+        capped_sum(risks, 470.0),
+        serde_json::json!([
+            component("any_failed_tests", correctness.failed_count > 0, risks[0]),
+            component("failed_test_count", correctness.failed_count, risks[1]),
+            component("unknown_test_count", correctness.unknown_count, risks[2]),
+            component("skipped_test_count", correctness.skipped_count, risks[3]),
+            component("test_run_failure", correctness.run_failed, risks[4]),
+            component(
+                "line_coverage_below_70",
+                correctness.line_coverage_percent,
+                risks[5]
+            ),
+            component("missing_test_evidence", !has_evidence, risks[6]),
+        ]),
+    )
+}
+
+fn architecture_score(
+    inputs: &ArchitectureRiskInputs,
+    outbound: usize,
+    violations: usize,
+) -> Score {
+    let risks = [
+        (outbound as f64 * 10.0).min(120.0),
+        (inputs.inbound_dependencies as f64 * 8.0).min(120.0),
+        (violations as f64 * 32.0).min(120.0),
+        if inputs.in_cycle { 110.0 } else { 0.0 },
+        if inputs.sloc >= 250 { 60.0 } else { 0.0 },
+    ];
+    (
+        capped_sum(risks, 530.0),
+        serde_json::json!([
+            component("outbound_dependencies", outbound, risks[0]),
+            component(
+                "inbound_dependencies",
+                inputs.inbound_dependencies,
+                risks[1]
+            ),
+            component("layer_violations", violations, risks[2]),
+            component("cycle_membership", inputs.in_cycle, risks[3]),
+            component("large_module", inputs.sloc, risks[4]),
+        ]),
+    )
+}
+
+fn capped_sum<const N: usize>(risks: [f64; N], cap: f64) -> f64 {
+    round2(risks.into_iter().sum::<f64>().min(cap))
 }
 
 fn component(signal: &str, raw: impl serde::Serialize, contribution: f64) -> serde_json::Value {

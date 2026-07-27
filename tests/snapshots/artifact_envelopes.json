@@ -1,4 +1,5 @@
 {
+  "api_health.json": ["generated_from", "measurement_confidence", "records", "risk_model_id", "risk_model_version", "schema_version", "summary", "tool"],
   "clones.json": ["generated_from", "measurement_confidence", "records", "risk_model_id", "risk_model_version", "schema_version", "summary", "tool"],
   "correctness_review.json": ["data", "generated_from", "measurement_confidence", "risk_model_id", "risk_model_version", "schema_version", "summary", "tool"],
   "coverage.json": ["data", "generated_from", "measurement_confidence", "risk_model_id", "risk_model_version", "schema_version", "summary", "tool"],
@@ -7,5 +8,6 @@
   "locality_metrics.json": ["generated_from", "measurement_confidence", "records", "risk_model_id", "risk_model_version", "schema_version", "summary", "tool"],
   "map.json": ["data", "generated_from", "measurement_confidence", "risk_model_id", "risk_model_version", "schema_version", "summary", "tool"],
   "rust_escape_hatches.json": ["generated_from", "measurement_confidence", "records", "risk_model_id", "risk_model_version", "schema_version", "summary", "tool"],
+  "reliability_findings.json": ["generated_from", "measurement_confidence", "records", "risk_model_id", "risk_model_version", "schema_version", "summary", "tool"],
   "type_health.json": ["generated_from", "measurement_confidence", "records", "risk_model_id", "risk_model_version", "schema_version", "summary", "tool"]
 }

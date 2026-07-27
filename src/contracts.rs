@@ -117,7 +117,7 @@ pub(crate) struct ReviewMeasurement {
 pub(crate) fn artifact_schemas(tool: &MeasureTool) -> Value {
     match tool {
         MeasureTool::All => {
-            let schemas = MeasureTool::all_tools()
+            let schemas = MeasureTool::schema_tools()
                 .into_iter()
                 .map(|tool| {
                     (
@@ -203,6 +203,46 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
+        MeasureTool::Reliability => array_schema(
+            "reliability_findings.json",
+            &["rule_id", "category", "severity", "path", "line", "message"],
+            json!({
+                "rule_id": {"type": "string"},
+                "category": {"type": "string", "const": "static-finding"},
+                "kind": {"type": "string"},
+                "severity": {"type": "string", "enum": ["error", "warning", "advisory"]},
+                "path": {"type": "string"},
+                "line": {"type": "integer"},
+                "module_key": {"type": "string"},
+                "module_id": {"type": "string"},
+                "scope": {"type": "string", "enum": ["production", "test"]},
+                "message": {"type": "string"},
+                "source": {"type": "string"},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
+        ),
+        MeasureTool::ApiHealth => array_schema(
+            "api_health.json",
+            &[
+                "module_key",
+                "path",
+                "public_item_count",
+                "documented_public_item_count",
+                "documentation_percent",
+            ],
+            json!({
+                "module_key": {"type": "string"},
+                "module_id": {"type": "string"},
+                "path": {"type": "string"},
+                "public_item_count": {"type": "integer"},
+                "documented_public_item_count": {"type": "integer"},
+                "missing_documentation_count": {"type": "integer"},
+                "documentation_percent": {"type": "number"},
+                "crate_level_documentation": {"type": ["boolean", "null"]},
+                "signals": {"type": "array", "items": {"type": "string"}},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
+        ),
         MeasureTool::TypeHealth => array_schema(
             "type_health.json",
             &[
@@ -281,6 +321,38 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
             json!({
                 "summary": {"type": "object"},
                 "files": {"type": "array", "items": {"type": "object"}},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
+        ),
+        MeasureTool::Practices => object_schema(
+            "rust_practices.json",
+            &[
+                "version",
+                "profile",
+                "summary",
+                "checks",
+                "measurement_confidence",
+            ],
+            json!({
+                "version": {"type": "integer"},
+                "profile": {"type": "string"},
+                "summary": {"type": "object"},
+                "checks": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["rule_id", "category", "severity", "status", "source"],
+                        "properties": {
+                            "rule_id": {"type": "string"},
+                            "category": {"type": "string", "enum": ["verified-gate", "static-finding", "heuristic-signal"]},
+                            "severity": {"type": "string", "enum": ["error", "warning", "advisory"]},
+                            "status": {"type": "string", "enum": ["passed", "failed", "unavailable", "timed-out", "skipped"]},
+                            "source": {"type": "string"},
+                            "evidence": {"type": "object"}
+                        },
+                        "additionalProperties": true
+                    }
+                },
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),

@@ -28,12 +28,16 @@
               rust-analyzer
               cargo-nextest
               cargo-llvm-cov
+              llvmPackages.llvm
+              jq
               cargo-watch
               cargo-audit
               cargo-deny
             ];
 
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+            LLVM_COV = "${pkgs.llvmPackages.llvm}/bin/llvm-cov";
+            LLVM_PROFDATA = "${pkgs.llvmPackages.llvm}/bin/llvm-profdata";
 
             shellHook = ''
               echo "rust-quality-lens dev shell"

@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use crate::config::{LensConfig, SemanticIdentityMode};
-use crate::facts::{FileFacts, ResolvedDependencyFact};
+use crate::facts::{DependencyReferenceFact, FileFacts, ResolvedDependencyFact};
 use crate::util::{normalize_slashes, write_json};
 
 const CACHE_VERSION: u64 = 8;
@@ -81,17 +81,7 @@ pub(crate) fn resolve(
     config: &LensConfig,
     facts: &mut [FileFacts],
 ) -> Result<IdentityResolutionSummary> {
-    let candidates = facts
-        .iter()
-        .map(|fact| {
-            fact.graph
-                .dependency_references
-                .iter()
-                .filter(|reference| is_semantic_candidate(&reference.raw_path, fact, facts))
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
+    let candidates = semantic_candidates(facts);
     let reference_count = candidates.iter().map(Vec::len).sum();
     if config.identity_resolution == SemanticIdentityMode::Disabled || reference_count == 0 {
         return Ok(IdentityResolutionSummary::disabled(
@@ -99,125 +89,218 @@ pub(crate) fn resolve(
             reference_count,
         ));
     }
-
     let analyzer_version = analyzer_version(config);
     let fingerprint = fingerprint(config, facts, analyzer_version.as_deref());
-    if let Some(mut cached) = read_cache(config, &fingerprint) {
-        for fact in facts.iter_mut() {
-            fact.graph.resolved_dependencies = cached
-                .resolved_by_path
-                .remove(&normalize_slashes(&fact.path))
-                .unwrap_or_default();
-        }
-        cached.summary.mode = config.identity_resolution;
-        cached.summary.cache_hit = true;
-        cached.summary.duration_ms = 0;
-        return enforce_required(config, cached.summary);
+    if let Some(summary) = restore_cache(config, facts, &fingerprint) {
+        return enforce_required(config, summary);
     }
 
     let started = Instant::now();
     let deadline = started + Duration::from_secs(config.identity_timeout_seconds);
     let linked_project = detached_rust_project(config, facts)?;
-    let client = LspClient::start(config, linked_project.as_deref(), deadline);
-    let mut client = match client {
+    let mut client = match LspClient::start(config, linked_project.as_deref(), deadline) {
         Ok(client) => client,
         Err(error) => {
-            let mut summary =
-                IdentityResolutionSummary::disabled(config.identity_resolution, reference_count);
-            summary.reason = Some(error.to_string());
-            summary.analyzer_version = analyzer_version;
-            return enforce_required(config, summary);
+            return unavailable_summary(config, reference_count, analyzer_version, error);
         }
     };
-
     let path_index = fact_path_index(config, facts);
-    let mut resolved_count = 0;
-    let mut local_definition_count = 0;
-    let mut external_definition_count = 0;
-    let mut unresolved_count = 0;
-    for (fact, references) in facts.iter_mut().zip(candidates) {
-        let source_path = absolute_path(config, &fact.path);
-        let source_uri = file_uri(&source_path);
-        let mut resolved = Vec::new();
-        for reference in &references {
-            if Instant::now() >= deadline {
-                unresolved_count += 1;
-                resolved.push(unresolved(reference, "timeout"));
-                continue;
-            }
-            let definition = client.definition(
-                &source_uri,
-                reference.line.saturating_sub(1),
-                reference.column,
-                deadline,
-            );
-            match definition {
-                Ok(Some(location)) => {
-                    resolved_count += 1;
-                    let target_path = uri_path(&location.uri);
-                    let target_key = target_path.as_ref().map(canonical_key);
-                    let target_fact = target_key.as_ref().and_then(|key| path_index.get(key));
-                    let symbol = target_path
-                        .as_ref()
-                        .and_then(|path| identifier_at(path, location.line, location.character))
-                        .unwrap_or_else(|| reference_symbol(&reference.raw_path));
-                    let (status, target_module_id, target_module_key, symbol_identity) =
-                        if let Some(target) = target_fact {
-                            local_definition_count += 1;
-                            (
-                                "resolved_local",
-                                Some(target.0.clone()),
-                                Some(target.1.clone()),
-                                Some(format!("{}::{symbol}", target.0)),
-                            )
-                        } else {
-                            external_definition_count += 1;
-                            ("resolved_external", None, None, None)
-                        };
-                    resolved.push(ResolvedDependencyFact {
-                        raw_path: reference.raw_path.clone(),
-                        line: reference.line,
-                        column: reference.column,
-                        status: status.to_string(),
-                        backend: "rust_analyzer".to_string(),
-                        target_path: target_path.map(normalize_slashes),
-                        target_module_id,
-                        target_module_key,
-                        symbol_identity,
-                    });
-                }
-                Ok(None) => {
-                    unresolved_count += 1;
-                    resolved.push(unresolved(reference, "unresolved"));
-                }
-                Err(error) => {
-                    unresolved_count += 1;
-                    resolved.push(unresolved(reference, &format!("error: {error}")));
-                }
-            }
-        }
-        fact.graph.resolved_dependencies = resolved;
-    }
+    let counts = resolve_candidates(
+        config,
+        facts,
+        candidates,
+        &path_index,
+        &mut client,
+        deadline,
+    );
     client.shutdown();
 
-    let summary = IdentityResolutionSummary {
-        mode: config.identity_resolution,
-        backend: "rust_analyzer".to_string(),
-        available: true,
-        complete: unresolved_count == 0,
-        cache_hit: false,
+    let summary = counts.summary(
+        config.identity_resolution,
         reference_count,
-        resolved_count,
-        local_definition_count,
-        external_definition_count,
-        unresolved_count,
-        duration_ms: started.elapsed().as_millis(),
+        started.elapsed(),
         analyzer_version,
-        reason: (unresolved_count > 0)
-            .then(|| format!("{unresolved_count} dependency references were not resolved")),
-    };
+    );
     write_cache(config, facts, &fingerprint, &summary)?;
     enforce_required(config, summary)
+}
+
+#[derive(Default)]
+struct ResolutionCounts {
+    resolved: usize,
+    local: usize,
+    external: usize,
+    unresolved: usize,
+}
+
+impl ResolutionCounts {
+    fn record(&mut self, fact: &ResolvedDependencyFact) {
+        match fact.status.as_str() {
+            "resolved_local" => {
+                self.resolved += 1;
+                self.local += 1;
+            }
+            "resolved_external" => {
+                self.resolved += 1;
+                self.external += 1;
+            }
+            _ => self.unresolved += 1,
+        }
+    }
+
+    fn summary(
+        self,
+        mode: SemanticIdentityMode,
+        reference_count: usize,
+        duration: Duration,
+        analyzer_version: Option<String>,
+    ) -> IdentityResolutionSummary {
+        IdentityResolutionSummary {
+            mode,
+            backend: "rust_analyzer".to_string(),
+            available: true,
+            complete: self.unresolved == 0,
+            cache_hit: false,
+            reference_count,
+            resolved_count: self.resolved,
+            local_definition_count: self.local,
+            external_definition_count: self.external,
+            unresolved_count: self.unresolved,
+            duration_ms: duration.as_millis(),
+            analyzer_version,
+            reason: (self.unresolved > 0).then(|| {
+                format!(
+                    "{} dependency references were not resolved",
+                    self.unresolved
+                )
+            }),
+        }
+    }
+}
+
+fn semantic_candidates(facts: &[FileFacts]) -> Vec<Vec<DependencyReferenceFact>> {
+    facts
+        .iter()
+        .map(|fact| {
+            fact.graph
+                .dependency_references
+                .iter()
+                .filter(|reference| is_semantic_candidate(&reference.raw_path, fact, facts))
+                .cloned()
+                .collect()
+        })
+        .collect()
+}
+
+fn restore_cache(
+    config: &LensConfig,
+    facts: &mut [FileFacts],
+    fingerprint: &str,
+) -> Option<IdentityResolutionSummary> {
+    let mut cached = read_cache(config, fingerprint)?;
+    for fact in facts {
+        fact.graph.resolved_dependencies = cached
+            .resolved_by_path
+            .remove(&normalize_slashes(&fact.path))
+            .unwrap_or_default();
+    }
+    cached.summary.mode = config.identity_resolution;
+    cached.summary.cache_hit = true;
+    cached.summary.duration_ms = 0;
+    Some(cached.summary)
+}
+
+fn unavailable_summary(
+    config: &LensConfig,
+    reference_count: usize,
+    analyzer_version: Option<String>,
+    error: anyhow::Error,
+) -> Result<IdentityResolutionSummary> {
+    let mut summary =
+        IdentityResolutionSummary::disabled(config.identity_resolution, reference_count);
+    summary.reason = Some(error.to_string());
+    summary.analyzer_version = analyzer_version;
+    enforce_required(config, summary)
+}
+
+fn resolve_candidates(
+    config: &LensConfig,
+    facts: &mut [FileFacts],
+    candidates: Vec<Vec<DependencyReferenceFact>>,
+    path_index: &BTreeMap<String, (String, String)>,
+    client: &mut LspClient,
+    deadline: Instant,
+) -> ResolutionCounts {
+    let mut counts = ResolutionCounts::default();
+    for (fact, references) in facts.iter_mut().zip(candidates) {
+        let source_uri = file_uri(&absolute_path(config, &fact.path));
+        fact.graph.resolved_dependencies = references
+            .iter()
+            .map(|reference| {
+                resolve_reference(client, &source_uri, reference, path_index, deadline)
+            })
+            .inspect(|resolved| counts.record(resolved))
+            .collect();
+    }
+    counts
+}
+
+fn resolve_reference(
+    client: &mut LspClient,
+    source_uri: &str,
+    reference: &DependencyReferenceFact,
+    path_index: &BTreeMap<String, (String, String)>,
+    deadline: Instant,
+) -> ResolvedDependencyFact {
+    if Instant::now() >= deadline {
+        return unresolved(reference, "timeout");
+    }
+    match client.definition(
+        source_uri,
+        reference.line.saturating_sub(1),
+        reference.column,
+        deadline,
+    ) {
+        Ok(Some(location)) => resolved_definition(reference, location, path_index),
+        Ok(None) => unresolved(reference, "unresolved"),
+        Err(error) => unresolved(reference, &format!("error: {error}")),
+    }
+}
+
+fn resolved_definition(
+    reference: &DependencyReferenceFact,
+    location: DefinitionLocation,
+    path_index: &BTreeMap<String, (String, String)>,
+) -> ResolvedDependencyFact {
+    let target_path = uri_path(&location.uri);
+    let target = target_path
+        .as_ref()
+        .map(canonical_key)
+        .and_then(|key| path_index.get(&key));
+    let symbol = target_path
+        .as_ref()
+        .and_then(|path| identifier_at(path, location.line, location.character))
+        .unwrap_or_else(|| reference_symbol(&reference.raw_path));
+    let (status, target_module_id, target_module_key, symbol_identity) = match target {
+        Some((module_id, module_key)) => (
+            "resolved_local",
+            Some(module_id.clone()),
+            Some(module_key.clone()),
+            Some(format!("{module_id}::{symbol}")),
+        ),
+        None => ("resolved_external", None, None, None),
+    };
+    ResolvedDependencyFact {
+        raw_path: reference.raw_path.clone(),
+        line: reference.line,
+        column: reference.column,
+        status: status.to_string(),
+        backend: "rust_analyzer".to_string(),
+        target_path: target_path.map(normalize_slashes),
+        target_module_id,
+        target_module_key,
+        symbol_identity,
+    }
 }
 
 fn enforce_required(
@@ -424,12 +507,71 @@ struct DefinitionLocation {
     character: usize,
 }
 
+type LspReceiver = Receiver<Result<Value, String>>;
+type LspTransport = (Child, ChildStdin, LspReceiver);
+
 struct LspClient {
     child: Child,
     stdin: ChildStdin,
-    receiver: Receiver<Result<Value, String>>,
+    receiver: LspReceiver,
     next_id: u64,
     configuration: Value,
+}
+
+fn lsp_transport(config: &LensConfig) -> Result<LspTransport> {
+    let mut child = Command::new(&config.rust_analyzer)
+        .current_dir(&config.project_root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("starting {}", config.rust_analyzer.display()))?;
+    let stdin = child
+        .stdin
+        .take()
+        .context("rust-analyzer stdin unavailable")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("rust-analyzer stdout unavailable")?;
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let message = match read_lsp_message(&mut reader) {
+                Ok(Some(message)) => Ok(message),
+                Ok(None) => return,
+                Err(error) => Err(error.to_string()),
+            };
+            let failed = message.is_err();
+            if sender.send(message).is_err() || failed {
+                return;
+            }
+        }
+    });
+    Ok((child, stdin, receiver))
+}
+
+fn analyzer_configuration(config: &LensConfig, linked_project: Option<&Path>) -> Value {
+    let extra_args = if config.identity_offline {
+        json!(["--offline", "--all-features"])
+    } else {
+        json!(["--all-features"])
+    };
+    let mut configuration = json!({
+        "cargo": {
+            "buildScripts": {"enable": false},
+            "extraArgs": extra_args,
+            "features": "all",
+            "allTargets": true
+        },
+        "procMacro": {"enable": false},
+        "checkOnSave": false
+    });
+    if let Some(project) = linked_project {
+        configuration["linkedProjects"] = json!([canonical_key(project)]);
+    }
+    configuration
 }
 
 impl LspClient {
@@ -438,81 +580,38 @@ impl LspClient {
         linked_project: Option<&Path>,
         deadline: Instant,
     ) -> Result<Self> {
-        let mut child = Command::new(&config.rust_analyzer)
-            .current_dir(&config.project_root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .with_context(|| format!("starting {}", config.rust_analyzer.display()))?;
-        let stdin = child
-            .stdin
-            .take()
-            .context("rust-analyzer stdin unavailable")?;
-        let stdout = child
-            .stdout
-            .take()
-            .context("rust-analyzer stdout unavailable")?;
-        let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            loop {
-                match read_lsp_message(&mut reader) {
-                    Ok(Some(message)) => {
-                        if sender.send(Ok(message)).is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(error) => {
-                        let _ = sender.send(Err(error.to_string()));
-                        break;
-                    }
-                }
-            }
-        });
-        let mut configuration = json!({
-            "cargo": {
-                "buildScripts": {"enable": false},
-                "extraArgs": if config.identity_offline { json!(["--offline", "--all-features"]) } else { json!(["--all-features"]) },
-                "features": "all",
-                "allTargets": true
-            },
-            "procMacro": {"enable": false},
-            "checkOnSave": false
-        });
-        if let Some(project) = linked_project {
-            configuration["linkedProjects"] = json!([canonical_key(project)]);
-        }
+        let (child, stdin, receiver) = lsp_transport(config)?;
+        let configuration = analyzer_configuration(config, linked_project);
         let mut client = Self {
             child,
             stdin,
             receiver,
             next_id: 1,
-            configuration: configuration.clone(),
+            configuration,
         };
+        client.initialize(config, deadline)?;
+        client.wait_until_ready(deadline)?;
+        Ok(client)
+    }
+
+    fn initialize(&mut self, config: &LensConfig, deadline: Instant) -> Result<()> {
         let root_uri = file_uri(&config.project_root);
-        let initialization_options = configuration;
-        client.request(
+        self.request(
             "initialize",
             json!({
                 "processId": Value::Null,
                 "rootUri": root_uri,
                 "workspaceFolders": [{"uri": root_uri, "name": config.project_name}],
-                "capabilities": {
-                    "experimental": {"serverStatusNotification": true}
-                },
-                "initializationOptions": initialization_options,
+                "capabilities": {"experimental": {"serverStatusNotification": true}},
+                "initializationOptions": self.configuration,
             }),
             deadline,
         )?;
-        client.notify("initialized", json!({}))?;
-        client.notify(
+        self.notify("initialized", json!({}))?;
+        self.notify(
             "workspace/didChangeConfiguration",
-            json!({"settings": {"rust-analyzer": client.configuration.clone()}}),
-        )?;
-        client.wait_until_ready(deadline)?;
-        Ok(client)
+            json!({"settings": {"rust-analyzer": self.configuration}}),
+        )
     }
 
     fn definition(
@@ -538,15 +637,7 @@ impl LspClient {
         self.next_id += 1;
         self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
         loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                bail!("rust-analyzer request timed out");
-            }
-            let message = self
-                .receiver
-                .recv_timeout(remaining)
-                .map_err(|_| anyhow!("rust-analyzer request timed out"))?
-                .map_err(|error| anyhow!(error))?;
+            let message = self.receive(deadline, "request")?;
             if message["id"].as_u64() == Some(id) {
                 if !message["error"].is_null() {
                     bail!("rust-analyzer {method} error: {}", message["error"]);
@@ -583,15 +674,7 @@ impl LspClient {
 
     fn wait_until_ready(&mut self, deadline: Instant) -> Result<()> {
         loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                bail!("rust-analyzer project loading timed out");
-            }
-            let message = self
-                .receiver
-                .recv_timeout(remaining)
-                .map_err(|_| anyhow!("rust-analyzer project loading timed out"))?
-                .map_err(|error| anyhow!(error))?;
+            let message = self.receive(deadline, "project loading")?;
             if message["method"] == "experimental/serverStatus"
                 && message["params"]["quiescent"] == true
             {
@@ -607,6 +690,17 @@ impl LspClient {
                 self.respond_to_server(&message)?;
             }
         }
+    }
+
+    fn receive(&self, deadline: Instant, operation: &str) -> Result<Value> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            bail!("rust-analyzer {operation} timed out");
+        }
+        self.receiver
+            .recv_timeout(remaining)
+            .map_err(|_| anyhow!("rust-analyzer {operation} timed out"))?
+            .map_err(|error| anyhow!(error))
     }
 
     fn notify(&mut self, method: &str, params: Value) -> Result<()> {
@@ -892,6 +986,7 @@ mod tests {
             rust_analyzer: root.path().join("missing-rust-analyzer"),
             identity_timeout_seconds: 1,
             identity_offline: true,
+            verification: Default::default(),
         };
         let source_path = root.path().join("src/lib.rs").to_string_lossy().to_string();
         let mut fact = FileFacts::test_fact(&source_path, "lib");
@@ -936,6 +1031,7 @@ mod tests {
             rust_analyzer: PathBuf::from("rust-analyzer"),
             identity_timeout_seconds: 20,
             identity_offline: true,
+            verification: Default::default(),
         };
         let library_path = root.path().join("src/lib.rs").to_string_lossy().to_string();
         let mut library = FileFacts::test_fact(&library_path, "lib");

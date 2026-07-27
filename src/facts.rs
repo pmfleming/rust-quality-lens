@@ -90,6 +90,10 @@ pub(crate) struct FileGraphFacts {
     pub(crate) child_modules: Vec<String>,
     pub(crate) unsupported_patterns: Vec<String>,
     pub(crate) public_api_count: usize,
+    #[serde(default)]
+    pub(crate) documented_public_api_count: usize,
+    #[serde(default)]
+    pub(crate) has_crate_docs: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -127,6 +131,8 @@ pub(crate) struct FileItems {
     pub(crate) tests: Vec<TestFact>,
     #[serde(default)]
     pub(crate) functions: Vec<FunctionFact>,
+    #[serde(default)]
+    pub(crate) quality_findings: Vec<QualityFindingFact>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -191,6 +197,15 @@ pub(crate) struct LocationFact {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+pub(crate) struct QualityFindingFact {
+    pub(crate) rule_id: String,
+    pub(crate) kind: String,
+    pub(crate) line: usize,
+    pub(crate) message: String,
+    pub(crate) test_code: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub(crate) struct AstCloneFact {
     pub(crate) name: String,
     pub(crate) qualified_name: String,
@@ -216,6 +231,8 @@ impl RunContext {
                 MeasureTool::Hotspots
                     | MeasureTool::Clones
                     | MeasureTool::EscapeHatches
+                    | MeasureTool::Reliability
+                    | MeasureTool::ApiHealth
                     | MeasureTool::TypeHealth
                     | MeasureTool::Correctness
                     | MeasureTool::CorrectnessRun

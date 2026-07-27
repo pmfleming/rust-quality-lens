@@ -402,13 +402,16 @@ fn artifact_schema_prints_known_output_contracts() {
     for file in [
         "hotspots.json",
         "clones.json",
+        "api_health.json",
         "rust_escape_hatches.json",
+        "reliability_findings.json",
         "type_health.json",
         "correctness_review.json",
         "coverage.json",
         "locality_metrics.json",
         "leverage_metrics.json",
         "map.json",
+        "rust_practices.json",
     ] {
         assert!(properties.contains_key(file), "missing schema for {file}");
     }
@@ -431,6 +434,32 @@ fn artifact_schema_prints_known_output_contracts() {
 }
 
 #[test]
+fn verify_writes_structured_practice_evidence() {
+    let config = "tests/fixtures/mini_rust_project/rqlens.toml";
+    let output = run(&["verify", "--config", config]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = read_json(
+        repo_root().join("tests/fixtures/mini_rust_project/target/analysis/rust_practices.json"),
+    );
+    let checks = report["checks"]
+        .as_array()
+        .expect("checks should be an array");
+    assert!(checks.iter().any(|check| {
+        check["rule_id"] == "rust.official.rustfmt"
+            && matches!(check["status"].as_str(), Some("passed" | "failed"))
+    }));
+    assert!(checks.iter().all(|check| check["source"].is_string()));
+    assert_eq!(
+        report["measurement_confidence"]["confidence_scope"],
+        "verified_practices"
+    );
+}
+
+#[test]
 fn init_writes_default_config() {
     let root = repo_root()
         .join("target")
@@ -448,8 +477,9 @@ fn init_writes_default_config() {
         String::from_utf8_lossy(&output.stderr)
     );
     let text = fs::read_to_string(config_path).expect("config should be written");
-    assert!(text.contains("source_roots = [\"src\"]"));
+    assert!(text.contains("Cargo workspace and local path packages are discovered automatically"));
     assert!(text.contains("[rust]"));
+    assert!(text.contains("[verification]"));
 }
 
 #[test]

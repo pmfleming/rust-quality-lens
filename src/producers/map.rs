@@ -2,27 +2,19 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-use crate::artifacts::{
-    MapArtifacts, cycle_modules, git_history_facts, is_layer_violation, layer_violations,
-    map_measurement_confidence,
-};
+use crate::artifacts::MapEvidence;
 use crate::config::LensConfig;
 use crate::facts::{ModuleGraph, ModuleInfo, RunContext, module_graph};
 use crate::measurement::{
-    MODEL_ID, MODEL_VERSION, RULESET_ID, RULESET_VERSION, classify_module, layer_color,
-    option_json, risk_model_classification, risk_model_tool_scores, risk_model_weights,
+    MODEL_ID, MODEL_VERSION, RULESET_ID, RULESET_VERSION, layer_color, option_json,
+    risk_model_classification, risk_model_tool_scores, risk_model_weights,
 };
 use crate::risk_model::{ArchitectureRiskInputs, architecture_risk_scores};
 use crate::util::normalize_slashes;
 
-use super::topology::dependency_counts;
-
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let graph = module_graph(&context.source_facts);
-    let artifacts = MapArtifacts::load(config);
-    let git_history = git_history_facts(config, &graph);
-    let cycle_modules = cycle_modules(&graph.dependencies);
-    let layer_violations = layer_violations(&graph);
+    let evidence = MapEvidence::load(config, &graph);
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut unknown_metric_counts = BTreeMap::new();
@@ -32,14 +24,11 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         let node = MapNodeInputs {
             graph: &graph,
             module,
-            artifacts: &artifacts,
-            git_history: &git_history,
-            cycle_modules: &cycle_modules,
-            layer_violations: &layer_violations,
+            evidence: &evidence,
         }
         .build(&mut unknown_metric_counts, &mut unknown_module_count);
         nodes.push(node);
-        edges.extend(module_edges(&graph, module));
+        edges.extend(module_edges(&graph, module, &evidence));
     }
 
     let summary = json!({
@@ -47,10 +36,10 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         "edge_count": edges.len(),
         "unknown_module_count": unknown_module_count,
         "unknown_metrics": unknown_metric_counts,
-        "artifact_status": artifacts.status_json(&git_history),
+        "artifact_status": evidence.status_json(),
     });
     let mut measurement_confidence =
-        map_measurement_confidence(&config.source_roots, &graph.facts, &artifacts, &git_history);
+        evidence.measurement_confidence(&config.source_roots, &graph.facts);
     if let Some(object) = measurement_confidence.as_object_mut() {
         object.insert(
             "semantic_identity".to_string(),
@@ -82,10 +71,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
 struct MapNodeInputs<'a> {
     graph: &'a ModuleGraph,
     module: &'a ModuleInfo,
-    artifacts: &'a MapArtifacts,
-    git_history: &'a crate::artifacts::GitHistoryIndex,
-    cycle_modules: &'a std::collections::BTreeSet<String>,
-    layer_violations: &'a BTreeMap<String, usize>,
+    evidence: &'a MapEvidence,
 }
 
 impl MapNodeInputs<'_> {
@@ -94,11 +80,17 @@ impl MapNodeInputs<'_> {
         unknown_metric_counts: &mut BTreeMap<String, usize>,
         unknown_module_count: &mut usize,
     ) -> Value {
-        let counts = dependency_counts(self.graph, &self.module.key);
-        let mut correctness = self.artifacts.correctness.as_ref().map(|correctness| {
-            correctness.for_module_identity(&self.module.id, &self.module.module_key)
-        });
+        let (outbound, inbound) = self.graph.dependency_counts(&self.module.key);
+        let mut correctness = self
+            .evidence
+            .artifacts
+            .correctness
+            .as_ref()
+            .map(|correctness| {
+                correctness.for_module_identity(&self.module.id, &self.module.module_key)
+            });
         if let Some(coverage) = self
+            .evidence
             .artifacts
             .coverage
             .as_ref()
@@ -111,36 +103,39 @@ impl MapNodeInputs<'_> {
             is_entrypoint: self.module.is_entrypoint,
             sloc: self.module.source_nonblank_line_count,
             public_api_count: self.module.public_api_count,
-            outbound_dependencies: counts.outbound,
-            inbound_dependencies: counts.inbound,
+            outbound_dependencies: outbound,
+            inbound_dependencies: inbound,
             complexity_score: self
+                .evidence
                 .artifacts
                 .hotspots
                 .as_ref()
                 .and_then(|hotspots| module_metric(hotspots, self.module)),
             change: self
-                .git_history
-                .for_module(&self.module.key, correctness.as_ref()),
+                .evidence
+                .change_for(&self.module.key, correctness.as_ref()),
             correctness,
             locality_risk: self
+                .evidence
                 .artifacts
                 .locality
                 .as_ref()
                 .map(|locality| module_metric(locality, self.module).unwrap_or_default()),
             leverage_pressure: self
+                .evidence
                 .artifacts
                 .leverage
                 .as_ref()
                 .map(|leverage| module_metric(leverage, self.module).unwrap_or_default()),
-            layer_violations: *self.layer_violations.get(&self.module.key).unwrap_or(&0),
-            in_cycle: self.cycle_modules.contains(&self.module.key),
+            layer_violations: self.evidence.violation_count(&self.module.key),
+            in_cycle: self.evidence.in_cycle(&self.module.key),
         });
         record_unknown_metrics(
             &scores.unknown_metrics,
             unknown_metric_counts,
             unknown_module_count,
         );
-        let layer = module_layer(self.module);
+        let layer = self.module.layer();
         json!({
             "data": {
                 "id": self.module.key,
@@ -158,10 +153,10 @@ impl MapNodeInputs<'_> {
                 "layer_color": layer_color(layer),
                 "sloc": self.module.source_nonblank_line_count,
                 "public_api_count": self.module.public_api_count,
-                "outbound_dependencies": counts.outbound,
-                "inbound_dependencies": counts.inbound,
-                "layer_violation_count": *self.layer_violations.get(&self.module.key).unwrap_or(&0),
-                "cycle_member": self.cycle_modules.contains(&self.module.key),
+                "outbound_dependencies": outbound,
+                "inbound_dependencies": inbound,
+                "layer_violation_count": self.evidence.violation_count(&self.module.key),
+                "cycle_member": self.evidence.in_cycle(&self.module.key),
                 "maintainability_risk": option_json(scores.maintainability_risk),
                 "change_risk": option_json(scores.change_risk),
                 "correctness_risk": option_json(scores.correctness_risk),
@@ -177,16 +172,16 @@ impl MapNodeInputs<'_> {
 
     fn raw_facts(&self) -> Value {
         json!({
-            "complexity_score": self.artifacts.hotspots.as_ref().and_then(|hotspots| module_metric(hotspots, self.module)).map(Value::from).unwrap_or(Value::Null),
-            "correctness": self.artifacts.correctness.as_ref().map(|correctness| {
+            "complexity_score": self.evidence.artifacts.hotspots.as_ref().and_then(|hotspots| module_metric(hotspots, self.module)).map(Value::from).unwrap_or(Value::Null),
+            "correctness": self.evidence.artifacts.correctness.as_ref().map(|correctness| {
                 let mut facts = correctness.for_module_identity(&self.module.id, &self.module.module_key);
-                facts.line_coverage_percent = self.artifacts.coverage.as_ref().and_then(|coverage| module_metric(coverage, self.module));
+                facts.line_coverage_percent = self.evidence.artifacts.coverage.as_ref().and_then(|coverage| module_metric(coverage, self.module));
                 facts.to_json()
             }).unwrap_or(Value::Null),
-            "coverage": self.artifacts.coverage.as_ref().and_then(|coverage| module_metric(coverage, self.module)).map(|line_percent| json!({"line_percent": line_percent})).unwrap_or(Value::Null),
-            "locality": self.artifacts.locality.as_ref().and_then(|locality| module_metric(locality, self.module)).map(|locality_risk| json!({"locality_risk": locality_risk})).unwrap_or(Value::Null),
-            "leverage": self.artifacts.leverage.as_ref().and_then(|leverage| module_metric(leverage, self.module)).map(|pressure_score| json!({"pressure_score": pressure_score})).unwrap_or(Value::Null),
-            "git_history": self.git_history.raw_for_module(&self.module.key),
+            "coverage": self.evidence.artifacts.coverage.as_ref().and_then(|coverage| module_metric(coverage, self.module)).map(|line_percent| json!({"line_percent": line_percent})).unwrap_or(Value::Null),
+            "locality": self.evidence.artifacts.locality.as_ref().and_then(|locality| module_metric(locality, self.module)).map(|locality_risk| json!({"locality_risk": locality_risk})).unwrap_or(Value::Null),
+            "leverage": self.evidence.artifacts.leverage.as_ref().and_then(|leverage| module_metric(leverage, self.module)).map(|pressure_score| json!({"pressure_score": pressure_score})).unwrap_or(Value::Null),
+            "git_history": self.evidence.history_for(&self.module.key),
                 "target": {
                 "module_id": self.module.id,
                 "package_name": self.module.package_name,
@@ -207,14 +202,6 @@ fn module_metric(metrics: &BTreeMap<String, f64>, module: &ModuleInfo) -> Option
         .copied()
 }
 
-fn module_layer(module: &ModuleInfo) -> &'static str {
-    if module.is_entrypoint {
-        "Entrypoint"
-    } else {
-        classify_module(&module.module_key)
-    }
-}
-
 fn record_unknown_metrics(
     unknown_metrics: &[String],
     unknown_metric_counts: &mut BTreeMap<String, usize>,
@@ -229,7 +216,7 @@ fn record_unknown_metrics(
     }
 }
 
-fn module_edges(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<Value> {
+fn module_edges(graph: &ModuleGraph, module: &ModuleInfo, evidence: &MapEvidence) -> Vec<Value> {
     let dependency_edges = graph
         .dependencies
         .get(&module.key)
@@ -241,7 +228,7 @@ fn module_edges(graph: &ModuleGraph, module: &ModuleInfo) -> Vec<Value> {
                 "source": module.key,
                 "target": target,
                 "kind": "dependency",
-                "layer_violation": is_layer_violation(&module.key, target),
+                "layer_violation": evidence.is_layer_violation(&module.key, target),
                 "identity_backends": graph.dependency_provenance.get(&edge).cloned().unwrap_or_default(),
                 "symbol_identities": graph.dependency_symbols.get(&edge).cloned().unwrap_or_default(),
             }})

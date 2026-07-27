@@ -5,12 +5,15 @@ use crate::MeasureTool;
 use crate::config::LensConfig;
 use crate::facts::RunContext;
 
+mod api_health;
 mod clones;
 mod correctness;
 mod coverage;
 mod escape_hatches;
 mod hotspots;
 mod map;
+mod practices;
+mod reliability;
 mod topology;
 mod type_health;
 
@@ -24,12 +27,15 @@ pub(crate) fn produce_measurement(
         MeasureTool::Clones => clones::produce(config, context),
         MeasureTool::EscapeHatches => escape_hatches::produce(config, context),
         MeasureTool::TypeHealth => type_health::produce(config, context),
+        MeasureTool::Reliability => reliability::produce(config, context),
+        MeasureTool::ApiHealth => api_health::produce(config, context),
         MeasureTool::Correctness => correctness::produce(config, context, false),
         MeasureTool::CorrectnessRun => correctness::produce(config, context, true),
         MeasureTool::Locality => topology::locality(context),
         MeasureTool::Leverage => topology::leverage(context),
         MeasureTool::Map => map::produce(config, context),
         MeasureTool::Coverage => coverage::produce(config, context),
+        MeasureTool::Practices => practices::produce(config),
         MeasureTool::All => unreachable!(),
     }
 }

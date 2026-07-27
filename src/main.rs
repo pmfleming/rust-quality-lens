@@ -1,3 +1,5 @@
+//! Command-line interface for Rust quality measurement and verification.
+
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
@@ -6,6 +8,7 @@ use std::path::PathBuf;
 mod artifacts;
 mod calibration;
 mod catalog;
+mod command_runner;
 mod config;
 mod contracts;
 mod facts;
@@ -14,6 +17,7 @@ mod policy;
 mod producers;
 mod review;
 mod risk_model;
+mod sarif;
 mod semantic;
 mod util;
 
@@ -56,6 +60,16 @@ enum Commands {
         #[arg(default_value = "all")]
         tool: MeasureTool,
     },
+    Verify {
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    Sarif {
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     Review {
         #[arg(long)]
         changed_since: Option<String>,
@@ -93,6 +107,9 @@ enum MeasureTool {
     EscapeHatches,
     #[value(name = "type-health")]
     TypeHealth,
+    Reliability,
+    #[value(name = "api-health")]
+    ApiHealth,
     Correctness,
     #[value(name = "correctness-run")]
     CorrectnessRun,
@@ -100,6 +117,7 @@ enum MeasureTool {
     Leverage,
     Map,
     Coverage,
+    Practices,
 }
 
 impl MeasureTool {
@@ -108,6 +126,8 @@ impl MeasureTool {
             Self::Hotspots,
             Self::Clones,
             Self::EscapeHatches,
+            Self::Reliability,
+            Self::ApiHealth,
             Self::TypeHealth,
             Self::Coverage,
             Self::CorrectnessRun,
@@ -117,6 +137,12 @@ impl MeasureTool {
         ]
     }
 
+    pub(crate) fn schema_tools() -> Vec<Self> {
+        let mut tools = Self::all_tools();
+        tools.push(Self::Practices);
+        tools
+    }
+
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::All => "all",
@@ -124,12 +150,15 @@ impl MeasureTool {
             Self::Clones => "clones",
             Self::EscapeHatches => "escape-hatches",
             Self::TypeHealth => "type-health",
+            Self::Reliability => "reliability",
+            Self::ApiHealth => "api-health",
             Self::Correctness => "correctness",
             Self::CorrectnessRun => "correctness-run",
             Self::Locality => "locality",
             Self::Leverage => "leverage",
             Self::Map => "map",
             Self::Coverage => "coverage",
+            Self::Practices => "practices",
         }
     }
 
@@ -139,11 +168,14 @@ impl MeasureTool {
             Self::Clones => "clones.json",
             Self::EscapeHatches => "rust_escape_hatches.json",
             Self::TypeHealth => "type_health.json",
+            Self::Reliability => "reliability_findings.json",
+            Self::ApiHealth => "api_health.json",
             Self::Correctness | Self::CorrectnessRun => "correctness_review.json",
             Self::Locality => "locality_metrics.json",
             Self::Leverage => "leverage_metrics.json",
             Self::Map => "map.json",
             Self::Coverage => "coverage.json",
+            Self::Practices => "rust_practices.json",
             Self::All => unreachable!("all has no direct output file"),
         }
     }
@@ -168,6 +200,12 @@ fn main() -> Result<()> {
                 "{}",
                 serde_json::to_string_pretty(&artifact_schemas(&tool))?
             );
+            Ok(())
+        }
+        Commands::Verify { config } => measure(MeasureTool::Practices, LensConfig::load(config)?),
+        Commands::Sarif { output, config } => {
+            let output = sarif::write(&LensConfig::load(config)?, output)?;
+            println!("Wrote SARIF report to {}", output.display());
             Ok(())
         }
         Commands::Review {

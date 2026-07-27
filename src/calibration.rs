@@ -12,7 +12,7 @@ use crate::contracts::artifact_document;
 use crate::facts::RunContext;
 use crate::measurement::{MODEL_ID, MODEL_VERSION};
 use crate::producers;
-use crate::util::{repo_root, round2, write_json};
+use crate::util::{bundled_helper_manifest, round2, write_json};
 
 const CALIBRATION_TOOLS: [MeasureTool; 5] = [
     MeasureTool::Hotspots,
@@ -27,145 +27,218 @@ pub(crate) fn run(project_specs: &[String], output_dir: PathBuf) -> Result<PathB
         bail!("calibration requires at least one --project NAME=PATH");
     }
     fs::create_dir_all(&output_dir)?;
-    let helper_manifest = repo_root()?.join("rust_helpers/Cargo.toml");
-    let mut projects = Vec::new();
-    let mut pooled_function_scores = Vec::new();
-    let mut pooled_module_scores = Vec::new();
-    let mut pooled_total_scores = Vec::new();
-    let mut semantic_references = 0usize;
-    let mut semantic_resolved = 0usize;
-    let mut semantic_local = 0usize;
-    let mut semantic_unresolved = 0usize;
-
+    let helper_manifest = bundled_helper_manifest()?;
+    let mut pool = CalibrationPool::default();
     for spec in project_specs {
-        let (name, root) = parse_project(spec)?;
-        let source_roots = calibration_source_roots(&root);
-        if source_roots.is_empty() {
-            bail!("calibration project {name} has no discoverable Rust source roots");
-        }
-        let project_output = output_dir.join(safe_name(&name));
-        fs::create_dir_all(&project_output)?;
-        let config = LensConfig {
-            project_name: name.clone(),
-            project_root: root.clone(),
-            source_roots: source_roots
-                .iter()
-                .map(|path| path.to_string_lossy().to_string())
-                .collect(),
-            output_dir: project_output,
-            helper_manifest: helper_manifest.clone(),
-            identity_resolution: SemanticIdentityMode::Auto,
-            rust_analyzer: PathBuf::from("rust-analyzer"),
-            identity_timeout_seconds: 90,
-            identity_offline: true,
-        };
-        let context = RunContext::new(&config, &CALIBRATION_TOOLS)
-            .with_context(|| format!("extracting calibration facts for {name}"))?;
-        semantic_references += context.identity_resolution.reference_count;
-        semantic_resolved += context.identity_resolution.resolved_count;
-        semantic_local += context.identity_resolution.local_definition_count;
-        semantic_unresolved += context.identity_resolution.unresolved_count;
-        let identity_backends = context.source_facts.iter().fold(
-            BTreeMap::<String, usize>::new(),
-            |mut counts, fact| {
-                *counts.entry(fact.identity_backend.clone()).or_default() += 1;
-                counts
-            },
-        );
-        let function_count = context
-            .source_facts
-            .iter()
-            .map(|fact| fact.items.functions.len())
-            .sum::<usize>();
-        let sloc = context
-            .source_facts
-            .iter()
-            .map(|fact| fact.source.source_nonblank_line_count)
-            .sum::<usize>();
+        pool.add(calibrate_project(spec, &output_dir, &helper_manifest)?);
+    }
+    let report_path = output_dir.join("calibration_report.json");
+    write_json(&report_path, &pool.report())?;
+    Ok(report_path)
+}
 
-        let mut payloads = BTreeMap::new();
-        for tool in &CALIBRATION_TOOLS {
-            let payload = producers::produce_measurement(tool, &config, &context)?;
-            write_json(
-                &config.output_dir.join(tool.output_file()),
-                &artifact_document(tool, &config, &context, payload.clone()),
-            )?;
-            payloads.insert(tool.name(), payload);
-        }
-        let hotspots = &payloads["hotspots"];
-        let map = &payloads["map"];
-        let function_scores = scores_where(hotspots, "function", "score");
-        let module_scores = scores_where(hotspots, "module", "score");
-        let total_scores = map_scores(map, "total_score");
-        pooled_function_scores.extend(&function_scores);
-        pooled_module_scores.extend(&module_scores);
-        pooled_total_scores.extend(&total_scores);
-        let module_count = map["graph"]["nodes"].as_array().map_or(0, Vec::len);
-        let unknown_module_count = map["meta"]["summary"]["unknown_module_count"]
-            .as_u64()
-            .unwrap_or_default();
-        projects.push(json!({
-            "name": name,
-            "path": root,
-            "git_revision": git_revision(&config.project_root),
-            "rust_file_count": context.source_facts.len(),
-            "function_count": function_count,
-            "module_count": module_count,
-            "source_nonblank_lines": sloc,
-            "identity_backends": identity_backends,
-            "cargo_identity_percent": percent(*identity_backends.get("cargo_metadata").unwrap_or(&0), context.source_facts.len()),
-            "semantic_identity": context.identity_resolution.to_json(),
-            "unknown_module_count": unknown_module_count,
-            "unknown_module_percent": percent(unknown_module_count as usize, module_count),
-            "distributions": {
-                "function_hotspot_score": distribution(&function_scores),
-                "module_hotspot_score": distribution(&module_scores),
-                "maintainability_risk": distribution(&map_scores(map, "maintainability_risk")),
-                "change_risk": distribution(&map_scores(map, "change_risk")),
-                "correctness_risk": distribution(&map_scores(map, "correctness_risk")),
-                "architectural_risk": distribution(&map_scores(map, "architectural_risk")),
-                "quality_risk": distribution(&map_scores(map, "quality_risk")),
-                "total_score": distribution(&total_scores),
-            },
-            "top_function_hotspots": top_hotspots(hotspots, "function", 10),
-            "top_module_hotspots": top_hotspots(hotspots, "module", 10),
-        }));
+struct ProjectCalibration {
+    report: Value,
+    function_scores: Vec<f64>,
+    module_scores: Vec<f64>,
+    total_scores: Vec<f64>,
+    semantic: crate::semantic::IdentityResolutionSummary,
+}
+
+#[derive(Default)]
+struct CalibrationPool {
+    projects: Vec<Value>,
+    function_scores: Vec<f64>,
+    module_scores: Vec<f64>,
+    total_scores: Vec<f64>,
+    references: usize,
+    resolved: usize,
+    local: usize,
+    unresolved: usize,
+}
+
+impl CalibrationPool {
+    fn add(&mut self, project: ProjectCalibration) {
+        self.function_scores.extend(project.function_scores);
+        self.module_scores.extend(project.module_scores);
+        self.total_scores.extend(project.total_scores);
+        self.references += project.semantic.reference_count;
+        self.resolved += project.semantic.resolved_count;
+        self.local += project.semantic.local_definition_count;
+        self.unresolved += project.semantic.unresolved_count;
+        self.projects.push(project.report);
     }
 
-    let report = json!({
-        "schema_version": 1,
-        "generated_from": "rqlens calibrate",
-        "generated_at": chrono::Utc::now().to_rfc3339(),
-        "risk_model_id": MODEL_ID,
-        "risk_model_version": MODEL_VERSION,
-        "project_count": projects.len(),
-        "projects": projects,
-        "pooled_distributions": {
-            "function_hotspot_score": distribution(&pooled_function_scores),
-            "module_hotspot_score": distribution(&pooled_module_scores),
-            "total_score": distribution(&pooled_total_scores),
+    fn report(&self) -> Value {
+        json!({
+            "schema_version": 1,
+            "generated_from": "rqlens calibrate",
+            "generated_at": chrono::Utc::now().to_rfc3339(),
+            "risk_model_id": MODEL_ID,
+            "risk_model_version": MODEL_VERSION,
+            "project_count": self.projects.len(),
+            "projects": self.projects,
+            "pooled_distributions": {
+                "function_hotspot_score": distribution(&self.function_scores),
+                "module_hotspot_score": distribution(&self.module_scores),
+                "total_score": distribution(&self.total_scores),
+            },
+            "semantic_identity": {
+                "reference_count": self.references,
+                "resolved_count": self.resolved,
+                "local_definition_count": self.local,
+                "unresolved_count": self.unresolved,
+                "resolution_percent": percent(self.resolved, self.references),
+            },
+            "exploratory_thresholds": {
+                "function_hotspot": thresholds(&self.function_scores),
+                "module_hotspot": thresholds(&self.module_scores),
+                "total_score": thresholds(&self.total_scores),
+            },
+            "limitations": [
+                "Percentile thresholds are empirical triage bands, not defect probabilities.",
+                "Static correctness catalogs leave unexecuted tests unknown; run and coverage evidence should be added for release gates.",
+                "The sample is intentionally heterogeneous but too small to establish ecosystem-wide norms."
+            ],
+        })
+    }
+}
+
+fn calibrate_project(
+    spec: &str,
+    output_dir: &Path,
+    helper_manifest: &Path,
+) -> Result<ProjectCalibration> {
+    let (name, root) = parse_project(spec)?;
+    let config = calibration_config(&name, root.clone(), output_dir, helper_manifest)?;
+    let context = RunContext::new(&config, &CALIBRATION_TOOLS)
+        .with_context(|| format!("extracting calibration facts for {name}"))?;
+    let payloads = calibration_payloads(&config, &context)?;
+    let hotspots = &payloads["hotspots"];
+    let map = &payloads["map"];
+    let function_scores = scores_where(hotspots, "function", "score");
+    let module_scores = scores_where(hotspots, "module", "score");
+    let total_scores = map_scores(map, "total_score");
+    let report = project_report(
+        name,
+        root,
+        &config,
+        &context,
+        hotspots,
+        map,
+        (&function_scores, &module_scores, &total_scores),
+    );
+    Ok(ProjectCalibration {
+        report,
+        function_scores,
+        module_scores,
+        total_scores,
+        semantic: context.identity_resolution.clone(),
+    })
+}
+
+fn calibration_config(
+    name: &str,
+    root: PathBuf,
+    output_dir: &Path,
+    helper_manifest: &Path,
+) -> Result<LensConfig> {
+    let source_roots = calibration_source_roots(&root);
+    if source_roots.is_empty() {
+        bail!("calibration project {name} has no discoverable Rust source roots");
+    }
+    Ok(LensConfig {
+        project_name: name.to_string(),
+        project_root: root,
+        source_roots: source_roots
+            .into_iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect(),
+        output_dir: output_dir.join(safe_name(name)),
+        helper_manifest: helper_manifest.to_path_buf(),
+        identity_resolution: SemanticIdentityMode::Auto,
+        rust_analyzer: PathBuf::from("rust-analyzer"),
+        identity_timeout_seconds: 90,
+        identity_offline: true,
+        verification: Default::default(),
+    })
+}
+
+fn calibration_payloads(
+    config: &LensConfig,
+    context: &RunContext,
+) -> Result<BTreeMap<&'static str, Value>> {
+    fs::create_dir_all(&config.output_dir)?;
+    let mut payloads = BTreeMap::new();
+    for tool in &CALIBRATION_TOOLS {
+        let payload = producers::produce_measurement(tool, config, context)?;
+        write_json(
+            &config.output_dir.join(tool.output_file()),
+            &artifact_document(tool, config, context, payload.clone()),
+        )?;
+        payloads.insert(tool.name(), payload);
+    }
+    Ok(payloads)
+}
+
+fn project_report(
+    name: String,
+    root: PathBuf,
+    config: &LensConfig,
+    context: &RunContext,
+    hotspots: &Value,
+    map: &Value,
+    scores: (&[f64], &[f64], &[f64]),
+) -> Value {
+    let (function_scores, module_scores, total_scores) = scores;
+    let identity_backends =
+        context
+            .source_facts
+            .iter()
+            .fold(BTreeMap::<String, usize>::new(), |mut counts, fact| {
+                *counts.entry(fact.identity_backend.clone()).or_default() += 1;
+                counts
+            });
+    let function_count = context
+        .source_facts
+        .iter()
+        .map(|fact| fact.items.functions.len())
+        .sum::<usize>();
+    let sloc = context
+        .source_facts
+        .iter()
+        .map(|fact| fact.source.source_nonblank_line_count)
+        .sum::<usize>();
+    let module_count = map["graph"]["nodes"].as_array().map_or(0, Vec::len);
+    let unknown_modules = map["meta"]["summary"]["unknown_module_count"]
+        .as_u64()
+        .unwrap_or_default() as usize;
+    json!({
+        "name": name,
+        "path": root,
+        "git_revision": git_revision(&config.project_root),
+        "rust_file_count": context.source_facts.len(),
+        "function_count": function_count,
+        "module_count": module_count,
+        "source_nonblank_lines": sloc,
+        "identity_backends": identity_backends,
+        "cargo_identity_percent": percent(*identity_backends.get("cargo_metadata").unwrap_or(&0), context.source_facts.len()),
+        "semantic_identity": context.identity_resolution.to_json(),
+        "unknown_module_count": unknown_modules,
+        "unknown_module_percent": percent(unknown_modules, module_count),
+        "distributions": {
+            "function_hotspot_score": distribution(function_scores),
+            "module_hotspot_score": distribution(module_scores),
+            "maintainability_risk": distribution(&map_scores(map, "maintainability_risk")),
+            "change_risk": distribution(&map_scores(map, "change_risk")),
+            "correctness_risk": distribution(&map_scores(map, "correctness_risk")),
+            "architectural_risk": distribution(&map_scores(map, "architectural_risk")),
+            "quality_risk": distribution(&map_scores(map, "quality_risk")),
+            "total_score": distribution(total_scores),
         },
-        "semantic_identity": {
-            "reference_count": semantic_references,
-            "resolved_count": semantic_resolved,
-            "local_definition_count": semantic_local,
-            "unresolved_count": semantic_unresolved,
-            "resolution_percent": percent(semantic_resolved, semantic_references),
-        },
-        "exploratory_thresholds": {
-            "function_hotspot": thresholds(&pooled_function_scores),
-            "module_hotspot": thresholds(&pooled_module_scores),
-            "total_score": thresholds(&pooled_total_scores),
-        },
-        "limitations": [
-            "Percentile thresholds are empirical triage bands, not defect probabilities.",
-            "Static correctness catalogs leave unexecuted tests unknown; run and coverage evidence should be added for release gates.",
-            "The sample is intentionally heterogeneous but too small to establish ecosystem-wide norms."
-        ],
-    });
-    let report_path = output_dir.join("calibration_report.json");
-    write_json(&report_path, &report)?;
-    Ok(report_path)
+        "top_function_hotspots": top_hotspots(hotspots, "function", 10),
+        "top_module_hotspots": top_hotspots(hotspots, "module", 10),
+    })
 }
 
 fn parse_project(spec: &str) -> Result<(String, PathBuf)> {

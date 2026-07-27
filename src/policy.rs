@@ -13,6 +13,8 @@ use crate::util::write_json;
 pub(crate) enum FailPolicy {
     Partial,
     TestFailure,
+    PracticeFailure,
+    ReliabilityFinding,
     Regression,
     Threshold,
 }
@@ -27,6 +29,8 @@ pub(crate) fn run_check(
     let documents = measurement_documents(config)?;
     let partial_artifacts = partial_artifacts(&documents);
     let test_failures = test_failures(&documents);
+    let practice_failures = practice_failures(&documents);
+    let reliability_findings = reliability_findings(&documents);
     let current_map = documents.get("map.json").map(artifact_payload);
     let threshold_violations = current_map
         .map(|map| threshold_violations(map, max_total_score))
@@ -58,6 +62,8 @@ pub(crate) fn run_check(
         .filter(|policy| match policy {
             FailPolicy::Partial => !partial_artifacts.is_empty(),
             FailPolicy::TestFailure => !test_failures.is_empty(),
+            FailPolicy::PracticeFailure => !practice_failures.is_empty(),
+            FailPolicy::ReliabilityFinding => !reliability_findings.is_empty(),
             FailPolicy::Regression => !regressions.is_empty(),
             FailPolicy::Threshold => !threshold_violations.is_empty(),
         })
@@ -71,6 +77,8 @@ pub(crate) fn run_check(
         "failed_policies": failed_policies,
         "partial_artifacts": partial_artifacts,
         "test_failures": test_failures,
+        "practice_failures": practice_failures,
+        "reliability_findings": reliability_findings,
         "threshold_violations": threshold_violations,
         "regressions": regressions,
         "score_deltas": score_deltas,
@@ -93,6 +101,8 @@ impl FailPolicy {
         match self {
             Self::Partial => "partial",
             Self::TestFailure => "test-failure",
+            Self::PracticeFailure => "practice-failure",
+            Self::ReliabilityFinding => "reliability-finding",
             Self::Regression => "regression",
             Self::Threshold => "threshold",
         }
@@ -100,7 +110,7 @@ impl FailPolicy {
 }
 
 fn measurement_documents(config: &LensConfig) -> Result<BTreeMap<String, Value>> {
-    let files = MeasureTool::all_tools()
+    let files = MeasureTool::schema_tools()
         .into_iter()
         .map(|tool| tool.output_file())
         .collect::<BTreeSet<_>>();
@@ -150,6 +160,39 @@ fn test_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
     } else {
         Vec::new()
     }
+}
+
+fn practice_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
+    let Some(document) = documents.get("rust_practices.json") else {
+        return vec![json!({"reason": "rust_practices.json is missing"})];
+    };
+    let data = artifact_payload(document);
+    data["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|check| {
+            check["severity"] == "error"
+                && matches!(
+                    check["status"].as_str(),
+                    Some("failed" | "unavailable" | "timed-out")
+                )
+        })
+        .cloned()
+        .collect()
+}
+
+fn reliability_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
+    let Some(document) = documents.get("reliability_findings.json") else {
+        return vec![json!({"reason": "reliability_findings.json is missing"})];
+    };
+    artifact_payload(document)
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|finding| finding["severity"] == "error" && finding["scope"] == "production")
+        .cloned()
+        .collect()
 }
 
 fn threshold_violations(map: &Value, maximum: f64) -> Vec<Value> {

@@ -322,7 +322,6 @@ fn status_for_test<'a>(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::status_for_test;
     use crate::facts::TestStatus;
@@ -343,10 +342,9 @@ mod tests {
         statuses.insert("tests::case".to_string(), status("passed"));
         statuses.insert("module::tests::case".to_string(), status("failed"));
 
-        let found =
-            status_for_test(&statuses, &["tests::case".to_string()], "tests::case").unwrap();
+        let found = status_for_test(&statuses, &["tests::case".to_string()], "tests::case");
 
-        assert_eq!(found.status, "passed");
+        assert_eq!(found.map(|status| status.status.as_str()), Some("passed"));
     }
 
     #[test]
@@ -358,10 +356,9 @@ mod tests {
             &statuses,
             &["other.rs::tests::case".to_string()],
             "tests::case",
-        )
-        .unwrap();
+        );
 
-        assert_eq!(found.status, "passed");
+        assert_eq!(found.map(|status| status.status.as_str()), Some("passed"));
     }
 
     #[test]

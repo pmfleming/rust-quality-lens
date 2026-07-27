@@ -8,6 +8,9 @@ vendor dashboard code or project-specific scripts.
 
 ## What It Measures
 
+- verified Rust gates for rustfmt, compilation, Clippy, tests, doctests, and rustdoc
+- safety-contract findings and explicit panic paths such as undocumented unsafe, `unwrap`, `expect`, and `panic!`
+- project maturity evidence for MSRV, licensing, contribution, security, and release documentation
 - function- and module-level complexity hotspots with score explanations
 - token, AST, module-responsibility, and test-body duplication groups
 - Rust escape hatches such as unsafe, FFI, raw memory, globals, and lint suppressions
@@ -31,14 +34,23 @@ Create a config in the Rust project you want to inspect:
 ```toml
 project_name = "my-rust-project"
 project_root = "."
-source_roots = ["src"]
 output_dir = "target/analysis"
 
+# source_roots is optional. RQLens discovers local Cargo package roots.
 [rust]
 identity_resolution = "auto"
 rust_analyzer = "rust-analyzer"
 identity_timeout_seconds = 60
 identity_offline = true
+
+[verification]
+timeout_seconds = 600
+workspace = true
+all_targets = true
+all_features = false
+# Optional supply-chain gates:
+audit = false
+deny = false
 ```
 
 Or scaffold one:
@@ -47,16 +59,35 @@ Or scaffold one:
 cargo run --bin rqlens -- init
 ```
 
-Run all JSON producers:
+Run all static, dynamic, and architecture producers:
 
 ```powershell
 cargo run --bin rqlens -- measure all --config rqlens.toml
 ```
 
+Run the official Rust baseline and repository-practice checks:
+
+```powershell
+cargo run --bin rqlens -- verify --config rqlens.toml
+cargo run --bin rqlens -- check --fail-on practice-failure --fail-on reliability-finding --config rqlens.toml
+```
+
+Verification writes `rust_practices.json`. It keeps authoritative command gates separate from static findings and heuristic architecture scores.
+
+Export failed gates and source findings for GitHub code scanning:
+
+```powershell
+cargo run --bin rqlens -- sarif --config rqlens.toml
+```
+
+This writes `target/analysis/rqlens.sarif` by default.
+
 Run one producer:
 
 ```powershell
 cargo run --bin rqlens -- measure escape-hatches --config rqlens.toml
+cargo run --bin rqlens -- measure reliability --config rqlens.toml
+cargo run --bin rqlens -- measure api-health --config rqlens.toml
 cargo run --bin rqlens -- measure clones --config rqlens.toml
 cargo run --bin rqlens -- measure type-health --config rqlens.toml
 cargo run --bin rqlens -- measure correctness --config rqlens.toml
@@ -125,6 +156,14 @@ measurements. Review scope also reports changed tool entrypoints in
 
 ## Reading Outputs
 
+RQLens deliberately separates three evidence classes:
+
+- **verified gates**: authoritative commands passed, failed, timed out, or were unavailable
+- **static findings**: concrete source or repository evidence requiring review
+- **heuristic signals**: calibrated complexity, duplication, coupling, and architecture triage
+
+These classes are not combined into a universal quality score. Missing tools never count as passing. See `docs/quality-model.md` for sources and interpretation.
+
 Generated artifacts use a versioned envelope. Array-oriented measurements are
 stored under `records`; structured measurements such as correctness, coverage,
 and the architecture map are stored under `data`. Every envelope carries
@@ -174,10 +213,9 @@ orchestration belongs to `project-management-board`.
 
 ## External Tools
 
-The CLI is Rust. Syntax-aware facts come from helper binaries in
-`rust_helpers/Cargo.toml`, and they run through Cargo automatically. The helper
-crate exposes shared path and module-key logic in `rust_helpers/src/lib.rs` so
-helper binaries do not duplicate project path normalization.
+The CLI is Rust. Syntax-aware extraction uses bundled helper sources. In a source checkout the workspace helper crate is reused; packaged installations materialize the same versioned sources in the user cache before building them. This keeps `cargo install` packages independent of the original checkout.
+
+Baseline verification requires Cargo with rustfmt, Clippy, and rustdoc. Coverage requires `cargo-llvm-cov` and `llvm-tools-preview`. `cargo-audit` and `cargo-deny` are optional unless enabled in `[verification]`.
 
 ## Validation
 
@@ -188,9 +226,10 @@ itself:
 cargo fmt
 cargo check --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test
-cargo test --manifest-path rust_helpers/Cargo.toml
+cargo test --workspace
+cargo run --bin rqlens -- verify
 cargo run --bin rqlens -- measure all
+bash scripts/check-package.sh
 ```
 
 The final command refreshes `target/analysis/*.json`. Check

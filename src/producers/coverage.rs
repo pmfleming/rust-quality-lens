@@ -1,37 +1,43 @@
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::process::Command;
+use std::time::Duration;
 
+use crate::command_runner::{CommandRequest, CommandStatus, run as run_command};
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext};
 use crate::measurement::{module_for_path, project_relative_path};
-use crate::util::{round2, tail};
+use crate::util::round2;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
-    let available = Command::new("cargo")
-        .args(["llvm-cov", "--version"])
-        .current_dir(&config.project_root)
-        .output()
-        .is_ok_and(|output| output.status.success());
-    if !available {
+    let version_args = ["llvm-cov", "--version"].map(str::to_string);
+    let mut version_request = CommandRequest::new("cargo", &version_args, &config.project_root);
+    version_request.timeout = Duration::from_secs(30);
+    let version = run_command(version_request);
+    if version.status != CommandStatus::Passed {
         return Ok(unavailable(
-            "cargo-llvm-cov is not installed",
+            version
+                .reason
+                .as_deref()
+                .unwrap_or("cargo-llvm-cov is not installed"),
             "missing_input",
         ));
     }
 
     let temp = tempfile::tempdir()?;
     let output_path = temp.path().join("coverage.json");
-    let output = Command::new("cargo")
-        .args(["llvm-cov", "--json", "--output-path"])
-        .arg(&output_path)
-        .current_dir(&config.project_root)
-        .output()?;
-    if !output.status.success() {
+    let arguments = vec![
+        "llvm-cov".to_string(),
+        "--json".to_string(),
+        "--output-path".to_string(),
+        output_path.to_string_lossy().to_string(),
+    ];
+    let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
+    request.timeout = Duration::from_secs(config.verification.timeout_seconds);
+    let output = run_command(request);
+    if output.status != CommandStatus::Passed {
         let detail = format!(
             "cargo llvm-cov failed: {} {}",
-            tail(&String::from_utf8_lossy(&output.stdout), 10),
-            tail(&String::from_utf8_lossy(&output.stderr), 10)
+            output.stdout_tail, output.stderr_tail
         );
         return Ok(unavailable(&detail, "unsupported_pattern"));
     }
@@ -154,6 +160,7 @@ mod tests {
             rust_analyzer: PathBuf::from("rust-analyzer"),
             identity_timeout_seconds: 1,
             identity_offline: true,
+            verification: Default::default(),
         };
         let mut fact = FileFacts::test_fact("/project/src/domain.rs", "domain");
         fact.module_id = "demo::demo::domain".to_string();

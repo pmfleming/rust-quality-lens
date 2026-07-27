@@ -1,30 +1,8 @@
+use crate::facts::{ModuleGraph, RunContext, module_graph};
+use crate::measurement::{MODEL_ID, MODEL_VERSION};
+use crate::util::round2;
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::collections::HashSet;
-
-use crate::facts::{ModuleGraph, ModuleInfo, RunContext, module_graph};
-use crate::measurement::{MODEL_ID, MODEL_VERSION, classify_module};
-use crate::util::round2;
-
-pub(super) struct DependencyCounts {
-    pub(super) outbound: usize,
-    pub(super) inbound: usize,
-}
-
-pub(super) fn dependency_counts(graph: &ModuleGraph, module_key: &str) -> DependencyCounts {
-    DependencyCounts {
-        outbound: graph
-            .dependencies
-            .get(module_key)
-            .map(HashSet::len)
-            .unwrap_or(0),
-        inbound: graph
-            .reverse_dependencies
-            .get(module_key)
-            .map(HashSet::len)
-            .unwrap_or(0),
-    }
-}
 
 pub(super) fn locality(context: &RunContext) -> Result<Value> {
     let graph = module_graph(&context.source_facts);
@@ -33,10 +11,10 @@ pub(super) fn locality(context: &RunContext) -> Result<Value> {
             .modules
             .values()
             .map(|module| {
-                let counts = dependency_counts(&graph, &module.key);
+                let (outbound, inbound) = graph.dependency_counts(&module.key);
                 let outbound_free = if module.is_entrypoint { 8 } else { 5 };
-                let risk = ((counts.outbound.saturating_sub(outbound_free) * 3) as f64
-                    + (counts.inbound.saturating_sub(12) as f64 * 0.75))
+                let risk = ((outbound.saturating_sub(outbound_free) * 3) as f64
+                    + (inbound.saturating_sub(12) as f64 * 0.75))
                     .min(100.0);
                 let signals = if risk > 0.0 {
                     vec!["dependency spread"]
@@ -56,16 +34,16 @@ pub(super) fn locality(context: &RunContext) -> Result<Value> {
                     "target_kind": module.target_kind,
                     "entrypoint_kind": module.entrypoint_kind,
                     "is_entrypoint": module.is_entrypoint,
-                    "layer": module_layer(module),
-                    "outbound_dependencies": counts.outbound,
-                    "inbound_dependencies": counts.inbound,
+                    "layer": module.layer(),
+                    "outbound_dependencies": outbound,
+                    "inbound_dependencies": inbound,
                     "locality_risk": round2(risk),
                     "locality_score": round2(100.0 - risk),
                     "signals": signals,
                     "dependency_identity_backends": identity_backends,
                     "score_components": [
-                        {"signal": "outbound_over_allowance", "raw": counts.outbound.saturating_sub(outbound_free), "contribution": (counts.outbound.saturating_sub(outbound_free) * 3) as f64},
-                        {"signal": "inbound_over_12", "raw": counts.inbound.saturating_sub(12), "contribution": round2(counts.inbound.saturating_sub(12) as f64 * 0.75)},
+                        {"signal": "outbound_over_allowance", "raw": outbound.saturating_sub(outbound_free), "contribution": (outbound.saturating_sub(outbound_free) * 3) as f64},
+                        {"signal": "inbound_over_12", "raw": inbound.saturating_sub(12), "contribution": round2(inbound.saturating_sub(12) as f64 * 0.75)},
                     ],
                     "risk_model_id": MODEL_ID,
                     "risk_model_version": MODEL_VERSION,
@@ -83,10 +61,9 @@ pub(super) fn leverage(context: &RunContext) -> Result<Value> {
             .modules
             .values()
             .map(|module| {
-                let counts = dependency_counts(&graph, &module.key);
+                let (outbound, inbound) = graph.dependency_counts(&module.key);
                 let outbound_weight = if module.is_entrypoint { 1.5 } else { 3.0 };
-                let score = (68.0 + counts.inbound as f64 * 2.5
-                    - counts.outbound as f64 * outbound_weight)
+                let score = (68.0 + inbound as f64 * 2.5 - outbound as f64 * outbound_weight)
                     .clamp(0.0, 100.0);
                 let identity_backends = dependency_identity_backends(&graph, &module.key);
                 json!({
@@ -99,17 +76,17 @@ pub(super) fn leverage(context: &RunContext) -> Result<Value> {
                     "target_kind": module.target_kind,
                     "entrypoint_kind": module.entrypoint_kind,
                     "is_entrypoint": module.is_entrypoint,
-                    "layer": module_layer(module),
-                    "reach": counts.inbound,
-                    "outbound_dependencies": counts.outbound,
+                    "layer": module.layer(),
+                    "reach": inbound,
+                    "outbound_dependencies": outbound,
                     "leverage_score": round2(score),
                     "pressure_score": round2(100.0 - score),
                     "signals": if score >= 68.0 { vec!["high leverage"] } else { vec!["pressure"] },
                     "dependency_identity_backends": identity_backends,
                     "score_components": [
                         {"signal": "base", "raw": 68.0, "contribution": 68.0},
-                        {"signal": "inbound_reach", "raw": counts.inbound, "contribution": round2(counts.inbound as f64 * 2.5)},
-                        {"signal": "outbound_pressure", "raw": counts.outbound, "contribution": round2(-(counts.outbound as f64 * outbound_weight))},
+                        {"signal": "inbound_reach", "raw": inbound, "contribution": round2(inbound as f64 * 2.5)},
+                        {"signal": "outbound_pressure", "raw": outbound, "contribution": round2(-(outbound as f64 * outbound_weight))},
                     ],
                     "risk_model_id": MODEL_ID,
                     "risk_model_version": MODEL_VERSION,
@@ -129,12 +106,4 @@ fn dependency_identity_backends(graph: &ModuleGraph, source: &str) -> Vec<String
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect()
-}
-
-fn module_layer(module: &ModuleInfo) -> &'static str {
-    if module.is_entrypoint {
-        "Entrypoint"
-    } else {
-        classify_module(&module.module_key)
-    }
 }

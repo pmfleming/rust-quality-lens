@@ -24,117 +24,16 @@ const MIN_CLONE_LINE_SPAN: usize = 5;
 const MIN_RESPONSIBILITY_LINES: usize = 8;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
-    let token_re = Regex::new(
-        r"[A-Za-z_][A-Za-z0-9_]*|\d+|::|->|=>|==|!=|<=|>=|&&|\|\||[{}\(\)\[\];,.:+\-*/%&|^!<>=?]",
-    )?;
-    let mut windows: HashMap<String, Vec<CloneInstance>> = HashMap::new();
-    let mut read_errors = Vec::new();
-    for path in iter_rust_files(&config.source_roots) {
-        let text = match fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(error) => {
-                read_errors.push(format!("{}: {error}", normalize_slashes(&path)));
-                continue;
-            }
-        };
-        let lines: Vec<&str> = text.lines().collect();
-        let mut tokens = Vec::new();
-        for (line_index, line) in lines.iter().enumerate() {
-            for cap in token_re.find_iter(line) {
-                let token = cap.as_str();
-                let normalized = if token
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                {
-                    match token {
-                        "fn" | "let" | "pub" | "struct" | "enum" | "impl" | "if" | "match"
-                        | "for" | "while" | "loop" | "use" | "mod" | "return" | "Self" | "self" => {
-                            token.to_string()
-                        }
-                        _ => "ID".to_string(),
-                    }
-                } else if token.chars().all(|c| c.is_ascii_digit()) {
-                    "LIT".to_string()
-                } else {
-                    token.to_string()
-                };
-                tokens.push((normalized, line_index + 1));
-            }
-        }
-        for window in tokens.windows(CLONE_WINDOW_TOKENS) {
-            let (Some(first), Some(last)) = (window.first(), window.last()) else {
-                continue;
-            };
-            let start = first.1;
-            let end = last.1;
-            if end.saturating_sub(start) + 1 < 3 {
-                continue;
-            }
-            let key = window
-                .iter()
-                .map(|(token, _)| token.as_str())
-                .collect::<Vec<_>>()
-                .join("|");
-            let snippet = lines[start - 1..end.min(lines.len())].join("\n");
-            windows.entry(key).or_default().push(CloneInstance {
-                file_path: normalize_slashes(&path),
-                start_line: start,
-                end_line: end,
-                snippet,
-            });
-        }
-    }
-    let confidence = source_scan_confidence_with_errors(&config.source_roots, read_errors);
-    let mut rows = Vec::new();
-    for (key, instances) in windows {
-        let instances = non_overlapping_clone_instances(instances);
-        let file_count = instances
-            .iter()
-            .map(|item| &item.file_path)
-            .collect::<HashSet<_>>()
-            .len();
-        if instances.len() < 2 {
-            continue;
-        }
-        let max_line_span = instances
-            .iter()
-            .map(|instance| instance.end_line - instance.start_line + 1)
-            .max()
-            .unwrap_or(0);
-        if max_line_span < MIN_CLONE_LINE_SPAN {
-            continue;
-        }
-        rows.push(json!({
-            "engine": "token",
-            "hash": stable_hash(&key),
-            "token_count": CLONE_WINDOW_TOKENS,
-            "instance_count": instances.len(),
-            "file_count": file_count,
-            "max_line_span": max_line_span,
-            "score": round2(instances.len() as f64 * 5.0),
-            "signals": if file_count >= 2 { format!("cross-file x{file_count}") } else { "same-file repeat".to_string() },
-            "score_components": [{"signal": "instances", "raw": instances.len(), "weight": 5.0, "contribution": round2(instances.len() as f64 * 5.0)}],
-            "risk_model_id": MODEL_ID,
-            "risk_model_version": MODEL_VERSION,
-            "risk_calibration": "clones_token",
-            "instances": instances.into_iter().map(|instance| json!({
-                "file_path": instance.file_path,
-                "start_line": instance.start_line,
-                "end_line": instance.end_line,
-                "snippet": instance.snippet,
-            })).collect::<Vec<_>>(),
-            "measurement_confidence": confidence,
-        }));
-    }
+    let mut rows = token_clone_rows(config)?;
+    let source_fact_confidence = source_confidence(&config.source_roots, &context.source_facts);
     rows.extend(ast_clone_rows(
         config,
         &ast_clone_facts_for_paths(config, &config.source_roots)?,
-        source_confidence(&config.source_roots, &context.source_facts),
+        source_fact_confidence.clone(),
     ));
     rows.extend(module_responsibility_rows(
         &context.source_facts,
-        source_confidence(&config.source_roots, &context.source_facts),
+        source_fact_confidence,
     ));
     rows.extend(test_ast_clone_rows(
         config,
@@ -146,6 +45,179 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         crate::artifacts::json_f64(b, "score").total_cmp(&crate::artifacts::json_f64(a, "score"))
     });
     Ok(Value::Array(rows))
+}
+
+fn token_clone_rows(config: &LensConfig) -> Result<Vec<Value>> {
+    let token_re = Regex::new(
+        r"[A-Za-z_][A-Za-z0-9_]*|\d+|::|->|=>|==|!=|<=|>=|&&|\|\||[{}\(\)\[\];,.:+\-*/%&|^!<>=?]",
+    )?;
+    let (windows, read_errors) = collect_clone_windows(config, &token_re);
+    let confidence = source_scan_confidence_with_errors(&config.source_roots, read_errors);
+    Ok(coalesce_clone_groups(windows)
+        .into_iter()
+        .filter_map(|(key, instances)| token_clone_row(&key, instances, &confidence))
+        .collect())
+}
+
+fn collect_clone_windows(
+    config: &LensConfig,
+    token_re: &Regex,
+) -> (HashMap<String, Vec<CloneInstance>>, Vec<String>) {
+    let mut windows = HashMap::new();
+    let mut read_errors = Vec::new();
+    for path in iter_rust_files(&config.source_roots) {
+        match fs::read_to_string(&path) {
+            Ok(text) => add_file_windows(&mut windows, &path, &text, token_re),
+            Err(error) => read_errors.push(format!("{}: {error}", normalize_slashes(path))),
+        }
+    }
+    (windows, read_errors)
+}
+
+fn add_file_windows(
+    windows: &mut HashMap<String, Vec<CloneInstance>>,
+    path: &std::path::Path,
+    text: &str,
+    token_re: &Regex,
+) {
+    let lines = text.lines().collect::<Vec<_>>();
+    let tokens = normalized_tokens(&lines, token_re);
+    for window in tokens.windows(CLONE_WINDOW_TOKENS) {
+        let Some((key, start_line, end_line)) = clone_window(window) else {
+            continue;
+        };
+        windows.entry(key).or_default().push(CloneInstance {
+            file_path: normalize_slashes(path),
+            start_line,
+            end_line,
+            snippet: lines[start_line - 1..end_line.min(lines.len())].join("\n"),
+        });
+    }
+}
+
+fn normalized_tokens(lines: &[&str], token_re: &Regex) -> Vec<(String, usize)> {
+    lines
+        .iter()
+        .enumerate()
+        .flat_map(|(line, text)| {
+            token_re
+                .find_iter(text)
+                .map(move |token| (normalize_token(token.as_str()), line + 1))
+        })
+        .collect()
+}
+
+fn normalize_token(token: &str) -> String {
+    const KEYWORDS: &[&str] = &[
+        "fn", "let", "pub", "struct", "enum", "impl", "if", "match", "for", "while", "loop", "use",
+        "mod", "return", "Self", "self",
+    ];
+    let is_identifier = token
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_alphabetic() || character == '_');
+    if is_identifier && !KEYWORDS.contains(&token) {
+        "ID".to_string()
+    } else if token.chars().all(|character| character.is_ascii_digit()) {
+        "LIT".to_string()
+    } else {
+        token.to_string()
+    }
+}
+
+fn clone_window(window: &[(String, usize)]) -> Option<(String, usize, usize)> {
+    let (first, last) = (window.first()?, window.last()?);
+    let (start_line, end_line) = (first.1, last.1);
+    (end_line.saturating_sub(start_line) + 1 >= 3).then(|| {
+        let key = window
+            .iter()
+            .map(|(token, _)| token.as_str())
+            .collect::<Vec<_>>()
+            .join("|");
+        (key, start_line, end_line)
+    })
+}
+
+fn coalesce_clone_groups(
+    windows: HashMap<String, Vec<CloneInstance>>,
+) -> Vec<(String, Vec<CloneInstance>)> {
+    let mut groups: Vec<(String, Vec<CloneInstance>)> = Vec::new();
+    let mut windows = windows.into_iter().collect::<Vec<_>>();
+    windows.sort_by(|left, right| left.0.cmp(&right.0));
+    for (key, instances) in windows {
+        let instances = non_overlapping_clone_instances(instances);
+        if instances.len() < 2 {
+            continue;
+        }
+        if let Some((_, existing)) = groups
+            .iter_mut()
+            .find(|(_, existing)| clone_groups_overlap(existing, &instances))
+        {
+            merge_clone_instances(existing, instances);
+        } else {
+            groups.push((key, instances));
+        }
+    }
+    groups
+}
+
+fn clone_groups_overlap(left: &[CloneInstance], right: &[CloneInstance]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(left, right)| {
+            left.file_path == right.file_path
+                && left.start_line <= right.end_line.saturating_add(1)
+                && right.start_line <= left.end_line.saturating_add(1)
+        })
+}
+
+fn merge_clone_instances(existing: &mut [CloneInstance], incoming: Vec<CloneInstance>) {
+    for (existing, incoming) in existing.iter_mut().zip(incoming) {
+        existing.start_line = existing.start_line.min(incoming.start_line);
+        existing.end_line = existing.end_line.max(incoming.end_line);
+        existing.snippet =
+            snippet_for_range(&existing.file_path, existing.start_line, existing.end_line);
+    }
+}
+
+fn token_clone_row(key: &str, instances: Vec<CloneInstance>, confidence: &Value) -> Option<Value> {
+    if instances.len() < 2 {
+        return None;
+    }
+    let file_count = instances
+        .iter()
+        .map(|instance| &instance.file_path)
+        .collect::<HashSet<_>>()
+        .len();
+    let max_line_span = instances
+        .iter()
+        .map(|instance| instance.end_line - instance.start_line + 1)
+        .max()
+        .unwrap_or_default();
+    if max_line_span < MIN_CLONE_LINE_SPAN {
+        return None;
+    }
+    let score = round2(instances.len() as f64 * 5.0);
+    Some(json!({
+        "engine": "token",
+        "hash": stable_hash(key),
+        "token_count": CLONE_WINDOW_TOKENS,
+        "instance_count": instances.len(),
+        "file_count": file_count,
+        "max_line_span": max_line_span,
+        "score": score,
+        "signals": if file_count >= 2 { format!("cross-file x{file_count}") } else { "same-file repeat".to_string() },
+        "score_components": [{"signal": "instances", "raw": instances.len(), "weight": 5.0, "contribution": score}],
+        "risk_model_id": MODEL_ID,
+        "risk_model_version": MODEL_VERSION,
+        "risk_calibration": "clones_token",
+        "instances": instances.into_iter().map(|instance| json!({
+            "file_path": instance.file_path,
+            "start_line": instance.start_line,
+            "end_line": instance.end_line,
+            "snippet": instance.snippet,
+        })).collect::<Vec<_>>(),
+        "measurement_confidence": confidence,
+    }))
 }
 
 fn ast_clone_rows(config: &LensConfig, facts: &[AstCloneFact], confidence: Value) -> Vec<Value> {

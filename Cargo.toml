@@ -5,10 +5,11 @@ members = [".", "rust_helpers"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
 license = "MIT"
 
 [workspace.lints.rust]
-unsafe_code = "warn"
+unsafe_code = "deny"
 unused_unsafe = "warn"
 non_ascii_idents = "warn"
 
@@ -23,8 +24,15 @@ undocumented_unsafe_blocks = "warn"
 name = "rust-quality-lens"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
-description = "Reusable measurement JSON producers for Rust projects."
+description = "Reusable measurement and verification tooling for Rust projects."
+repository = "https://github.com/pmfleming/rust-quality-lens"
+homepage = "https://github.com/pmfleming/rust-quality-lens"
+documentation = "https://github.com/pmfleming/rust-quality-lens#readme"
+readme = "README.md"
+keywords = ["rust", "quality", "static-analysis", "architecture", "clippy"]
+categories = ["development-tools", "development-tools::testing"]
 
 [[bin]]
 name = "rqlens"

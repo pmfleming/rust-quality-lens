@@ -2,11 +2,11 @@ use anyhow::Result;
 use regex::Regex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Instant;
+use std::time::Duration;
 
+use crate::command_runner::{CommandRequest, CommandStatus, run};
 use crate::config::LensConfig;
-use crate::util::{dedupe, resolve_project_path, tail};
+use crate::util::{dedupe, resolve_project_path};
 
 #[derive(Clone)]
 pub(crate) struct TestStatus {
@@ -67,22 +67,24 @@ fn target_paths(value: &toml::Value, target: &str, project_root: &Path) -> Vec<S
 }
 
 pub(crate) fn run_tests(config: &LensConfig) -> Result<HashMap<String, TestStatus>> {
-    let started = Instant::now();
-    let output = Command::new("cargo")
-        .arg("test")
-        .current_dir(&config.project_root)
-        .output()?;
-    let duration = started.elapsed().as_secs_f64();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let mut statuses = parse_cargo_test_statuses(&stdout);
+    let arguments = config.verification.cargo_arguments("test", false, false);
+    let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
+    request.timeout = Duration::from_secs(config.verification.timeout_seconds);
+    let outcome = run(request);
+    let mut statuses = parse_cargo_test_statuses(&outcome.stdout);
+    let status = match outcome.status {
+        CommandStatus::Passed => run_status(true, &outcome.stdout, &outcome.stderr),
+        CommandStatus::Failed => run_status(false, &outcome.stdout, &outcome.stderr),
+        CommandStatus::Unavailable => "unavailable".to_string(),
+        CommandStatus::TimedOut => "timed_out".to_string(),
+    };
     statuses.insert(
         "__run__".to_string(),
         TestStatus {
-            status: run_status(output.status.success(), &stdout, &stderr),
-            duration: Some(duration),
-            stdout_tail: Some(tail(&stdout, 40)),
-            stderr_tail: Some(tail(&stderr, 40)),
+            status,
+            duration: Some(outcome.duration_ms as f64 / 1000.0),
+            stdout_tail: Some(outcome.stdout_tail),
+            stderr_tail: Some(outcome.stderr_tail),
         },
     );
     Ok(statuses)
@@ -157,7 +159,6 @@ fn test_status(status: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::{correctness_paths, run_status};
     use crate::config::{LensConfig, SemanticIdentityMode};
@@ -165,13 +166,13 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn cargo_target_paths_are_read_from_toml_structure() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join("src")).unwrap();
-        std::fs::create_dir_all(root.path().join("tests/fixtures")).unwrap();
-        std::fs::write(root.path().join("src/lib.rs"), "").unwrap();
-        std::fs::write(root.path().join("tests/smoke.rs"), "").unwrap();
-        std::fs::write(root.path().join("tests/fixtures/not_a_target.rs"), "").unwrap();
+    fn cargo_target_paths_are_read_from_toml_structure() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir_all(root.path().join("src"))?;
+        std::fs::create_dir_all(root.path().join("tests/fixtures"))?;
+        std::fs::write(root.path().join("src/lib.rs"), "")?;
+        std::fs::write(root.path().join("tests/smoke.rs"), "")?;
+        std::fs::write(root.path().join("tests/fixtures/not_a_target.rs"), "")?;
         std::fs::write(
             root.path().join("Cargo.toml"),
             r#"
@@ -190,8 +191,7 @@ path = "src/bin/tool.rs"
 name = "integration"
 path = "tests/integration.rs"
 "#,
-        )
-        .unwrap();
+        )?;
         let config = LensConfig {
             project_name: "target-paths".to_string(),
             project_root: root.path().to_path_buf(),
@@ -202,6 +202,7 @@ path = "tests/integration.rs"
             rust_analyzer: PathBuf::from("rust-analyzer"),
             identity_timeout_seconds: 1,
             identity_offline: true,
+            verification: Default::default(),
         };
         let paths = correctness_paths(&config);
         assert!(
@@ -229,6 +230,7 @@ path = "tests/integration.rs"
                 .iter()
                 .any(|path| normalize_slashes(path).contains("not-a-rust-target.rs"))
         );
+        Ok(())
     }
 
     #[test]

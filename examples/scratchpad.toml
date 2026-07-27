@@ -1,9 +1,17 @@
 project_name = "scratchpad"
 project_root = "../../scratchpad"
-source_roots = ["src"]
+# Omit source_roots to include Scratchpad and its local path packages.
 output_dir = "target/analysis"
 
 [rust]
 # By default the CLI uses the helper crate bundled with rust-quality-lens.
 # Override this only if a project vendors or forks the helper binaries.
 # helper_manifest = "../rust-quality-lens/rust_helpers/Cargo.toml"
+
+[verification]
+timeout_seconds = 1200
+workspace = true
+all_targets = false
+all_features = true
+audit = false
+deny = false

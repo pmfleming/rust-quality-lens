@@ -15,6 +15,8 @@ const REVIEW_TOOLS: &[MeasureTool] = &[
     MeasureTool::Hotspots,
     MeasureTool::Clones,
     MeasureTool::EscapeHatches,
+    MeasureTool::Reliability,
+    MeasureTool::ApiHealth,
     MeasureTool::TypeHealth,
 ];
 

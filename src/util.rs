@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::env;
@@ -20,6 +20,73 @@ pub(crate) fn write_json(path: &Path, payload: &Value) -> Result<()> {
 
 pub(crate) fn repo_root() -> Result<PathBuf> {
     Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
+pub(crate) fn bundled_helper_manifest() -> Result<PathBuf> {
+    let checkout_manifest = repo_root()?.join("rust_helpers").join("Cargo.toml");
+    if checkout_manifest.is_file() {
+        return Ok(checkout_manifest);
+    }
+    let sources = [
+        ("src/lib.rs", include_str!("bundled_helpers/lib.rs.txt")),
+        (
+            "src/bin/rust_facts.rs",
+            include_str!("bundled_helpers/rust_facts.rs.txt"),
+        ),
+        (
+            "src/bin/ast_hasher.rs",
+            include_str!("bundled_helpers/ast_hasher.rs.txt"),
+        ),
+    ];
+    let source_identity = sources
+        .iter()
+        .map(|(path, source)| format!("{path}\n{source}"))
+        .collect::<String>();
+    let root = helper_cache_root().join(format!(
+        "{}-{}",
+        env!("CARGO_PKG_VERSION"),
+        stable_hash(&source_identity)
+    ));
+    fs::create_dir_all(root.join("src/bin"))?;
+    write_if_changed(
+        &root.join("Cargo.toml"),
+        r#"[package]
+name = "rust-quality-lens-helpers"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+syn = { version = "2.0", features = ["full", "visit"] }
+quote = "1.0"
+"#,
+    )?;
+    for (path, source) in sources {
+        write_if_changed(&root.join(path), source)?;
+    }
+    Ok(root.join("Cargo.toml"))
+}
+
+fn helper_cache_root() -> PathBuf {
+    env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+        .unwrap_or_else(env::temp_dir)
+        .join("rqlens")
+        .join("helpers")
+}
+
+fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
+    if fs::read_to_string(path).ok().as_deref() == Some(contents) {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, contents).with_context(|| format!("writing bundled helper {}", path.display()))
 }
 
 pub(crate) fn resolve_config_path(path: PathBuf, config_dir: &Path) -> PathBuf {
@@ -85,27 +152,31 @@ pub(crate) fn dedupe(values: Vec<String>) -> Vec<String> {
 
 pub(crate) fn iter_rust_files(paths: &[String]) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
-    let mut files = Vec::new();
-    for raw_path in paths {
-        let path = PathBuf::from(raw_path);
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
-            if seen.insert(absolutize(&path)) {
-                files.push(path);
-            }
-        } else if path.is_dir() {
-            for entry in WalkDir::new(&path)
-                .into_iter()
-                .filter_map(|entry| entry.ok())
-            {
-                let entry_path = entry.path();
-                if entry_path.is_file()
-                    && entry_path.extension().is_some_and(|ext| ext == "rs")
-                    && seen.insert(absolutize(entry_path))
-                {
-                    files.push(entry_path.to_path_buf());
-                }
-            }
-        }
+    paths
+        .iter()
+        .flat_map(rust_files_at)
+        .filter(|path| seen.insert(absolutize(path)))
+        .collect()
+}
+
+fn rust_files_at(raw_path: &String) -> Vec<PathBuf> {
+    let path = PathBuf::from(raw_path);
+    if is_rust_file(&path) {
+        return vec![path];
     }
-    files
+    if !path.is_dir() {
+        return Vec::new();
+    }
+    WalkDir::new(path)
+        .into_iter()
+        .filter_map(Result::ok)
+        .map(|entry| entry.into_path())
+        .filter(|path| is_rust_file(path))
+        .collect()
+}
+
+fn is_rust_file(path: &Path) -> bool {
+    path.is_file()
+        && path.extension().is_some_and(|extension| extension == "rs")
+        && !normalize_slashes(path).contains("/bundled_helpers/")
 }

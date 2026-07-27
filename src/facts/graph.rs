@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::facts::FileFacts;
+use crate::measurement::classify_module;
 
 #[derive(Clone)]
 pub(crate) struct ModuleInfo {
@@ -21,6 +22,16 @@ pub(crate) struct ModuleInfo {
     pub(crate) source_nonblank_line_count: usize,
 }
 
+impl ModuleInfo {
+    pub(crate) fn layer(&self) -> &'static str {
+        if self.is_entrypoint {
+            "Entrypoint"
+        } else {
+            classify_module(&self.module_key)
+        }
+    }
+}
+
 pub(crate) struct ModuleGraph {
     pub(crate) facts: Vec<FileFacts>,
     pub(crate) modules: BTreeMap<String, ModuleInfo>,
@@ -29,6 +40,18 @@ pub(crate) struct ModuleGraph {
     pub(crate) reverse_dependencies: HashMap<String, HashSet<String>>,
     pub(crate) dependency_provenance: HashMap<(String, String), BTreeSet<String>>,
     pub(crate) dependency_symbols: HashMap<(String, String), BTreeSet<String>>,
+}
+
+impl ModuleGraph {
+    pub(crate) fn dependency_counts(&self, module: &str) -> (usize, usize) {
+        (
+            self.dependencies.get(module).map(HashSet::len).unwrap_or(0),
+            self.reverse_dependencies
+                .get(module)
+                .map(HashSet::len)
+                .unwrap_or(0),
+        )
+    }
 }
 
 pub(crate) fn module_graph(facts: &[FileFacts]) -> ModuleGraph {
@@ -105,32 +128,40 @@ fn record_containment(
     }
 }
 
+type EdgeProvenance = HashMap<(String, String), BTreeSet<String>>;
+
 fn record_dependencies(
     fact: &FileFacts,
     facts: &[FileFacts],
     dependencies: &mut HashMap<String, HashSet<String>>,
-    provenance: &mut HashMap<(String, String), BTreeSet<String>>,
-    symbols: &mut HashMap<(String, String), BTreeSet<String>>,
+    provenance: &mut EdgeProvenance,
+    symbols: &mut EdgeProvenance,
 ) {
     let scoped_facts = facts
         .iter()
         .filter(|candidate| candidate.package_name == fact.package_name)
         .collect::<Vec<_>>();
-    let module_keys = scoped_facts
-        .iter()
-        .map(|candidate| candidate.module_key.clone())
-        .collect::<Vec<_>>();
     let entry = dependencies.entry(fact.module_id.clone()).or_default();
-    let mut semantically_resolved = HashSet::new();
+    let resolved = record_resolved_dependencies(fact, entry, provenance, symbols);
+    record_syntax_dependencies(fact, &scoped_facts, &resolved, entry, provenance);
+}
+
+fn record_resolved_dependencies(
+    fact: &FileFacts,
+    edges: &mut HashSet<String>,
+    provenance: &mut EdgeProvenance,
+    symbols: &mut EdgeProvenance,
+) -> HashSet<String> {
+    let mut resolved_paths = HashSet::new();
     for resolved in &fact.graph.resolved_dependencies {
+        resolved_paths.insert(resolved.raw_path.clone());
         let Some(target) = resolved.target_module_id.as_ref() else {
             continue;
         };
-        semantically_resolved.insert(resolved.raw_path.clone());
-        if target == &fact.module_id {
+        if target == &fact.module_id || is_module_path_probe(resolved.symbol_identity.as_deref()) {
             continue;
         }
-        entry.insert(target.clone());
+        edges.insert(target.clone());
         let edge = (fact.module_id.clone(), target.clone());
         provenance
             .entry(edge.clone())
@@ -140,23 +171,50 @@ fn record_dependencies(
             symbols.entry(edge).or_default().insert(symbol.clone());
         }
     }
-    for raw in &fact.graph.dependencies {
-        if semantically_resolved.contains(raw) {
+    resolved_paths
+}
+
+fn record_syntax_dependencies(
+    fact: &FileFacts,
+    scoped_facts: &[&FileFacts],
+    resolved: &HashSet<String>,
+    edges: &mut HashSet<String>,
+    provenance: &mut EdgeProvenance,
+) {
+    let modules = scoped_facts
+        .iter()
+        .map(|candidate| candidate.module_key.clone())
+        .collect::<Vec<_>>();
+    for raw in fact
+        .graph
+        .dependencies
+        .iter()
+        .filter(|raw| !resolved.contains(*raw))
+    {
+        let Some(target_key) = resolve_dependency(raw, &fact.module_key, &modules) else {
+            continue;
+        };
+        if target_key == fact.module_key {
             continue;
         }
-        if let Some(target_key) = resolve_dependency(raw, &fact.module_key, &module_keys)
-            && target_key != fact.module_key
-            && let Some(target) = scoped_facts
-                .iter()
-                .find(|candidate| candidate.module_key == target_key)
-        {
-            entry.insert(target.module_id.clone());
-            provenance
-                .entry((fact.module_id.clone(), target.module_id.clone()))
-                .or_default()
-                .insert("syntax_fallback".to_string());
-        }
+        let Some(target) = scoped_facts
+            .iter()
+            .find(|candidate| candidate.module_key == target_key)
+        else {
+            continue;
+        };
+        edges.insert(target.module_id.clone());
+        provenance
+            .entry((fact.module_id.clone(), target.module_id.clone()))
+            .or_default()
+            .insert("syntax_fallback".to_string());
     }
+}
+
+fn is_module_path_probe(symbol: Option<&str>) -> bool {
+    symbol.is_some_and(|symbol| {
+        symbol.ends_with("::use") || symbol.ends_with("::self") || symbol.ends_with("::super")
+    })
 }
 
 fn reverse_index(
@@ -228,7 +286,7 @@ fn dependency_prefix(raw: &str, modules: &[String], relative_base: Option<&str>)
 
 #[cfg(test)]
 mod tests {
-    use super::{module_graph, resolve_dependency};
+    use super::{is_module_path_probe, module_graph, resolve_dependency};
     use crate::facts::FileFacts;
 
     #[test]
@@ -251,6 +309,13 @@ mod tests {
             resolve_dependency("super::domain::model", "service::worker", &modules),
             None
         );
+    }
+
+    #[test]
+    fn semantic_module_path_probes_are_not_dependencies() {
+        assert!(is_module_path_probe(Some("crate::module::use")));
+        assert!(is_module_path_probe(Some("crate::module::self")));
+        assert!(!is_module_path_probe(Some("crate::module::function")));
     }
 
     #[test]
