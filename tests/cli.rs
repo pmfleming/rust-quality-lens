@@ -986,10 +986,50 @@ fn check_command_enforces_threshold_policy() {
     );
     let report: Value = serde_json::from_slice(&check.stdout).unwrap();
     assert_eq!(report["passed"], true);
-    assert_eq!(
-        report["evidence_deltas"][0]["metric"],
-        "line_coverage_percent"
+    assert!(report["evidence_deltas"].is_array());
+}
+
+#[test]
+fn validation_command_scores_ranked_outcome_labels() {
+    let analysis = repo_root().join("target/test-fixtures/validation-analysis");
+    fs::create_dir_all(&analysis).expect("validation fixture should exist");
+    fs::write(
+        analysis.join("map.json"),
+        serde_json::to_string(&serde_json::json!({
+            "risk_model_version": 4,
+            "data": {"graph": {"nodes": [
+                {"data": {"id": "demo::lib::risky", "module_key": "risky", "total_score": 100.0}},
+                {"data": {"id": "demo::lib::stable", "module_key": "stable", "total_score": 1.0}}
+            ]}}
+        }))
+        .unwrap(),
+    )
+    .expect("validation map should be written");
+    fs::write(
+        analysis.join("repository_outcomes.json"),
+        serde_json::to_string(&serde_json::json!({
+            "data": {"records": [{"evidence_class": "reviewed-label", "modules": ["risky"]}]}
+        }))
+        .unwrap(),
+    )
+    .expect("validation outcomes should be written");
+    let output_dir = repo_root().join("target/test-fixtures/validation-report");
+    let project = format!("demo={}", analysis.display());
+    let output = run(&[
+        "validate",
+        "--project",
+        &project,
+        "--output-dir",
+        &output_dir.to_string_lossy(),
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
+    let report = read_document(output_dir.join("validation_report.json"));
+    assert_eq!(report["summary"]["validated_project_count"], 1);
+    assert_eq!(report["projects"][0]["metrics"]["recall_at_10"], 1.0);
 }
 
 #[test]

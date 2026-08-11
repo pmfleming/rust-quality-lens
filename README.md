@@ -175,6 +175,17 @@ cargo run --bin rqlens -- performance --baseline baseline/analysis --config rqle
 
 This writes `performance.json`. `rqlens check --fail-on regression` also evaluates benchmark percentage increases when both current and baseline performance artifacts exist. Use `--no-run` to parse existing Criterion output without executing benches.
 
+Validate whether risk rankings are associated with reviewed outcome labels across held-out projects:
+
+```powershell
+cargo run --bin rqlens -- validate \
+  --project app=/path/to/app/target/analysis \
+  --project library=/path/to/library/target/analysis \
+  --output-dir target/validation
+```
+
+The report calculates precision-at-10, recall-at-10, mean percentile rank, and top-quartile lift. Reviewed labels are the default; `--include-inferred` is explicitly lower-confidence. Results are associations, not defect probabilities. For prospective validation, capture `map.json` before the outcome-label window.
+
 Calibrate score distributions against multiple local checkouts:
 
 ```powershell

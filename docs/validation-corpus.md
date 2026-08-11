@@ -35,3 +35,7 @@ Before treating thresholds as broadly representative, pin and periodically run:
 - an embedded `no_std` project
 
 For every corpus run, retain the revision, toolchain, enabled features, runtime, unsupported patterns, tool availability, and reviewed false positives. Percentiles remain triage aids and must not be described as defect probabilities.
+
+## Outcome validation protocol
+
+Capture architecture artifacts at a pinned revision before opening the outcome window. After the window closes, review defect, revert, security, and incident labels and attach stable module identities. Run `rqlens validate` on projects not used to choose score weights. Track precision-at-10, recall-at-10, mean percentile rank, and top-quartile lift, including projects with no outcomes. Commit-message inference may be used for exploration but not for claims of predictive validity.

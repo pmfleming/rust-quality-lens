@@ -23,6 +23,7 @@ mod sarif;
 mod semantic;
 mod telemetry;
 mod util;
+mod validation;
 
 use catalog::print_catalog;
 use config::{LensConfig, config_schema, write_default_config};
@@ -121,6 +122,14 @@ enum Commands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+    Validate {
+        #[arg(long = "project", required = true)]
+        projects: Vec<String>,
+        #[arg(long, default_value = "target/validation")]
+        output_dir: PathBuf,
+        #[arg(long)]
+        include_inferred: bool,
+    },
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -207,41 +216,72 @@ impl MeasureTool {
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
-    match cli.command {
+    run_command(Cli::parse().command)
+}
+
+fn run_command(command: Commands) -> Result<()> {
+    match command {
+        Commands::Calibrate {
+            projects,
+            output_dir,
+        } => write_report(
+            calibration::run(&projects, output_dir)?,
+            "calibration report",
+        ),
+        Commands::Performance {
+            baseline,
+            no_run,
+            config,
+        } => write_report(
+            performance::run_benchmarks(&LensConfig::load(config)?, baseline, no_run)?,
+            "performance evidence",
+        ),
+        Commands::Outcomes { labels, config } => write_report(
+            outcomes::collect(&LensConfig::load(config)?, labels)?,
+            "repository outcomes",
+        ),
+        Commands::Telemetry {
+            input,
+            max_age_hours,
+            config,
+        } => write_report(
+            telemetry::ingest(&LensConfig::load(config)?, &input, max_age_hours.max(1))?,
+            "operational evidence",
+        ),
+        Commands::Validate {
+            projects,
+            output_dir,
+            include_inferred,
+        } => write_report(
+            validation::run(&projects, output_dir, include_inferred)?,
+            "outcome validation report",
+        ),
+        command => run_quality_command(command),
+    }
+}
+
+fn run_quality_command(command: Commands) -> Result<()> {
+    match command {
         Commands::Catalog { config } => print_catalog(&LensConfig::load(config)?),
         Commands::Measure { tool, config } => measure(tool, LensConfig::load(config)?),
         Commands::Init { path, force } => {
-            let path = write_default_config(path, force)?;
-            println!("Wrote config to {}", path.display());
-            Ok(())
+            write_report(write_default_config(path, force)?, "config")
         }
-        Commands::ConfigSchema => {
-            println!("{}", serde_json::to_string_pretty(&config_schema())?);
-            Ok(())
-        }
-        Commands::ArtifactSchema { tool } => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&artifact_schemas(&tool))?
-            );
-            Ok(())
-        }
+        Commands::ConfigSchema => print_json(&config_schema()),
+        Commands::ArtifactSchema { tool } => print_json(&artifact_schemas(&tool)),
         Commands::Verify { config } => measure(MeasureTool::Practices, LensConfig::load(config)?),
-        Commands::Sarif { output, config } => {
-            let output = sarif::write(&LensConfig::load(config)?, output)?;
-            println!("Wrote SARIF report to {}", output.display());
-            Ok(())
-        }
+        Commands::Sarif { output, config } => write_report(
+            sarif::write(&LensConfig::load(config)?, output)?,
+            "SARIF report",
+        ),
         Commands::Review {
             changed_since,
             diff_file,
             config,
-        } => {
-            let output = review::run_review(LensConfig::load(config)?, changed_since, diff_file)?;
-            println!("Wrote review data to {}", output.display());
-            Ok(())
-        }
+        } => write_report(
+            review::run_review(LensConfig::load(config)?, changed_since, diff_file)?,
+            "review data",
+        ),
         Commands::Check {
             baseline,
             fail_on,
@@ -255,39 +295,18 @@ fn main() -> Result<()> {
             max_total_score,
             max_regression,
         ),
-        Commands::Calibrate {
-            projects,
-            output_dir,
-        } => {
-            let output = calibration::run(&projects, output_dir)?;
-            println!("Wrote calibration report to {}", output.display());
-            Ok(())
-        }
-        Commands::Performance {
-            baseline,
-            no_run,
-            config,
-        } => {
-            let output = performance::run_benchmarks(&LensConfig::load(config)?, baseline, no_run)?;
-            println!("Wrote performance evidence to {}", output.display());
-            Ok(())
-        }
-        Commands::Outcomes { labels, config } => {
-            let output = outcomes::collect(&LensConfig::load(config)?, labels)?;
-            println!("Wrote repository outcomes to {}", output.display());
-            Ok(())
-        }
-        Commands::Telemetry {
-            input,
-            max_age_hours,
-            config,
-        } => {
-            let output =
-                telemetry::ingest(&LensConfig::load(config)?, &input, max_age_hours.max(1))?;
-            println!("Wrote operational evidence to {}", output.display());
-            Ok(())
-        }
+        _ => unreachable!("evidence commands are handled by run_command"),
     }
+}
+
+fn print_json(value: &serde_json::Value) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+fn write_report(path: PathBuf, label: &str) -> Result<()> {
+    println!("Wrote {label} to {}", path.display());
+    Ok(())
 }
 
 fn measure(tool: MeasureTool, config: LensConfig) -> Result<()> {
