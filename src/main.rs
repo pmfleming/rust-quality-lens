@@ -13,6 +13,7 @@ mod config;
 mod contracts;
 mod facts;
 mod measurement;
+mod performance;
 mod policy;
 mod producers;
 mod review;
@@ -95,6 +96,14 @@ enum Commands {
         projects: Vec<String>,
         #[arg(long, default_value = "target/calibration")]
         output_dir: PathBuf,
+    },
+    Performance {
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+        #[arg(long)]
+        no_run: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
     },
 }
 
@@ -236,6 +245,15 @@ fn main() -> Result<()> {
         } => {
             let output = calibration::run(&projects, output_dir)?;
             println!("Wrote calibration report to {}", output.display());
+            Ok(())
+        }
+        Commands::Performance {
+            baseline,
+            no_run,
+            config,
+        } => {
+            let output = performance::run_benchmarks(&LensConfig::load(config)?, baseline, no_run)?;
+            println!("Wrote performance evidence to {}", output.display());
             Ok(())
         }
     }

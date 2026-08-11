@@ -148,6 +148,15 @@ cargo run --bin rqlens -- check --baseline baseline/analysis --fail-on regressio
 
 Baseline regression checks compare both architecture risk and aggregate line coverage; `max-regression` is interpreted as risk-score points and coverage percentage points respectively.
 
+Capture Criterion benchmark estimates and compare them with a prior artifact:
+
+```powershell
+cargo run --bin rqlens -- performance --config rqlens.toml
+cargo run --bin rqlens -- performance --baseline baseline/analysis --config rqlens.toml
+```
+
+This writes `performance.json`. `rqlens check --fail-on regression` also evaluates benchmark percentage increases when both current and baseline performance artifacts exist. Use `--no-run` to parse existing Criterion output without executing benches.
+
 Calibrate score distributions against multiple local checkouts:
 
 ```powershell

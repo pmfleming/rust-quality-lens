@@ -78,13 +78,16 @@ pub(crate) fn run_check(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let evidence_deltas = baseline
+    let mut evidence_deltas = baseline
         .as_ref()
         .map(|path| coverage_regression(config, &documents, path, max_regression))
         .transpose()?
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
+    if let Some(path) = baseline.as_ref() {
+        evidence_deltas.extend(performance_regressions(&documents, path, max_regression)?);
+    }
     regressions.extend(
         evidence_deltas
             .iter()
@@ -188,7 +191,7 @@ fn measurement_documents(config: &LensConfig) -> Result<BTreeMap<String, Value>>
         .map(|tool| tool.output_file())
         .collect::<BTreeSet<_>>();
     let mut documents = BTreeMap::new();
-    for file in files {
+    for file in files.into_iter().chain(["performance.json"]) {
         let path = config.output_dir.join(file);
         if !path.exists() {
             continue;
@@ -413,6 +416,59 @@ fn coverage_regression(
         "status": if decrease > maximum { "regressed" } else if decrease < 0.0 { "improved" } else { "unchanged" },
         "project": config.project_name,
     })))
+}
+
+fn performance_regressions(
+    documents: &BTreeMap<String, Value>,
+    baseline: &Path,
+    maximum: f64,
+) -> Result<Vec<Value>> {
+    let Some(current) = documents.get("performance.json") else {
+        return Ok(Vec::new());
+    };
+    let path = if baseline.is_dir() {
+        baseline.join("performance.json")
+    } else {
+        baseline
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("performance.json")
+    };
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let old: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+    let old_records = old["data"]["records"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            Some((
+                row["id"].as_str()?.to_string(),
+                row["estimate_nanoseconds"].as_f64()?,
+            ))
+        })
+        .collect::<BTreeMap<_, _>>();
+    Ok(current["data"]["records"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let id = row["id"].as_str()?;
+            let current = row["estimate_nanoseconds"].as_f64()?;
+            let baseline = *old_records.get(id)?;
+            let increase = if baseline == 0.0 { 0.0 } else { crate::util::round2((current - baseline) / baseline * 100.0) };
+            Some(json!({
+                "metric": "benchmark_estimate_percent",
+                "benchmark": id,
+                "baseline": baseline,
+                "current": current,
+                "increase": increase,
+                "maximum_increase": maximum,
+                "status": if increase > maximum { "regressed" } else if increase < 0.0 { "improved" } else { "unchanged" },
+            }))
+        })
+        .collect())
 }
 
 fn read_baseline_map(path: &Path, current_model_version: Option<u64>) -> Result<Value> {

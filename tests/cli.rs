@@ -993,6 +993,26 @@ fn check_command_enforces_threshold_policy() {
 }
 
 #[test]
+fn performance_command_writes_explicit_missing_evidence() {
+    let output = run(&[
+        "performance",
+        "--no-run",
+        "--config",
+        "tests/fixtures/mini_rust_project/rqlens.toml",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = read_document(
+        repo_root().join("tests/fixtures/mini_rust_project/target/analysis/performance.json"),
+    );
+    assert_eq!(document["tool"], "performance");
+    assert_eq!(document["measurement_confidence"]["partial"], true);
+}
+
+#[test]
 fn hotspots_report_syntax_fact_confidence() {
     let output = run(&[
         "measure",
