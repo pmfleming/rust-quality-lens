@@ -148,6 +148,15 @@ cargo run --bin rqlens -- check --baseline baseline/analysis --fail-on regressio
 
 Baseline regression checks compare both architecture risk and aggregate line coverage; `max-regression` is interpreted as risk-score points and coverage percentage points respectively.
 
+Ingest normalized operational telemetry without coupling RQLens to a monitoring vendor:
+
+```powershell
+cargo run --bin rqlens -- telemetry --input production-signals.json --max-age-hours 24 --config rqlens.toml
+cargo run --bin rqlens -- check --fail-on operational-failure --config rqlens.toml
+```
+
+The input contains a `window.end` RFC 3339 timestamp and a `signals` array. Each signal requires `id`, `kind`, explicit `healthy`/`breached`/`unknown` status, numeric `value`, and `source`; optional module identities connect observations to architecture evidence. Stale windows and unknown statuses reduce confidence rather than silently passing.
+
 Collect inferred defect, revert, and security outcomes from Git history:
 
 ```powershell

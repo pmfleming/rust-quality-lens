@@ -993,6 +993,44 @@ fn check_command_enforces_threshold_policy() {
 }
 
 #[test]
+fn telemetry_command_preserves_observed_operational_evidence() {
+    let input = repo_root().join("target/test-fixtures/telemetry.json");
+    if let Some(parent) = input.parent() {
+        fs::create_dir_all(parent).expect("telemetry fixture dir should exist");
+    }
+    fs::write(
+        &input,
+        serde_json::to_string(&serde_json::json!({
+            "window": {"end": chrono::Utc::now().to_rfc3339()},
+            "signals": [{
+                "id": "api-errors", "kind": "error-rate", "status": "healthy",
+                "value": 0.1, "unit": "percent", "source": "test-monitor"
+            }]
+        }))
+        .unwrap(),
+    )
+    .expect("telemetry fixture should be written");
+    let output = run(&[
+        "telemetry",
+        "--input",
+        &input.to_string_lossy(),
+        "--config",
+        "rqlens.toml",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = read_document(repo_root().join("target/analysis/operational_evidence.json"));
+    assert_eq!(document["summary"]["healthy"], 1);
+    assert_eq!(
+        document["data"]["records"][0]["evidence_class"],
+        "operational-observed"
+    );
+}
+
+#[test]
 fn outcomes_command_separates_inferred_history() {
     let output = run(&["outcomes", "--config", "rqlens.toml"]);
     assert!(

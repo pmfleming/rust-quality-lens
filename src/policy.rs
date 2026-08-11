@@ -15,6 +15,7 @@ pub(crate) enum FailPolicy {
     TestFailure,
     PracticeFailure,
     ReliabilityFinding,
+    OperationalFailure,
     Regression,
     Threshold,
 }
@@ -32,6 +33,7 @@ pub(crate) fn run_check(
     let test_failures = test_failures(&documents);
     let practices = classify_findings(config, practice_findings(&documents));
     let reliability = classify_findings(config, reliability_findings(&documents));
+    let operational_failures = operational_failures(&documents);
     let policy_rule_evaluations = evaluate_policy_rules(
         &config.policy,
         practices.active.iter().chain(&reliability.active),
@@ -95,15 +97,16 @@ pub(crate) fn run_check(
             .cloned(),
     );
 
-    let mut failed_policies = failed_cli_policies(
-        fail_on,
-        &partial_artifacts,
-        &test_failures,
-        &practices.errors,
-        &reliability.errors,
-        &regressions,
-        &threshold_violations,
-    );
+    let policy_evidence = PolicyEvidence {
+        partial_artifacts: &partial_artifacts,
+        test_failures: &test_failures,
+        practice_failures: &practices.errors,
+        reliability_findings: &reliability.errors,
+        operational_failures: &operational_failures,
+        regressions: &regressions,
+        threshold_violations: &threshold_violations,
+    };
+    let mut failed_policies = failed_cli_policies(fail_on, &policy_evidence);
     if policy_rule_errors > 0 {
         failed_policies.push("configured-rules".to_string());
     }
@@ -127,6 +130,7 @@ pub(crate) fn run_check(
         "practice_warnings": practices.warnings,
         "reliability_findings": reliability.errors,
         "reliability_warnings": reliability.warnings,
+        "operational_failures": operational_failures,
         "waived_findings": waived_findings,
         "expired_waivers": expired_waivers,
         "policy_rule_evaluations": policy_rule_evaluations,
@@ -149,24 +153,27 @@ pub(crate) fn run_check(
     Ok(())
 }
 
-fn failed_cli_policies(
-    fail_on: &[FailPolicy],
-    partial_artifacts: &[String],
-    test_failures: &[Value],
-    practice_failures: &[Value],
-    reliability_findings: &[Value],
-    regressions: &[Value],
-    threshold_violations: &[Value],
-) -> Vec<String> {
+struct PolicyEvidence<'a> {
+    partial_artifacts: &'a [String],
+    test_failures: &'a [Value],
+    practice_failures: &'a [Value],
+    reliability_findings: &'a [Value],
+    operational_failures: &'a [Value],
+    regressions: &'a [Value],
+    threshold_violations: &'a [Value],
+}
+
+fn failed_cli_policies(fail_on: &[FailPolicy], evidence: &PolicyEvidence<'_>) -> Vec<String> {
     fail_on
         .iter()
         .filter(|policy| match policy {
-            FailPolicy::Partial => !partial_artifacts.is_empty(),
-            FailPolicy::TestFailure => !test_failures.is_empty(),
-            FailPolicy::PracticeFailure => !practice_failures.is_empty(),
-            FailPolicy::ReliabilityFinding => !reliability_findings.is_empty(),
-            FailPolicy::Regression => !regressions.is_empty(),
-            FailPolicy::Threshold => !threshold_violations.is_empty(),
+            FailPolicy::Partial => !evidence.partial_artifacts.is_empty(),
+            FailPolicy::TestFailure => !evidence.test_failures.is_empty(),
+            FailPolicy::PracticeFailure => !evidence.practice_failures.is_empty(),
+            FailPolicy::ReliabilityFinding => !evidence.reliability_findings.is_empty(),
+            FailPolicy::OperationalFailure => !evidence.operational_failures.is_empty(),
+            FailPolicy::Regression => !evidence.regressions.is_empty(),
+            FailPolicy::Threshold => !evidence.threshold_violations.is_empty(),
         })
         .map(|policy| policy.as_str().to_string())
         .collect()
@@ -179,6 +186,7 @@ impl FailPolicy {
             Self::TestFailure => "test-failure",
             Self::PracticeFailure => "practice-failure",
             Self::ReliabilityFinding => "reliability-finding",
+            Self::OperationalFailure => "operational-failure",
             Self::Regression => "regression",
             Self::Threshold => "threshold",
         }
@@ -191,10 +199,11 @@ fn measurement_documents(config: &LensConfig) -> Result<BTreeMap<String, Value>>
         .map(|tool| tool.output_file())
         .collect::<BTreeSet<_>>();
     let mut documents = BTreeMap::new();
-    for file in files
-        .into_iter()
-        .chain(["performance.json", "repository_outcomes.json"])
-    {
+    for file in files.into_iter().chain([
+        "performance.json",
+        "repository_outcomes.json",
+        "operational_evidence.json",
+    ]) {
         let path = config.output_dir.join(file);
         if !path.exists() {
             continue;
@@ -271,6 +280,18 @@ fn practice_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
                 Some("failed" | "unavailable" | "timed-out")
             )
         })
+        .cloned()
+        .collect()
+}
+
+fn operational_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
+    documents
+        .get("operational_evidence.json")
+        .map(artifact_payload)
+        .and_then(|data| data["records"].as_array())
+        .into_iter()
+        .flatten()
+        .filter(|record| record["status"] == "breached")
         .cloned()
         .collect()
 }

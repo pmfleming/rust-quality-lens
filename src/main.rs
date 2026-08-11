@@ -21,6 +21,7 @@ mod review;
 mod risk_model;
 mod sarif;
 mod semantic;
+mod telemetry;
 mod util;
 
 use catalog::print_catalog;
@@ -109,6 +110,14 @@ enum Commands {
     Outcomes {
         #[arg(long)]
         labels: Option<PathBuf>,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    Telemetry {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long, default_value_t = 24)]
+        max_age_hours: u64,
         #[arg(long)]
         config: Option<PathBuf>,
     },
@@ -266,6 +275,16 @@ fn main() -> Result<()> {
         Commands::Outcomes { labels, config } => {
             let output = outcomes::collect(&LensConfig::load(config)?, labels)?;
             println!("Wrote repository outcomes to {}", output.display());
+            Ok(())
+        }
+        Commands::Telemetry {
+            input,
+            max_age_hours,
+            config,
+        } => {
+            let output =
+                telemetry::ingest(&LensConfig::load(config)?, &input, max_age_hours.max(1))?;
+            println!("Wrote operational evidence to {}", output.display());
             Ok(())
         }
     }

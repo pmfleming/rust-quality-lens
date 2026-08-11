@@ -11,6 +11,7 @@ All notable changes to this project will be documented here. The format follows 
 - Configured cargo-fuzz target execution and compiler-sanitizer test gates alongside Miri.
 - Criterion performance artifacts with baseline percentage regression enforcement.
 - Repository outcome artifacts for inferred and reviewed defect, revert, and security labels.
+- Vendor-neutral operational telemetry ingestion with freshness and breach policy enforcement.
 - Official Rust practice verification with structured command evidence.
 - Safety-contract and explicit panic-path findings.
 - Automatic local Cargo package source discovery.
