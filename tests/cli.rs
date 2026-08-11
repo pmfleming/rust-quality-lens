@@ -408,6 +408,10 @@ fn config_schema_prints_machine_readable_schema() {
         payload["properties"]["verification"]["properties"]["flaky_test_runs"]["minimum"],
         1
     );
+    assert_eq!(
+        payload["properties"]["verification"]["properties"]["sanitizers"]["items"]["enum"],
+        serde_json::json!(["address", "leak", "memory", "thread"])
+    );
 }
 
 #[test]

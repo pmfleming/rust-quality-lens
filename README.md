@@ -58,6 +58,9 @@ semver = false
 feature_matrix = false
 mutation = false       # cargo-mutants
 flaky_test_runs = 1    # set to 2+ in a scheduled CI job
+fuzz_targets = []      # cargo-fuzz target names
+fuzz_seconds = 30
+sanitizers = []        # address, leak, memory, thread; usually nightly
 miri = false
 ```
 

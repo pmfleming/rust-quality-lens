@@ -18,6 +18,9 @@ semver = false
 feature_matrix = false
 mutation = false
 flaky_test_runs = 1
+fuzz_targets = []
+fuzz_seconds = 30
+sanitizers = []
 miri = false
 
 [policy.rules."rust.safety.undocumented-unsafe"]

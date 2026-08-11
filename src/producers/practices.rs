@@ -20,6 +20,8 @@ pub(super) fn produce(config: &LensConfig) -> Result<Value> {
         flaky_test_check(config),
         miri_check(config),
     ]);
+    checks.extend(fuzz_checks(config));
+    checks.extend(sanitizer_checks(config));
     checks.extend(project_evidence(config));
     let failed_errors = count(&checks, "failed", "error");
     let failed_warnings = count(&checks, "failed", "warning");
@@ -313,6 +315,64 @@ fn flaky_test_check(config: &LensConfig) -> Value {
             "runs": outcomes,
         },
     })
+}
+
+fn fuzz_checks(config: &LensConfig) -> Vec<Value> {
+    if config.verification.fuzz_targets.is_empty() {
+        return vec![skipped_check(
+            "rust.safety.fuzz",
+            "Configured fuzz targets execute without crashes",
+            "configure verification.fuzz_targets to require cargo-fuzz",
+            "https://rust-fuzz.github.io/book/cargo-fuzz.html",
+        )];
+    }
+    config
+        .verification
+        .fuzz_targets
+        .iter()
+        .map(|target| {
+            cargo_check(
+                config,
+                "rust.safety.fuzz",
+                &format!("Fuzz target {target} executes without crashes"),
+                vec![
+                    "fuzz".to_string(),
+                    "run".to_string(),
+                    target.clone(),
+                    "--".to_string(),
+                    format!("-max_total_time={}", config.verification.fuzz_seconds),
+                ],
+                "https://rust-fuzz.github.io/book/cargo-fuzz.html",
+                BTreeMap::new(),
+            )
+        })
+        .collect()
+}
+
+fn sanitizer_checks(config: &LensConfig) -> Vec<Value> {
+    if config.verification.sanitizers.is_empty() {
+        return vec![skipped_check(
+            "rust.safety.sanitizers",
+            "Tests pass under configured compiler sanitizers",
+            "configure verification.sanitizers on a supported nightly toolchain",
+            "https://doc.rust-lang.org/beta/unstable-book/compiler-flags/sanitizer.html",
+        )];
+    }
+    config
+        .verification
+        .sanitizers
+        .iter()
+        .map(|sanitizer| {
+            cargo_check(
+                config,
+                &format!("rust.safety.sanitizer.{sanitizer}"),
+                &format!("Tests pass under the {sanitizer} sanitizer"),
+                config.verification.cargo_arguments("test", true, false),
+                "https://doc.rust-lang.org/beta/unstable-book/compiler-flags/sanitizer.html",
+                BTreeMap::from([("RUSTFLAGS".to_string(), format!("-Zsanitizer={sanitizer}"))]),
+            )
+        })
+        .collect()
 }
 
 fn miri_check(config: &LensConfig) -> Value {

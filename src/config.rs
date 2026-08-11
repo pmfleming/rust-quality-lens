@@ -46,6 +46,9 @@ struct RawVerificationConfig {
     feature_matrix: Option<bool>,
     mutation: Option<bool>,
     flaky_test_runs: Option<usize>,
+    fuzz_targets: Option<Vec<String>>,
+    fuzz_seconds: Option<u64>,
+    sanitizers: Option<Vec<String>>,
     miri: Option<bool>,
 }
 
@@ -66,6 +69,9 @@ pub(crate) struct VerificationConfig {
     pub(crate) feature_matrix: bool,
     pub(crate) mutation: bool,
     pub(crate) flaky_test_runs: usize,
+    pub(crate) fuzz_targets: Vec<String>,
+    pub(crate) fuzz_seconds: u64,
+    pub(crate) sanitizers: Vec<String>,
     pub(crate) miri: bool,
 }
 
@@ -87,6 +93,9 @@ impl Default for VerificationConfig {
             feature_matrix: false,
             mutation: false,
             flaky_test_runs: 1,
+            fuzz_targets: Vec::new(),
+            fuzz_seconds: 30,
+            sanitizers: Vec::new(),
             miri: false,
         }
     }
@@ -301,9 +310,21 @@ impl From<Option<RawVerificationConfig>> for VerificationConfig {
             feature_matrix: raw.feature_matrix.unwrap_or_default(),
             mutation: raw.mutation.unwrap_or_default(),
             flaky_test_runs: raw.flaky_test_runs.unwrap_or(1).max(1),
+            fuzz_targets: raw.fuzz_targets.unwrap_or_default(),
+            fuzz_seconds: raw.fuzz_seconds.unwrap_or(30).max(1),
+            sanitizers: raw.sanitizers.unwrap_or_default(),
             miri: raw.miri.unwrap_or_default(),
         }
     }
+}
+
+fn validate_sanitizers(sanitizers: &[String]) -> Result<()> {
+    for sanitizer in sanitizers {
+        if !matches!(sanitizer.as_str(), "address" | "leak" | "memory" | "thread") {
+            bail!("unsupported sanitizer {sanitizer}; expected address, leak, memory, or thread");
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -398,6 +419,7 @@ impl LensConfig {
             .unwrap_or(60)
             .max(1);
         let verification = VerificationConfig::from(raw.verification);
+        validate_sanitizers(&verification.sanitizers)?;
         let policy = raw.policy.unwrap_or_default();
         policy.validate()?;
         let project_name = raw.project_name.unwrap_or_else(|| {
@@ -563,6 +585,10 @@ feature_matrix = false
 mutation = false
 # Set above 1 in CI to detect order-dependent or intermittent failures.
 flaky_test_runs = 1
+# Behavioral safety checks are opt-in and usually run on nightly:
+fuzz_targets = []
+fuzz_seconds = 30
+sanitizers = [] # address, leak, memory, or thread
 miri = false
 
 # Stable rule limits prevent new findings while allowing an explicit baseline:
@@ -630,6 +656,9 @@ pub(crate) fn config_schema() -> Value {
                     "feature_matrix": {"type": "boolean", "default": false},
                     "mutation": {"type": "boolean", "default": false},
                     "flaky_test_runs": {"type": "integer", "minimum": 1, "default": 1},
+                    "fuzz_targets": {"type": "array", "items": {"type": "string"}, "default": []},
+                    "fuzz_seconds": {"type": "integer", "minimum": 1, "default": 30},
+                    "sanitizers": {"type": "array", "items": {"type": "string", "enum": ["address", "leak", "memory", "thread"]}, "default": []},
                     "miri": {"type": "boolean", "default": false}
                 }
             },
