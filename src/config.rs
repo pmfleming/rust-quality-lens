@@ -376,6 +376,7 @@ impl LensConfig {
         };
         let project_root =
             resolve_config_path(raw.project_root.unwrap_or_else(|| ".".into()), &config_dir);
+        let project_root = fs::canonicalize(&project_root).unwrap_or(project_root);
         let rust = raw.rust;
         let identity_offline = rust
             .as_ref()
@@ -705,7 +706,7 @@ pub(crate) fn config_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        PolicyConfig, PolicyRule, PolicyRuleLevel, PolicyWaiver, VerificationConfig,
+        LensConfig, PolicyConfig, PolicyRule, PolicyRuleLevel, PolicyWaiver, VerificationConfig,
         metadata_source_roots,
     };
     use serde_json::json;
@@ -753,6 +754,23 @@ mod tests {
         assert!(rule.includes(Some("src/generated_code.rs"), Some("application")));
         assert!(!rule.includes(Some("src/lib.rs"), Some("generated-bindings")));
         assert!(rule.includes(Some("src/lib.rs"), Some("application")));
+    }
+
+    #[test]
+    fn project_root_is_canonicalized_for_stable_path_identity() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let project = root.path().join("project");
+        let config_dir = root.path().join("config");
+        std::fs::create_dir_all(project.join("src"))?;
+        std::fs::create_dir_all(&config_dir)?;
+        std::fs::write(project.join("src/lib.rs"), "")?;
+        std::fs::write(
+            config_dir.join("rqlens.toml"),
+            "project_root = \"../project/../project\"\n",
+        )?;
+        let config = LensConfig::load(Some(config_dir.join("rqlens.toml")))?;
+        assert_eq!(config.project_root, std::fs::canonicalize(project)?);
+        Ok(())
     }
 
     #[test]
