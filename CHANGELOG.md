@@ -10,6 +10,7 @@ All notable changes to this project will be documented here. The format follows 
 - Optional cargo-mutants and repeated-test behavioral gates for mutation strength and flakiness evidence.
 - Configured cargo-fuzz target execution and compiler-sanitizer test gates alongside Miri.
 - Criterion performance artifacts with baseline percentage regression enforcement.
+- Repository outcome artifacts for inferred and reviewed defect, revert, and security labels.
 - Official Rust practice verification with structured command evidence.
 - Safety-contract and explicit panic-path findings.
 - Automatic local Cargo package source discovery.

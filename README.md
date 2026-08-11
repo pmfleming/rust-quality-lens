@@ -148,6 +148,15 @@ cargo run --bin rqlens -- check --baseline baseline/analysis --fail-on regressio
 
 Baseline regression checks compare both architecture risk and aggregate line coverage; `max-regression` is interpreted as risk-score points and coverage percentage points respectively.
 
+Collect inferred defect, revert, and security outcomes from Git history:
+
+```powershell
+cargo run --bin rqlens -- outcomes --config rqlens.toml
+cargo run --bin rqlens -- outcomes --labels reviewed-outcomes.json --config rqlens.toml
+```
+
+The optional labels file is a JSON array with `commit`, `kind`, and optional `modules`, `paths`, and `source`. Inferred commit-message records remain explicitly marked `review_required`; reviewed labels are kept separate in `repository_outcomes.json`.
+
 Capture Criterion benchmark estimates and compare them with a prior artifact:
 
 ```powershell

@@ -191,7 +191,10 @@ fn measurement_documents(config: &LensConfig) -> Result<BTreeMap<String, Value>>
         .map(|tool| tool.output_file())
         .collect::<BTreeSet<_>>();
     let mut documents = BTreeMap::new();
-    for file in files.into_iter().chain(["performance.json"]) {
+    for file in files
+        .into_iter()
+        .chain(["performance.json", "repository_outcomes.json"])
+    {
         let path = config.output_dir.join(file);
         if !path.exists() {
             continue;

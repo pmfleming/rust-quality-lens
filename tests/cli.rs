@@ -993,6 +993,19 @@ fn check_command_enforces_threshold_policy() {
 }
 
 #[test]
+fn outcomes_command_separates_inferred_history() {
+    let output = run(&["outcomes", "--config", "rqlens.toml"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = read_document(repo_root().join("target/analysis/repository_outcomes.json"));
+    assert_eq!(document["tool"], "repository-outcomes");
+    assert!(document["data"]["records"].is_array());
+}
+
+#[test]
 fn performance_command_writes_explicit_missing_evidence() {
     let output = run(&[
         "performance",

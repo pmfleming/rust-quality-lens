@@ -13,6 +13,7 @@ mod config;
 mod contracts;
 mod facts;
 mod measurement;
+mod outcomes;
 mod performance;
 mod policy;
 mod producers;
@@ -102,6 +103,12 @@ enum Commands {
         baseline: Option<PathBuf>,
         #[arg(long)]
         no_run: bool,
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
+    Outcomes {
+        #[arg(long)]
+        labels: Option<PathBuf>,
         #[arg(long)]
         config: Option<PathBuf>,
     },
@@ -254,6 +261,11 @@ fn main() -> Result<()> {
         } => {
             let output = performance::run_benchmarks(&LensConfig::load(config)?, baseline, no_run)?;
             println!("Wrote performance evidence to {}", output.display());
+            Ok(())
+        }
+        Commands::Outcomes { labels, config } => {
+            let output = outcomes::collect(&LensConfig::load(config)?, labels)?;
+            println!("Wrote repository outcomes to {}", output.display());
             Ok(())
         }
     }
