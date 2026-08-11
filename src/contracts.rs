@@ -7,6 +7,7 @@ use crate::MeasureTool;
 use crate::config::LensConfig;
 use crate::facts::RunContext;
 use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
+use crate::util::project_input_fingerprint;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ArtifactEnvelope<T: Serialize> {
@@ -40,6 +41,7 @@ pub(crate) fn artifact_document(
         "generated_from": "rqlens",
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "generator_version": env!("CARGO_PKG_VERSION"),
+        "input_fingerprint": project_input_fingerprint(&config.project_root, &config.source_roots),
         "tool": tool.name(),
         "risk_model_id": MODEL_ID,
         "risk_model_version": MODEL_VERSION,
@@ -378,6 +380,20 @@ fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
         json!({"type": "string", "format": "date-time"}),
     );
     properties.insert("generator_version".to_string(), json!({"type": "string"}));
+    properties.insert(
+        "input_fingerprint".to_string(),
+        json!({
+            "type": "object",
+            "required": ["algorithm", "digest", "file_count", "complete"],
+            "properties": {
+                "algorithm": {"type": "string"},
+                "digest": {"type": "string"},
+                "file_count": {"type": "integer"},
+                "complete": {"type": "boolean"},
+                "read_errors": {"type": "array", "items": {"type": "string"}}
+            }
+        }),
+    );
     properties.insert(
         "tool".to_string(),
         if matches!(tool, MeasureTool::Correctness | MeasureTool::CorrectnessRun) {

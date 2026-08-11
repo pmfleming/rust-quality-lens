@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use serde_json::Value;
-use std::collections::HashSet;
+use serde_json::{Value, json};
+use std::collections::{BTreeSet, HashSet};
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -129,12 +129,78 @@ pub(crate) fn over_free(value: f64, free: f64, weight: f64, cap: f64) -> f64 {
 }
 
 pub(crate) fn stable_hash(value: &str) -> String {
-    let mut hash: u64 = 1469598103934665603;
-    for byte in value.as_bytes() {
+    format!("{:016x}", fnv1a(1469598103934665603, value.as_bytes()))
+}
+
+pub(crate) fn project_input_fingerprint(project_root: &Path, source_roots: &[String]) -> Value {
+    let mut files = BTreeSet::new();
+    for entry in WalkDir::new(project_root)
+        .into_iter()
+        .filter_entry(|entry| !ignored_input_directory(entry.path(), project_root))
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.is_file() && is_quality_input(path) {
+            files.insert(absolutize(path));
+        }
+    }
+    for path in iter_rust_files(source_roots) {
+        files.insert(absolutize(path));
+    }
+
+    let mut hash = 1469598103934665603;
+    let mut observed = 0usize;
+    let mut read_errors = Vec::new();
+    for path in files {
+        let relative = path.strip_prefix(project_root).unwrap_or(&path);
+        hash = fnv1a(hash, normalize_slashes(relative).as_bytes());
+        hash = fnv1a(hash, &[0]);
+        match fs::read(&path) {
+            Ok(bytes) => {
+                hash = fnv1a(hash, &bytes);
+                observed += 1;
+            }
+            Err(error) => read_errors.push(format!("{}: {error}", path.display())),
+        }
+        hash = fnv1a(hash, &[0xff]);
+    }
+    json!({
+        "algorithm": "fnv1a64-path-and-content-v1",
+        "digest": format!("{hash:016x}"),
+        "file_count": observed,
+        "read_errors": read_errors,
+        "complete": read_errors.is_empty(),
+    })
+}
+
+fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
         hash ^= *byte as u64;
         hash = hash.wrapping_mul(1099511628211);
     }
-    format!("{hash:016x}")
+    hash
+}
+
+fn ignored_input_directory(path: &Path, project_root: &Path) -> bool {
+    path != project_root
+        && path
+            .file_name()
+            .is_some_and(|name| matches!(name.to_str(), Some(".git" | ".direnv" | "target")))
+}
+
+fn is_quality_input(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "rs")
+        || matches!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some(
+                "Cargo.toml"
+                    | "Cargo.lock"
+                    | "rust-toolchain"
+                    | "rust-toolchain.toml"
+                    | "rqlens.toml"
+                    | "deny.toml"
+            )
+        )
 }
 
 pub(crate) fn tail(text: &str, lines: usize) -> String {
@@ -179,4 +245,33 @@ fn is_rust_file(path: &Path) -> bool {
     path.is_file()
         && path.extension().is_some_and(|extension| extension == "rs")
         && !normalize_slashes(path).contains("/bundled_helpers/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::project_input_fingerprint;
+
+    #[test]
+    fn project_fingerprint_changes_with_quality_inputs_only() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir_all(root.path().join("src"))?;
+        std::fs::create_dir_all(root.path().join("target"))?;
+        std::fs::write(root.path().join("Cargo.toml"), "[workspace]\n")?;
+        std::fs::write(root.path().join("src/lib.rs"), "pub fn value() {}\n")?;
+        let roots = vec![root.path().join("src").to_string_lossy().to_string()];
+        let initial = project_input_fingerprint(root.path(), &roots);
+
+        std::fs::write(root.path().join("target/ignored.rs"), "changed\n")?;
+        assert_eq!(
+            initial["digest"],
+            project_input_fingerprint(root.path(), &roots)["digest"]
+        );
+
+        std::fs::write(root.path().join("src/lib.rs"), "pub fn changed() {}\n")?;
+        assert_ne!(
+            initial["digest"],
+            project_input_fingerprint(root.path(), &roots)["digest"]
+        );
+        Ok(())
+    }
 }

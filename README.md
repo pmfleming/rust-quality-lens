@@ -196,7 +196,7 @@ RQLens deliberately separates three evidence classes:
 
 These classes are not combined into a universal quality score. Missing tools never count as passing. See `docs/quality-model.md` for sources and interpretation.
 
-Generated artifacts use a versioned envelope. Each document records `generated_at` and the producing `generator_version` for traceability. Array-oriented measurements are
+Generated artifacts use a versioned envelope. Each document records `generated_at`, the producing `generator_version`, and a path-and-content `input_fingerprint` for traceability and stale-artifact detection. Array-oriented measurements are
 stored under `records`; structured measurements such as correctness, coverage,
 and the architecture map are stored under `data`. Every envelope carries
 artifact-level `measurement_confidence`, a summary, tool identity, and risk

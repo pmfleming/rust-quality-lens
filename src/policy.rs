@@ -27,7 +27,8 @@ pub(crate) fn run_check(
     max_regression: f64,
 ) -> Result<()> {
     let documents = measurement_documents(config)?;
-    let partial_artifacts = partial_artifacts(&documents);
+    let stale_artifacts = stale_artifacts(config, &documents);
+    let partial_artifacts = partial_artifacts(&documents, &stale_artifacts);
     let test_failures = test_failures(&documents);
     let practices = classify_findings(config, practice_findings(&documents));
     let reliability = classify_findings(config, reliability_findings(&documents));
@@ -104,6 +105,7 @@ pub(crate) fn run_check(
         "enabled_policies": enabled_policies,
         "failed_policies": failed_policies,
         "partial_artifacts": partial_artifacts,
+        "stale_artifacts": stale_artifacts,
         "test_failures": test_failures,
         "practice_failures": practices.errors,
         "practice_warnings": practices.warnings,
@@ -184,12 +186,16 @@ fn measurement_documents(config: &LensConfig) -> Result<BTreeMap<String, Value>>
     Ok(documents)
 }
 
-fn partial_artifacts(documents: &BTreeMap<String, Value>) -> Vec<String> {
+fn partial_artifacts(
+    documents: &BTreeMap<String, Value>,
+    stale_artifacts: &[String],
+) -> Vec<String> {
     let mut partial = documents
         .iter()
         .filter(|(_, document)| document["measurement_confidence"]["partial"] == true)
         .map(|(name, _)| name.clone())
         .collect::<Vec<_>>();
+    partial.extend(stale_artifacts.iter().cloned());
     for tool in MeasureTool::all_tools() {
         let name = tool.output_file();
         if !documents.contains_key(name) && !partial.iter().any(|item| item == name) {
@@ -199,6 +205,17 @@ fn partial_artifacts(documents: &BTreeMap<String, Value>) -> Vec<String> {
     partial.sort();
     partial.dedup();
     partial
+}
+
+fn stale_artifacts(config: &LensConfig, documents: &BTreeMap<String, Value>) -> Vec<String> {
+    let current =
+        crate::util::project_input_fingerprint(&config.project_root, &config.source_roots);
+    let current_digest = current["digest"].as_str();
+    documents
+        .iter()
+        .filter(|(_, document)| document["input_fingerprint"]["digest"].as_str() != current_digest)
+        .map(|(name, _)| name.clone())
+        .collect()
 }
 
 fn test_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
