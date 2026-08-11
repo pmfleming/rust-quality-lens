@@ -4,7 +4,7 @@ use crate::contracts::{ReviewEntrypoint, ReviewMeasurement, ReviewOutput, Review
 use crate::facts::FileFacts;
 use crate::facts::RunContext;
 use crate::producers::produce_measurement;
-use crate::util::{absolutize, normalize_slashes, write_json};
+use crate::util::{absolutize, normalize_slashes, project_input_fingerprint, write_json};
 use anyhow::{Context, Result};
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
@@ -26,7 +26,9 @@ pub(crate) fn run_review(
     diff_file: Option<PathBuf>,
 ) -> Result<PathBuf> {
     fs::create_dir_all(&config.output_dir)?;
-    let changed_files = changed_files(&config.project_root, changed_since.as_deref(), &diff_file)?;
+    let diff = review_diff(&config.project_root, changed_since.as_deref(), &diff_file)?;
+    let changed_files = diff_paths(&config.project_root, &diff);
+    let changed_lines = diff_line_ranges(&diff);
     let measured_files = changed_files
         .iter()
         .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
@@ -61,16 +63,19 @@ pub(crate) fn run_review(
         )
     };
 
+    let change_evidence = changed_line_coverage(&config, &changed_lines);
     let output = ReviewOutput {
-        version: 1,
+        version: 2,
         generated_from: "rqlens",
         scope: ReviewScope {
             changed_since,
             diff_file: diff_file.map(normalize_slashes),
             changed_files: relative_paths(&config.project_root, &changed_files),
+            changed_lines: serde_json::to_value(&changed_lines)?,
             measured_rust_files: relative_paths(&config.project_root, &measured_files),
             entrypoints,
         },
+        change_evidence,
         measurements,
     };
     let output_path = config.output_dir.join("review.json");
@@ -102,23 +107,22 @@ fn review_entrypoints(
         .collect()
 }
 
-fn changed_files(
+fn review_diff(
     project_root: &Path,
     changed_since: Option<&str>,
     diff_file: &Option<PathBuf>,
-) -> Result<Vec<PathBuf>> {
+) -> Result<String> {
     if let Some(diff_file) = diff_file {
-        let text = fs::read_to_string(diff_file)
-            .with_context(|| format!("reading diff file {}", diff_file.display()))?;
-        return Ok(diff_paths(project_root, &text));
+        return fs::read_to_string(diff_file)
+            .with_context(|| format!("reading diff file {}", diff_file.display()));
     }
-    git_changed_paths(project_root, changed_since.unwrap_or("HEAD"))
+    git_diff(project_root, changed_since.unwrap_or("HEAD"))
 }
 
-fn git_changed_paths(project_root: &Path, base: &str) -> Result<Vec<PathBuf>> {
+fn git_diff(project_root: &Path, base: &str) -> Result<String> {
     let output = Command::new("git")
         .arg("diff")
-        .arg("--name-only")
+        .arg("--unified=0")
         .arg(base)
         .arg("--")
         .current_dir(project_root)
@@ -130,14 +134,7 @@ fn git_changed_paths(project_root: &Path, base: &str) -> Result<Vec<PathBuf>> {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let mut paths = BTreeSet::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            paths.insert(absolutize(project_root.join(trimmed)));
-        }
-    }
-    Ok(paths.into_iter().collect())
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn diff_paths(project_root: &Path, diff: &str) -> Vec<PathBuf> {
@@ -150,6 +147,89 @@ fn diff_paths(project_root: &Path, diff: &str) -> Vec<PathBuf> {
         }
     }
     paths.into_iter().collect()
+}
+
+fn diff_line_ranges(diff: &str) -> std::collections::BTreeMap<String, Vec<[u64; 2]>> {
+    let mut current_path = None;
+    let mut ranges = std::collections::BTreeMap::<String, Vec<[u64; 2]>>::new();
+    for line in diff.lines() {
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            current_path = (path != "/dev/null").then(|| normalize_slashes(path));
+            continue;
+        }
+        if !line.starts_with("@@") {
+            continue;
+        }
+        let Some(path) = current_path.as_ref() else {
+            continue;
+        };
+        let Some(added) = line
+            .split_whitespace()
+            .find(|part| part.starts_with('+'))
+            .map(|part| part.trim_start_matches('+'))
+        else {
+            continue;
+        };
+        let mut parts = added.split(',');
+        let Some(start) = parts.next().and_then(|value| value.parse::<u64>().ok()) else {
+            continue;
+        };
+        let count = parts
+            .next()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(1);
+        if count > 0 {
+            ranges
+                .entry(path.clone())
+                .or_default()
+                .push([start, start + count - 1]);
+        }
+    }
+    ranges
+}
+
+fn changed_line_coverage(
+    config: &LensConfig,
+    ranges: &std::collections::BTreeMap<String, Vec<[u64; 2]>>,
+) -> serde_json::Value {
+    let path = config.output_dir.join("coverage.json");
+    let Ok(text) = fs::read_to_string(&path) else {
+        return serde_json::json!({"status": "unavailable", "reason": "coverage.json is missing"});
+    };
+    let Ok(document) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return serde_json::json!({"status": "unavailable", "reason": "coverage.json is invalid"});
+    };
+    let current = project_input_fingerprint(&config.project_root, &config.source_roots);
+    if document["input_fingerprint"]["digest"] != current["digest"] {
+        return serde_json::json!({"status": "stale", "reason": "coverage inputs do not match the current source"});
+    }
+    let data = document.get("data").unwrap_or(&document);
+    let mut executable = 0u64;
+    let mut covered = 0u64;
+    for file in data["files"].as_array().into_iter().flatten() {
+        let Some(file_ranges) = file["path"].as_str().and_then(|path| ranges.get(path)) else {
+            continue;
+        };
+        for hit in file["line_hits"].as_array().into_iter().flatten() {
+            let Some(line) = hit["line"].as_u64() else {
+                continue;
+            };
+            if file_ranges
+                .iter()
+                .any(|range| line >= range[0] && line <= range[1])
+            {
+                executable += 1;
+                covered += u64::from(hit["covered"] == true);
+            }
+        }
+    }
+    serde_json::json!({
+        "status": "observed",
+        "changed_executable_lines": executable,
+        "changed_covered_lines": covered,
+        "changed_line_coverage_percent": if executable == 0 { serde_json::Value::Null } else { serde_json::Value::from(crate::util::round2(covered as f64 / executable as f64 * 100.0)) },
+        "source": "cargo_llvm_cov_changed_lines",
+    })
 }
 
 fn relative_paths(project_root: &Path, paths: &[PathBuf]) -> Vec<String> {

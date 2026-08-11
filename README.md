@@ -141,6 +141,8 @@ cargo run --bin rqlens -- check --fail-on partial --fail-on test-failure --confi
 cargo run --bin rqlens -- check --baseline baseline/analysis --fail-on regression --max-regression 5 --config rqlens.toml
 ```
 
+Baseline regression checks compare both architecture risk and aggregate line coverage; `max-regression` is interpreted as risk-score points and coverage percentage points respectively.
+
 Calibrate score distributions against multiple local checkouts:
 
 ```powershell
@@ -180,7 +182,7 @@ cargo run --bin rqlens -- review --changed-since main --config rqlens.toml
 cargo run --bin rqlens -- review --diff-file pr.diff --config rqlens.toml
 ```
 
-The review command writes `target/analysis/review.json`. It runs the standard
+The review command writes `target/analysis/review.json`. It records changed hunk ranges and, when a fresh coverage artifact is available, reports executable changed-line coverage. It runs the standard
 project extraction and filters hotspot, clone, escape-hatch, and type-health
 rows to changed Rust files so module keys remain comparable to full-project
 measurements. Review scope also reports changed tool entrypoints in

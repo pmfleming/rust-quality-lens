@@ -146,6 +146,7 @@ fn coverage_file(
         .iter()
         .find(|fact| project_relative_path(&config.project_root, &fact.path) == path);
     let summary = &file["summary"];
+    let line_hits = line_hits(&file["segments"])?;
     Ok(Some(json!({
         "path": path,
         "module_key": module_for_path(&path),
@@ -156,7 +157,39 @@ fn coverage_file(
         "regions": metric(&summary["regions"], "regions")?,
         "functions": metric(&summary["functions"], "functions")?,
         "branches": metric(&summary["branches"], "branches")?,
+        "line_hits": line_hits,
     })))
+}
+
+fn line_hits(segments: &Value) -> std::result::Result<Value, String> {
+    let segments = segments
+        .as_array()
+        .ok_or_else(|| "cargo llvm-cov omitted file coverage segments".to_string())?;
+    let mut lines = std::collections::BTreeMap::<u64, bool>::new();
+    for segment in segments {
+        let Some(values) = segment.as_array() else {
+            continue;
+        };
+        let (Some(line), Some(count), Some(has_count)) = (
+            values.first().and_then(Value::as_u64),
+            values.get(2).and_then(Value::as_u64),
+            values.get(3).and_then(Value::as_bool),
+        ) else {
+            continue;
+        };
+        if has_count {
+            lines
+                .entry(line)
+                .and_modify(|covered| *covered |= count > 0)
+                .or_insert(count > 0);
+        }
+    }
+    Ok(Value::Array(
+        lines
+            .into_iter()
+            .map(|(line, covered)| json!({"line": line, "covered": covered}))
+            .collect(),
+    ))
 }
 
 fn metric(value: &Value, name: &str) -> std::result::Result<Value, String> {
@@ -250,6 +283,7 @@ mod tests {
             &config,
             &json!({
                 "filename": "/project/src/domain.rs",
+                "segments": [[1, 1, 1, true, true, false], [2, 1, 0, true, true, false]],
                 "summary": {
                     "lines": {"count": 10, "covered": 8, "percent": 80.0},
                     "regions": {"count": 12, "covered": 9, "percent": 75.0},
@@ -272,6 +306,13 @@ mod tests {
         assert_eq!(
             file.as_ref().map(|row| &row["module_id"]),
             Some(&json!("demo::demo::domain"))
+        );
+        assert_eq!(
+            file.as_ref().map(|row| &row["line_hits"]),
+            Some(&json!([
+                {"line": 1, "covered": true},
+                {"line": 2, "covered": false}
+            ]))
         );
         let Ok(summary) = coverage_summary(
             &json!({

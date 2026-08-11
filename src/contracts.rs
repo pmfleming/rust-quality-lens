@@ -91,6 +91,7 @@ pub(crate) struct ReviewOutput {
     pub(crate) version: u64,
     pub(crate) generated_from: &'static str,
     pub(crate) scope: ReviewScope,
+    pub(crate) change_evidence: Value,
     pub(crate) measurements: Vec<ReviewMeasurement>,
 }
 
@@ -99,6 +100,7 @@ pub(crate) struct ReviewScope {
     pub(crate) changed_since: Option<String>,
     pub(crate) diff_file: Option<String>,
     pub(crate) changed_files: Vec<String>,
+    pub(crate) changed_lines: Value,
     pub(crate) measured_rust_files: Vec<String>,
     pub(crate) entrypoints: Vec<ReviewEntrypoint>,
 }

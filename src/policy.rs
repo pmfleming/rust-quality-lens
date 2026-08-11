@@ -57,19 +57,19 @@ pub(crate) fn run_check(
     let threshold_violations = current_map
         .map(|map| threshold_violations(map, max_total_score))
         .unwrap_or_default();
-    let score_deltas = match baseline {
+    let score_deltas = match baseline.as_ref() {
         Some(path) => {
             let current_document = documents
                 .get("map.json")
                 .context("map.json is required for baseline comparison")?;
-            let baseline_map = read_baseline_map(&path, model_version(current_document))?;
+            let baseline_map = read_baseline_map(path, model_version(current_document))?;
             current_map
                 .map(|current| score_deltas(current, &baseline_map))
                 .unwrap_or_default()
         }
         None => Vec::new(),
     };
-    let regressions = score_deltas
+    let mut regressions = score_deltas
         .iter()
         .filter(|delta| {
             delta["delta"]
@@ -78,6 +78,19 @@ pub(crate) fn run_check(
         })
         .cloned()
         .collect::<Vec<_>>();
+    let evidence_deltas = baseline
+        .as_ref()
+        .map(|path| coverage_regression(config, &documents, path, max_regression))
+        .transpose()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    regressions.extend(
+        evidence_deltas
+            .iter()
+            .filter(|delta| delta["status"] == "regressed")
+            .cloned(),
+    );
 
     let mut failed_policies = failed_cli_policies(
         fail_on,
@@ -118,6 +131,7 @@ pub(crate) fn run_check(
         "threshold_violations": threshold_violations,
         "regressions": regressions,
         "score_deltas": score_deltas,
+        "evidence_deltas": evidence_deltas,
         "limits": {"max_total_score": max_total_score, "max_regression": max_regression},
     });
     let output = config.output_dir.join("policy_report.json");
@@ -358,6 +372,47 @@ fn threshold_violations(map: &Value, maximum: f64) -> Vec<Value> {
                 .then(|| json!({"module": data["id"], "score": score, "maximum": maximum}))
         })
         .collect()
+}
+
+fn coverage_regression(
+    config: &LensConfig,
+    documents: &BTreeMap<String, Value>,
+    baseline: &Path,
+    maximum: f64,
+) -> Result<Option<Value>> {
+    let Some(current) = documents.get("coverage.json") else {
+        return Ok(None);
+    };
+    let path = if baseline.is_dir() {
+        baseline.join("coverage.json")
+    } else {
+        baseline
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("coverage.json")
+    };
+    if !path.exists() {
+        return Ok(None);
+    }
+    let old: Value = serde_json::from_str(
+        &fs::read_to_string(&path)
+            .with_context(|| format!("reading baseline coverage {}", path.display()))?,
+    )?;
+    let current_percent = artifact_payload(current)["summary"]["lines"]["percent"].as_f64();
+    let baseline_percent = artifact_payload(&old)["summary"]["lines"]["percent"].as_f64();
+    let Some((current_percent, baseline_percent)) = current_percent.zip(baseline_percent) else {
+        return Ok(None);
+    };
+    let decrease = crate::util::round2(baseline_percent - current_percent);
+    Ok(Some(json!({
+        "metric": "line_coverage_percent",
+        "baseline": baseline_percent,
+        "current": current_percent,
+        "decrease": decrease,
+        "maximum_decrease": maximum,
+        "status": if decrease > maximum { "regressed" } else if decrease < 0.0 { "improved" } else { "unchanged" },
+        "project": config.project_name,
+    })))
 }
 
 fn read_baseline_map(path: &Path, current_model_version: Option<u64>) -> Result<Value> {

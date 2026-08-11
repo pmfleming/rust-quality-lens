@@ -528,7 +528,13 @@ fn review_uses_diff_file_scope() {
     );
     let payload =
         read_json(repo_root().join("tests/fixtures/mini_rust_project/target/analysis/review.json"));
+    assert_eq!(payload["version"], 2);
     assert_eq!(payload["scope"]["measured_rust_files"][0], "src/lib.rs");
+    assert_eq!(
+        payload["scope"]["changed_lines"]["src/lib.rs"],
+        serde_json::json!([[1, 1]])
+    );
+    assert!(payload["change_evidence"]["status"].is_string());
     assert!(payload["measurements"].as_array().unwrap().len() >= 4);
 }
 
@@ -968,6 +974,10 @@ fn check_command_enforces_threshold_policy() {
     );
     let report: Value = serde_json::from_slice(&check.stdout).unwrap();
     assert_eq!(report["passed"], true);
+    assert_eq!(
+        report["evidence_deltas"][0]["metric"],
+        "line_coverage_percent"
+    );
 }
 
 #[test]
