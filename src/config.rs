@@ -44,6 +44,8 @@ struct RawVerificationConfig {
     semver: Option<bool>,
     semver_baseline_rev: Option<String>,
     feature_matrix: Option<bool>,
+    mutation: Option<bool>,
+    flaky_test_runs: Option<usize>,
     miri: Option<bool>,
 }
 
@@ -62,6 +64,8 @@ pub(crate) struct VerificationConfig {
     pub(crate) semver: bool,
     pub(crate) semver_baseline_rev: Option<String>,
     pub(crate) feature_matrix: bool,
+    pub(crate) mutation: bool,
+    pub(crate) flaky_test_runs: usize,
     pub(crate) miri: bool,
 }
 
@@ -81,6 +85,8 @@ impl Default for VerificationConfig {
             semver: false,
             semver_baseline_rev: None,
             feature_matrix: false,
+            mutation: false,
+            flaky_test_runs: 1,
             miri: false,
         }
     }
@@ -293,6 +299,8 @@ impl From<Option<RawVerificationConfig>> for VerificationConfig {
             semver: raw.semver.unwrap_or_default(),
             semver_baseline_rev: raw.semver_baseline_rev,
             feature_matrix: raw.feature_matrix.unwrap_or_default(),
+            mutation: raw.mutation.unwrap_or_default(),
+            flaky_test_runs: raw.flaky_test_runs.unwrap_or(1).max(1),
             miri: raw.miri.unwrap_or_default(),
         }
     }
@@ -551,6 +559,10 @@ audit = false
 deny = false
 semver = false
 feature_matrix = false
+# Optional behavioral evidence (requires cargo-mutants):
+mutation = false
+# Set above 1 in CI to detect order-dependent or intermittent failures.
+flaky_test_runs = 1
 miri = false
 
 # Stable rule limits prevent new findings while allowing an explicit baseline:
@@ -616,6 +628,8 @@ pub(crate) fn config_schema() -> Value {
                     "semver": {"type": "boolean", "default": false},
                     "semver_baseline_rev": {"type": "string"},
                     "feature_matrix": {"type": "boolean", "default": false},
+                    "mutation": {"type": "boolean", "default": false},
+                    "flaky_test_runs": {"type": "integer", "minimum": 1, "default": 1},
                     "miri": {"type": "boolean", "default": false}
                 }
             },

@@ -16,6 +16,8 @@ pub(super) fn produce(config: &LensConfig) -> Result<Value> {
         deny_check(config),
         semver_check(config),
         feature_matrix_check(config),
+        mutation_check(config),
+        flaky_test_check(config),
         miri_check(config),
     ]);
     checks.extend(project_evidence(config));
@@ -215,6 +217,102 @@ fn feature_matrix_check(config: &LensConfig) -> Value {
         "https://github.com/taiki-e/cargo-hack",
         BTreeMap::new(),
     )
+}
+
+fn mutation_check(config: &LensConfig) -> Value {
+    if !config.verification.mutation {
+        return skipped_check(
+            "rust.tests.mutation",
+            "Tests reject generated code mutations",
+            "enable verification.mutation to require cargo-mutants",
+            "https://mutants.rs/",
+        );
+    }
+    let mut arguments = vec!["mutants".to_string(), "--no-times".to_string()];
+    if config.verification.workspace {
+        arguments.push("--workspace".to_string());
+        for package in &config.verification.exclude {
+            arguments.extend(["--exclude".to_string(), package.clone()]);
+        }
+    }
+    if config.verification.all_features {
+        arguments.push("--all-features".to_string());
+    } else {
+        if config.verification.no_default_features {
+            arguments.push("--no-default-features".to_string());
+        }
+        if !config.verification.features.is_empty() {
+            arguments.extend([
+                "--features".to_string(),
+                config.verification.features.join(","),
+            ]);
+        }
+    }
+    cargo_check(
+        config,
+        "rust.tests.mutation",
+        "Tests reject generated code mutations",
+        arguments,
+        "https://mutants.rs/",
+        BTreeMap::new(),
+    )
+}
+
+fn flaky_test_check(config: &LensConfig) -> Value {
+    let runs = config.verification.flaky_test_runs;
+    if runs <= 1 {
+        return skipped_check(
+            "rust.tests.flaky-repeat",
+            "Repeated test runs are stable",
+            "set verification.flaky_test_runs above 1 to detect intermittent failures",
+            "https://doc.rust-lang.org/cargo/commands/cargo-test.html",
+        );
+    }
+    let arguments = config.verification.cargo_arguments("test", true, false);
+    let mut outcomes = Vec::new();
+    for _ in 0..runs {
+        let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
+        request.timeout = Duration::from_secs(config.verification.timeout_seconds);
+        outcomes.push(run(request));
+    }
+    let passed = outcomes
+        .iter()
+        .filter(|outcome| outcome.status == CommandStatus::Passed)
+        .count();
+    let unavailable = outcomes.iter().any(|outcome| {
+        outcome.status == CommandStatus::Unavailable
+            || (outcome.status == CommandStatus::Failed
+                && cargo_tool_is_unavailable(&outcome.stderr))
+    });
+    let timed_out = outcomes
+        .iter()
+        .any(|outcome| outcome.status == CommandStatus::TimedOut);
+    let status = if unavailable {
+        "unavailable"
+    } else if timed_out {
+        "timed-out"
+    } else if passed == runs {
+        "passed"
+    } else {
+        "failed"
+    };
+    json!({
+        "rule_id": "rust.tests.flaky-repeat",
+        "title": "Repeated test runs are stable",
+        "category": "verified-gate",
+        "severity": "error",
+        "status": status,
+        "source": "https://doc.rust-lang.org/cargo/commands/cargo-test.html",
+        "tool": "cargo",
+        "tool_version": cargo_version(),
+        "evidence": {
+            "requested_runs": runs,
+            "passed_runs": passed,
+            "failed_runs": runs.saturating_sub(passed),
+            "inconsistent": passed > 0 && passed < runs,
+            "runs": outcomes,
+        },
+    })
 }
 
 fn miri_check(config: &LensConfig) -> Value {

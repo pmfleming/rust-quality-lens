@@ -7,6 +7,7 @@ All notable changes to this project will be documented here. The format follows 
 ### Added
 
 - Source and manifest fingerprints on every artifact, with stale-input enforcement in policy checks.
+- Optional cargo-mutants and repeated-test behavioral gates for mutation strength and flakiness evidence.
 - Official Rust practice verification with structured command evidence.
 - Safety-contract and explicit panic-path findings.
 - Automatic local Cargo package source discovery.

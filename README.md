@@ -56,6 +56,8 @@ deny = false
 semver = false
 # semver_baseline_rev = "v1.2.3"
 feature_matrix = false
+mutation = false       # cargo-mutants
+flaky_test_runs = 1    # set to 2+ in a scheduled CI job
 miri = false
 ```
 

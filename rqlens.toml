@@ -16,6 +16,8 @@ audit = false
 deny = false
 semver = false
 feature_matrix = false
+mutation = false
+flaky_test_runs = 1
 miri = false
 
 [policy.rules."rust.safety.undocumented-unsafe"]

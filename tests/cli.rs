@@ -400,6 +400,14 @@ fn config_schema_prints_machine_readable_schema() {
         payload["properties"]["verification"]["properties"]["feature_matrix"]["default"],
         false
     );
+    assert_eq!(
+        payload["properties"]["verification"]["properties"]["mutation"]["default"],
+        false
+    );
+    assert_eq!(
+        payload["properties"]["verification"]["properties"]["flaky_test_runs"]["minimum"],
+        1
+    );
 }
 
 #[test]
