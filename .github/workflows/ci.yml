@@ -26,18 +26,18 @@ jobs:
         run: bash scripts/check-bundled-helpers.sh
 
       - name: Check
-        run: cargo check --workspace --all-targets
+        run: cargo check --workspace --all-targets --locked
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Documentation
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps --locked
 
       - name: RustSec audit
         uses: rustsec/audit-check@v2
@@ -46,7 +46,7 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
 
       - name: Verify Rust practices
-        run: cargo run --bin rqlens -- verify
+        run: cargo run --locked --bin rqlens -- verify
 
       - name: Package smoke test
         run: bash scripts/check-package.sh
@@ -55,16 +55,16 @@ jobs:
         run: cargo install cargo-llvm-cov --locked
 
       - name: Catalog
-        run: cargo run --bin rqlens -- catalog
+        run: cargo run --locked --bin rqlens -- catalog
 
       - name: Measure
-        run: cargo run --bin rqlens -- measure all
+        run: cargo run --locked --bin rqlens -- measure all
 
       - name: Enforce self-metric baseline
         run: bash scripts/check-self-metrics.sh
 
       - name: Export SARIF
-        run: cargo run --bin rqlens -- sarif
+        run: cargo run --locked --bin rqlens -- sarif
 
       - name: Upload SARIF artifact
         uses: actions/upload-artifact@v4
@@ -73,7 +73,7 @@ jobs:
           path: target/analysis/rqlens.sarif
 
       - name: Enforce measurement policy
-        run: cargo run --bin rqlens -- check --fail-on partial --fail-on test-failure --fail-on practice-failure --fail-on reliability-finding
+        run: cargo run --locked --bin rqlens -- check --fail-on partial --fail-on test-failure --fail-on practice-failure --fail-on reliability-finding
 
   msrv:
     name: MSRV
@@ -100,4 +100,4 @@ jobs:
           components: rustfmt, clippy, rust-analyzer
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
-      - run: cargo run --bin rqlens -- measure reliability --config tests/fixtures/mini_rust_project/rqlens.toml
+      - run: cargo run --locked --bin rqlens -- measure reliability --config tests/fixtures/mini_rust_project/rqlens.toml

@@ -1,6 +1,6 @@
 {
   "dependency_edges": [
-    ["mini-rust-project::mini-rust-project::lib", "mini-rust-project::mini-rust-project::math"]
+    ["mini-rust-project::mini_rust_project::lib", "mini-rust-project::mini_rust_project::math"]
   ],
   "hotspots": [
     {

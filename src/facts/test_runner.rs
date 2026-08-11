@@ -2,6 +2,7 @@ use anyhow::Result;
 use regex::Regex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 use crate::command_runner::{CommandRequest, CommandStatus, run};
@@ -38,6 +39,52 @@ fn top_level_rust_files(path: &Path) -> Vec<String> {
 }
 
 fn cargo_target_paths(config: &LensConfig) -> Vec<String> {
+    metadata_target_paths(config).unwrap_or_else(|| manifest_target_paths(config))
+}
+
+fn metadata_target_paths(config: &LensConfig) -> Option<Vec<String>> {
+    let mut command = Command::new("cargo");
+    command
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .current_dir(&config.project_root);
+    if config.identity_offline {
+        command.arg("--offline");
+    }
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let project_root = config
+        .project_root
+        .canonicalize()
+        .unwrap_or_else(|_| config.project_root.clone());
+    Some(
+        metadata["packages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|package| {
+                package["manifest_path"]
+                    .as_str()
+                    .and_then(|path| Path::new(path).parent())
+                    .is_some_and(|root| root.starts_with(&project_root))
+            })
+            .flat_map(|package| package["targets"].as_array().into_iter().flatten())
+            .filter(|target| {
+                target["kind"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(serde_json::Value::as_str)
+                    .any(|kind| matches!(kind, "bin" | "test" | "bench" | "example"))
+            })
+            .filter_map(|target| target["src_path"].as_str().map(str::to_string))
+            .collect(),
+    )
+}
+
+fn manifest_target_paths(config: &LensConfig) -> Vec<String> {
     let cargo = config.project_root.join("Cargo.toml");
     let Ok(text) = std::fs::read_to_string(cargo) else {
         return Vec::new();
@@ -67,7 +114,7 @@ fn target_paths(value: &toml::Value, target: &str, project_root: &Path) -> Vec<S
 }
 
 pub(crate) fn run_tests(config: &LensConfig) -> Result<HashMap<String, TestStatus>> {
-    let arguments = config.verification.cargo_arguments("test", false, false);
+    let arguments = config.verification.cargo_arguments("test", true, false);
     let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
     request.timeout = Duration::from_secs(config.verification.timeout_seconds);
     let outcome = run(request);

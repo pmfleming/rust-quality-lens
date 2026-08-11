@@ -38,6 +38,8 @@ pub(crate) fn artifact_document(
     let mut document = json!({
         "schema_version": 2,
         "generated_from": "rqlens",
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "generator_version": env!("CARGO_PKG_VERSION"),
         "tool": tool.name(),
         "risk_model_id": MODEL_ID,
         "risk_model_version": MODEL_VERSION,
@@ -235,6 +237,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "module_id": {"type": "string"},
                 "path": {"type": "string"},
                 "public_item_count": {"type": "integer"},
+                "visibility_scope": {"type": "string", "const": "syntactic_pub"},
                 "documented_public_item_count": {"type": "integer"},
                 "missing_documentation_count": {"type": "integer"},
                 "documentation_percent": {"type": "number"},
@@ -370,6 +373,11 @@ fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
         json!({"type": "integer", "const": 2}),
     );
     properties.insert("generated_from".to_string(), json!({"type": "string"}));
+    properties.insert(
+        "generated_at".to_string(),
+        json!({"type": "string", "format": "date-time"}),
+    );
+    properties.insert("generator_version".to_string(), json!({"type": "string"}));
     properties.insert(
         "tool".to_string(),
         if matches!(tool, MeasureTool::Correctness | MeasureTool::CorrectnessRun) {

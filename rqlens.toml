@@ -11,6 +11,7 @@ timeout_seconds = 600
 workspace = true
 all_targets = true
 all_features = false
+locked = true
 audit = false
 deny = false
 semver = false

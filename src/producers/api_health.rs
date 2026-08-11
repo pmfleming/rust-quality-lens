@@ -23,7 +23,9 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
                 documented as f64 / total as f64 * 100.0
             };
             let signals = [
-                (missing > 0).then(|| format!("{missing} public items without documentation")),
+                (missing > 0).then(|| {
+                    format!("{missing} syntactically public items without documentation")
+                }),
                 (matches!(fact.module_key.as_str(), "lib" | "main") && !fact.graph.has_crate_docs)
                     .then(|| "crate-level documentation is missing".to_string()),
             ]
@@ -37,6 +39,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
                 "target_name": fact.target_name,
                 "path": project_relative_path(&config.project_root, &fact.path),
                 "public_item_count": total,
+                "visibility_scope": "syntactic_pub",
                 "documented_public_item_count": documented,
                 "missing_documentation_count": missing,
                 "documentation_percent": round2(percent),

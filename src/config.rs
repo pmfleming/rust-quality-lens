@@ -35,6 +35,7 @@ struct RawVerificationConfig {
     workspace: Option<bool>,
     all_targets: Option<bool>,
     all_features: Option<bool>,
+    locked: Option<bool>,
     no_default_features: Option<bool>,
     features: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
@@ -52,6 +53,7 @@ pub(crate) struct VerificationConfig {
     pub(crate) workspace: bool,
     pub(crate) all_targets: bool,
     pub(crate) all_features: bool,
+    pub(crate) locked: bool,
     pub(crate) no_default_features: bool,
     pub(crate) features: Vec<String>,
     pub(crate) exclude: Vec<String>,
@@ -70,6 +72,7 @@ impl Default for VerificationConfig {
             workspace: true,
             all_targets: true,
             all_features: false,
+            locked: false,
             no_default_features: false,
             features: Vec::new(),
             exclude: Vec::new(),
@@ -91,6 +94,19 @@ impl VerificationConfig {
         doc_tests: bool,
     ) -> Vec<String> {
         let mut arguments = vec![command.to_string()];
+        arguments.extend(self.cargo_scope_arguments(include_targets));
+        if doc_tests {
+            arguments.push("--doc".to_string());
+        }
+        if command == "doc" {
+            arguments.push("--no-deps".to_string());
+        }
+        arguments
+    }
+
+    /// Cargo selection flags shared by verification and cargo-llvm-cov.
+    pub(crate) fn cargo_scope_arguments(&self, include_targets: bool) -> Vec<String> {
+        let mut arguments = Vec::new();
         if self.workspace {
             arguments.push("--workspace".to_string());
         }
@@ -107,16 +123,13 @@ impl VerificationConfig {
                 arguments.extend(["--features".to_string(), self.features.join(",")]);
             }
         }
+        if self.locked {
+            arguments.push("--locked".to_string());
+        }
         if self.workspace {
             for package in &self.exclude {
                 arguments.extend(["--exclude".to_string(), package.clone()]);
             }
-        }
-        if doc_tests {
-            arguments.push("--doc".to_string());
-        }
-        if command == "doc" {
-            arguments.push("--no-deps".to_string());
         }
         arguments
     }
@@ -269,6 +282,7 @@ impl From<Option<RawVerificationConfig>> for VerificationConfig {
             workspace: raw.workspace.unwrap_or(defaults.workspace),
             all_targets: raw.all_targets.unwrap_or(defaults.all_targets),
             all_features: raw.all_features.unwrap_or(defaults.all_features),
+            locked: raw.locked.unwrap_or(defaults.locked),
             no_default_features: raw
                 .no_default_features
                 .unwrap_or(defaults.no_default_features),
@@ -531,6 +545,8 @@ timeout_seconds = 600
 workspace = true
 all_targets = true
 all_features = false
+# Enable in CI when Cargo.lock is committed.
+locked = false
 audit = false
 deny = false
 semver = false
@@ -591,6 +607,7 @@ pub(crate) fn config_schema() -> Value {
                     "workspace": {"type": "boolean", "default": true},
                     "all_targets": {"type": "boolean", "default": true},
                     "all_features": {"type": "boolean", "default": false},
+                    "locked": {"type": "boolean", "default": false, "description": "Pass --locked to Cargo verification and coverage commands."},
                     "no_default_features": {"type": "boolean", "default": false},
                     "features": {"type": "array", "items": {"type": "string"}, "default": []},
                     "exclude": {"type": "array", "items": {"type": "string"}, "default": []},
@@ -644,7 +661,10 @@ pub(crate) fn config_schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{PolicyConfig, PolicyRule, PolicyRuleLevel, PolicyWaiver, metadata_source_roots};
+    use super::{
+        PolicyConfig, PolicyRule, PolicyRuleLevel, PolicyWaiver, VerificationConfig,
+        metadata_source_roots,
+    };
     use serde_json::json;
     use std::collections::BTreeMap;
 
@@ -690,6 +710,29 @@ mod tests {
         assert!(rule.includes(Some("src/generated_code.rs"), Some("application")));
         assert!(!rule.includes(Some("src/lib.rs"), Some("generated-bindings")));
         assert!(rule.includes(Some("src/lib.rs"), Some("application")));
+    }
+
+    #[test]
+    fn cargo_arguments_preserve_reproducible_workspace_scope() {
+        let verification = VerificationConfig {
+            locked: true,
+            features: vec!["serde".to_string(), "cli".to_string()],
+            exclude: vec!["generated".to_string()],
+            ..VerificationConfig::default()
+        };
+        assert_eq!(
+            verification.cargo_arguments("test", true, false),
+            [
+                "test",
+                "--workspace",
+                "--all-targets",
+                "--features",
+                "serde,cli",
+                "--locked",
+                "--exclude",
+                "generated",
+            ]
+        );
     }
 
     #[test]

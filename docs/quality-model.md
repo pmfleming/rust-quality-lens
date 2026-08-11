@@ -24,10 +24,12 @@ The Rust Foundation supports the ecosystem but does not mandate one coding stand
 
 ## Interpretation
 
-- Verification commands use the project's configured workspace, targets, and features. `--all-features` is opt-in because features can be mutually exclusive.
+- Verification, correctness runs, and coverage use the same configured workspace, targets, features, exclusions, and lockfile policy. `--all-features` is opt-in because features can be mutually exclusive.
 - Optional tools report `skipped` unless enabled. Once enabled, unavailable tools make measurement confidence partial. Optional gates include RustSec, cargo-deny, cargo-semver-checks, cargo-hack feature matrices, and Miri.
 - Unsafe findings check for reviewable contracts such as `// SAFETY:` rationale and `# Safety` documentation. Presence of text is evidence, not proof of soundness.
 - Panic-path findings are warnings in production code and advisory in test code. `unwrap`, `expect`, and `panic!` can be valid when an invariant is clear.
+- API-health counts are syntax-level `pub` documentation inventory. They can include items inside private modules and are not a replacement for rustdoc's authoritative reachability and warning checks.
+- Coverage is aggregate execution evidence from `cargo-llvm-cov`; it does not prove assertion quality or attribute a covered line to a particular test. Branch percentages are `null` with `available: false` when the LLVM export has no branch instrumentation (the stable-toolchain default), rather than being presented as 100%.
 - Architecture percentile bands are empirical triage aids from a limited corpus, not defect probabilities or ecosystem-wide standards.
 
 ## Waivers

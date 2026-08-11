@@ -28,7 +28,7 @@ use facts::RunContext;
 use util::write_json;
 
 #[derive(Parser)]
-#[command(name = "rqlens")]
+#[command(name = "rqlens", version)]
 #[command(about = "Reusable Rust measurement JSON producers")]
 struct Cli {
     #[command(subcommand)]

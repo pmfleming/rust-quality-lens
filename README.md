@@ -48,6 +48,8 @@ timeout_seconds = 600
 workspace = true
 all_targets = true
 all_features = false
+# Recommended in CI when Cargo.lock is committed:
+locked = true
 # Optional project-specific gates:
 audit = false
 deny = false
@@ -194,7 +196,7 @@ RQLens deliberately separates three evidence classes:
 
 These classes are not combined into a universal quality score. Missing tools never count as passing. See `docs/quality-model.md` for sources and interpretation.
 
-Generated artifacts use a versioned envelope. Array-oriented measurements are
+Generated artifacts use a versioned envelope. Each document records `generated_at` and the producing `generator_version` for traceability. Array-oriented measurements are
 stored under `records`; structured measurements such as correctness, coverage,
 and the architecture map are stored under `data`. Every envelope carries
 artifact-level `measurement_confidence`, a summary, tool identity, and risk
@@ -245,7 +247,9 @@ orchestration belongs to `project-management-board`.
 
 The CLI is Rust. Syntax-aware extraction uses bundled helper sources. In a source checkout the workspace helper crate is reused; packaged installations materialize the same versioned sources in the user cache before building them. This keeps `cargo install` packages independent of the original checkout.
 
-Baseline verification requires Cargo with rustfmt, Clippy, and rustdoc. Coverage requires `cargo-llvm-cov` and `llvm-tools-preview`. `cargo-audit` and `cargo-deny` are optional unless enabled in `[verification]`.
+Baseline verification requires Cargo with rustfmt, Clippy, and rustdoc. Coverage requires `cargo-llvm-cov` and `llvm-tools-preview`. `cargo-audit` and `cargo-deny` are optional unless enabled in `[verification]`. Verification, correctness runs, and coverage share the configured workspace, target, feature, exclusion, and lockfile scope; doctests remain a separate library-only Cargo gate because Cargo does not combine `--doc` with `--all-targets`.
+
+For production CI, commit `Cargo.lock` where appropriate and set `locked = true`; enable RustSec and cargo-deny (or run equivalent dedicated CI jobs), and keep a separate job that compiles with the declared MSRV. RQLens' dependency MSRV row is metadata evidence, not a substitute for executing the MSRV toolchain.
 
 ## Validation
 

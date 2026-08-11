@@ -712,8 +712,8 @@ fn map_captures_direct_module_path_dependency() {
     );
     let edges = payload["graph"]["edges"].as_array().unwrap();
     assert!(edges.iter().any(|edge| {
-        edge["data"]["source"] == "mini-rust-project::mini-rust-project::lib"
-            && edge["data"]["target"] == "mini-rust-project::mini-rust-project::math"
+        edge["data"]["source"] == "mini-rust-project::mini_rust_project::lib"
+            && edge["data"]["target"] == "mini-rust-project::mini_rust_project::math"
     }));
 }
 

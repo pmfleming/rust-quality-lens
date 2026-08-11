@@ -17,4 +17,9 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Changed
 
+- Verified gates, correctness runs, and coverage now share workspace, target, feature, exclusion, and optional lockfile scope.
+- Coverage rejects malformed exports and nested invocations instead of emitting misleading complete metrics.
+- Correctness target discovery now uses Cargo metadata across local workspace packages.
+- Artifacts record generation time and RQLens version; the CLI exposes `--version`.
+- The self-metric gate tracks hotspots and duplication instead of treating total repository LOC as a quality regression.
 - Verified gates, static findings, and heuristic architecture signals are represented separately.

@@ -178,7 +178,10 @@ fn test_row(
         "kind": test_kind_for_path(&path),
         "last_status": last_status,
         "last_duration": last_duration,
-        "command": format!("cargo test {}", test.name),
+        "command": format!(
+            "cargo test --package {} {} -- --exact",
+            fact.package_name, test.qualified_name
+        ),
     })
 }
 
@@ -194,7 +197,9 @@ fn tested_modules(
         targets.insert(module);
     }
 
-    let crate_names = crate_names(config);
+    let mut crate_names = crate_names(config);
+    crate_names.insert(fact.package_name.clone());
+    crate_names.insert(fact.package_name.replace('-', "_"));
     for raw in &fact.graph.dependencies {
         let normalized = crate_names
             .iter()

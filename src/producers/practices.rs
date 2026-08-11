@@ -10,163 +10,14 @@ use crate::command_runner::{CommandOutcome, CommandRequest, CommandStatus, run};
 use crate::config::LensConfig;
 
 pub(super) fn produce(config: &LensConfig) -> Result<Value> {
-    let mut checks = Vec::new();
-    checks.push(cargo_check(
-        config,
-        "rust.official.rustfmt",
-        "Formatting matches rustfmt",
-        ["fmt", "--all", "--", "--check"]
-            .map(str::to_string)
-            .to_vec(),
-        "https://github.com/rust-lang/rustfmt",
-        BTreeMap::new(),
-    ));
-    checks.push(cargo_check(
-        config,
-        "rust.official.cargo-check",
-        "All configured targets compile",
-        scoped_args(config, "check", true, false),
-        "https://doc.rust-lang.org/cargo/commands/cargo-check.html",
-        BTreeMap::new(),
-    ));
-    let mut clippy_args = scoped_args(config, "clippy", true, false);
-    clippy_args.extend(["--".to_string(), "-D".to_string(), "warnings".to_string()]);
-    checks.push(cargo_check(
-        config,
-        "rust.official.clippy",
-        "Clippy reports no warnings",
-        clippy_args,
-        "https://doc.rust-lang.org/clippy/",
-        BTreeMap::new(),
-    ));
-    checks.push(cargo_check(
-        config,
-        "rust.official.tests",
-        "Cargo tests pass",
-        scoped_args(config, "test", false, false),
-        "https://doc.rust-lang.org/cargo/commands/cargo-test.html",
-        BTreeMap::new(),
-    ));
-    checks.push(cargo_check(
-        config,
-        "rust.official.doctests",
-        "Rust documentation tests pass",
-        scoped_args(config, "test", false, true),
-        "https://doc.rust-lang.org/rustdoc/write-documentation/documentation-tests.html",
-        BTreeMap::new(),
-    ));
-    checks.push(cargo_check(
-        config,
-        "rust.official.rustdoc",
-        "Rust documentation builds without warnings",
-        scoped_args(config, "doc", false, false),
-        "https://doc.rust-lang.org/rustdoc/",
-        BTreeMap::from([("RUSTDOCFLAGS".to_string(), "-D warnings".to_string())]),
-    ));
-
-    if config.verification.audit {
-        checks.push(cargo_check(
-            config,
-            "rust.security.rustsec",
-            "Dependencies have no known RustSec advisories",
-            vec!["audit".to_string()],
-            "https://rustsec.org/",
-            BTreeMap::new(),
-        ));
-    } else {
-        checks.push(skipped_check(
-            "rust.security.rustsec",
-            "Dependency advisory scan",
-            "enable verification.audit to require cargo-audit",
-            "https://rustsec.org/",
-        ));
-    }
-    if config.verification.deny {
-        checks.push(cargo_check(
-            config,
-            "rust.supply-chain.cargo-deny",
-            "Dependency policy passes cargo-deny",
-            vec!["deny".to_string(), "check".to_string()],
-            "https://embarkstudios.github.io/cargo-deny/",
-            BTreeMap::new(),
-        ));
-    } else {
-        checks.push(skipped_check(
-            "rust.supply-chain.cargo-deny",
-            "Dependency license and source policy",
-            "enable verification.deny to require cargo-deny",
-            "https://embarkstudios.github.io/cargo-deny/",
-        ));
-    }
-    if config.verification.semver {
-        let mut arguments = vec!["semver-checks".to_string(), "check-release".to_string()];
-        if let Some(revision) = &config.verification.semver_baseline_rev {
-            arguments.extend(["--baseline-rev".to_string(), revision.clone()]);
-        }
-        checks.push(cargo_check(
-            config,
-            "rust.api.semver",
-            "Public API is compatible with the configured baseline",
-            arguments,
-            "https://github.com/obi1kenobi/cargo-semver-checks",
-            BTreeMap::new(),
-        ));
-    } else {
-        checks.push(skipped_check(
-            "rust.api.semver",
-            "Public API compatibility",
-            "enable verification.semver for release-oriented libraries",
-            "https://github.com/obi1kenobi/cargo-semver-checks",
-        ));
-    }
-    if config.verification.feature_matrix {
-        let mut arguments = vec![
-            "hack".to_string(),
-            "check".to_string(),
-            "--feature-powerset".to_string(),
-        ];
-        if config.verification.workspace {
-            arguments.push("--workspace".to_string());
-        }
-        if config.verification.all_targets {
-            arguments.push("--all-targets".to_string());
-        }
-        checks.push(cargo_check(
-            config,
-            "rust.features.matrix",
-            "Configured Cargo feature combinations compile",
-            arguments,
-            "https://github.com/taiki-e/cargo-hack",
-            BTreeMap::new(),
-        ));
-    } else {
-        checks.push(skipped_check(
-            "rust.features.matrix",
-            "Cargo feature compatibility matrix",
-            "enable verification.feature_matrix to require cargo-hack",
-            "https://github.com/taiki-e/cargo-hack",
-        ));
-    }
-    if config.verification.miri {
-        let mut arguments = vec!["miri".to_string()];
-        arguments.extend(config.verification.cargo_arguments("test", false, false));
-        checks.push(cargo_check(
-            config,
-            "rust.safety.miri",
-            "Miri finds no undefined behavior in executed tests",
-            arguments,
-            "https://github.com/rust-lang/miri",
-            BTreeMap::new(),
-        ));
-    } else {
-        checks.push(skipped_check(
-            "rust.safety.miri",
-            "Miri undefined-behavior checks",
-            "enable verification.miri on a toolchain with the Miri component",
-            "https://github.com/rust-lang/miri",
-        ));
-    }
-
+    let mut checks = official_checks(config);
+    checks.extend([
+        audit_check(config),
+        deny_check(config),
+        semver_check(config),
+        feature_matrix_check(config),
+        miri_check(config),
+    ]);
     checks.extend(project_evidence(config));
     let failed_errors = count(&checks, "failed", "error");
     let failed_warnings = count(&checks, "failed", "warning");
@@ -208,6 +59,185 @@ pub(super) fn produce(config: &LensConfig) -> Result<Value> {
     }))
 }
 
+fn official_checks(config: &LensConfig) -> Vec<Value> {
+    let mut clippy_args = scoped_args(config, "clippy", true, false);
+    clippy_args.extend(["--".to_string(), "-D".to_string(), "warnings".to_string()]);
+    vec![
+        cargo_check(
+            config,
+            "rust.official.rustfmt",
+            "Formatting matches rustfmt",
+            ["fmt", "--all", "--", "--check"]
+                .map(str::to_string)
+                .to_vec(),
+            "https://github.com/rust-lang/rustfmt",
+            BTreeMap::new(),
+        ),
+        cargo_check(
+            config,
+            "rust.official.cargo-check",
+            "All configured targets compile",
+            scoped_args(config, "check", true, false),
+            "https://doc.rust-lang.org/cargo/commands/cargo-check.html",
+            BTreeMap::new(),
+        ),
+        cargo_check(
+            config,
+            "rust.official.clippy",
+            "Clippy reports no warnings",
+            clippy_args,
+            "https://doc.rust-lang.org/clippy/",
+            BTreeMap::new(),
+        ),
+        cargo_check(
+            config,
+            "rust.official.tests",
+            "Cargo tests pass for all configured targets",
+            scoped_args(config, "test", true, false),
+            "https://doc.rust-lang.org/cargo/commands/cargo-test.html",
+            BTreeMap::new(),
+        ),
+        cargo_check(
+            config,
+            "rust.official.doctests",
+            "Rust documentation tests pass",
+            scoped_args(config, "test", false, true),
+            "https://doc.rust-lang.org/rustdoc/write-documentation/documentation-tests.html",
+            BTreeMap::new(),
+        ),
+        cargo_check(
+            config,
+            "rust.official.rustdoc",
+            "Rust documentation builds without warnings",
+            scoped_args(config, "doc", false, false),
+            "https://doc.rust-lang.org/rustdoc/",
+            BTreeMap::from([("RUSTDOCFLAGS".to_string(), "-D warnings".to_string())]),
+        ),
+    ]
+}
+
+fn audit_check(config: &LensConfig) -> Value {
+    if config.verification.audit {
+        cargo_check(
+            config,
+            "rust.security.rustsec",
+            "Dependencies have no known RustSec advisories",
+            vec!["audit".to_string()],
+            "https://rustsec.org/",
+            BTreeMap::new(),
+        )
+    } else {
+        skipped_check(
+            "rust.security.rustsec",
+            "Dependency advisory scan",
+            "enable verification.audit to require cargo-audit",
+            "https://rustsec.org/",
+        )
+    }
+}
+
+fn deny_check(config: &LensConfig) -> Value {
+    if config.verification.deny {
+        cargo_check(
+            config,
+            "rust.supply-chain.cargo-deny",
+            "Dependency policy passes cargo-deny",
+            vec!["deny".to_string(), "check".to_string()],
+            "https://embarkstudios.github.io/cargo-deny/",
+            BTreeMap::new(),
+        )
+    } else {
+        skipped_check(
+            "rust.supply-chain.cargo-deny",
+            "Dependency license and source policy",
+            "enable verification.deny to require cargo-deny",
+            "https://embarkstudios.github.io/cargo-deny/",
+        )
+    }
+}
+
+fn semver_check(config: &LensConfig) -> Value {
+    if !config.verification.semver {
+        return skipped_check(
+            "rust.api.semver",
+            "Public API compatibility",
+            "enable verification.semver for release-oriented libraries",
+            "https://github.com/obi1kenobi/cargo-semver-checks",
+        );
+    }
+    let mut arguments = vec!["semver-checks".to_string(), "check-release".to_string()];
+    if let Some(revision) = &config.verification.semver_baseline_rev {
+        arguments.extend(["--baseline-rev".to_string(), revision.clone()]);
+    }
+    cargo_check(
+        config,
+        "rust.api.semver",
+        "Public API is compatible with the configured baseline",
+        arguments,
+        "https://github.com/obi1kenobi/cargo-semver-checks",
+        BTreeMap::new(),
+    )
+}
+
+fn feature_matrix_check(config: &LensConfig) -> Value {
+    if !config.verification.feature_matrix {
+        return skipped_check(
+            "rust.features.matrix",
+            "Cargo feature compatibility matrix",
+            "enable verification.feature_matrix to require cargo-hack",
+            "https://github.com/taiki-e/cargo-hack",
+        );
+    }
+    let mut arguments = vec![
+        "hack".to_string(),
+        "check".to_string(),
+        "--feature-powerset".to_string(),
+    ];
+    if config.verification.workspace {
+        arguments.push("--workspace".to_string());
+    }
+    if config.verification.all_targets {
+        arguments.push("--all-targets".to_string());
+    }
+    if config.verification.locked {
+        arguments.push("--locked".to_string());
+    }
+    if config.verification.workspace {
+        for package in &config.verification.exclude {
+            arguments.extend(["--exclude".to_string(), package.clone()]);
+        }
+    }
+    cargo_check(
+        config,
+        "rust.features.matrix",
+        "Configured Cargo feature combinations compile",
+        arguments,
+        "https://github.com/taiki-e/cargo-hack",
+        BTreeMap::new(),
+    )
+}
+
+fn miri_check(config: &LensConfig) -> Value {
+    if !config.verification.miri {
+        return skipped_check(
+            "rust.safety.miri",
+            "Miri undefined-behavior checks",
+            "enable verification.miri on a toolchain with the Miri component",
+            "https://github.com/rust-lang/miri",
+        );
+    }
+    let mut arguments = vec!["miri".to_string()];
+    arguments.extend(config.verification.cargo_arguments("test", true, false));
+    cargo_check(
+        config,
+        "rust.safety.miri",
+        "Miri finds no undefined behavior in executed tests",
+        arguments,
+        "https://github.com/rust-lang/miri",
+        BTreeMap::new(),
+    )
+}
+
 fn cargo_check(
     config: &LensConfig,
     rule_id: &str,
@@ -219,8 +249,28 @@ fn cargo_check(
     let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
     request.timeout = Duration::from_secs(config.verification.timeout_seconds);
     request.environment = environment;
-    let outcome = run(request);
+    let mut outcome = run(request);
+    if outcome.status == CommandStatus::Failed && cargo_tool_is_unavailable(&outcome.stderr) {
+        outcome.status = CommandStatus::Unavailable;
+        outcome.reason =
+            Some("the requested Cargo command or toolchain component is unavailable".to_string());
+    }
     command_check(rule_id, title, source, outcome)
+}
+
+fn cargo_tool_is_unavailable(stderr: &str) -> bool {
+    let stderr = stderr.to_ascii_lowercase();
+    [
+        "no such command:",
+        "is not installed for the toolchain",
+        "component is unavailable",
+        "component 'rustfmt' is unavailable",
+        "component 'clippy' is unavailable",
+        "toolchain is not installed",
+        "unknown proxy name",
+    ]
+    .iter()
+    .any(|message| stderr.contains(message))
 }
 
 fn command_check(rule_id: &str, title: &str, source: &str, outcome: CommandOutcome) -> Value {
@@ -460,7 +510,7 @@ fn count(checks: &[Value], status: &str, severity: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_rust_version, parse_rust_version};
+    use super::{cargo_tool_is_unavailable, format_rust_version, parse_rust_version};
 
     #[test]
     fn rust_versions_compare_as_numeric_components() {
@@ -468,5 +518,16 @@ mod tests {
         assert_eq!(parse_rust_version("1.95"), Some((1, 95, 0)));
         assert_eq!(format_rust_version((1, 95, 0)), "1.95.0");
         assert_eq!(parse_rust_version("stable"), None);
+    }
+
+    #[test]
+    fn missing_cargo_components_are_not_reported_as_code_failures() {
+        assert!(cargo_tool_is_unavailable("error: no such command: `audit`"));
+        assert!(cargo_tool_is_unavailable(
+            "error: component 'rustfmt' is unavailable for download"
+        ));
+        assert!(!cargo_tool_is_unavailable(
+            "error: could not compile `demo` due to 1 previous error"
+        ));
     }
 }
