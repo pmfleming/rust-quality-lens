@@ -34,13 +34,13 @@ pub(crate) fn run_benchmarks(
         .as_ref()
         .is_none_or(|outcome| outcome.status == CommandStatus::Passed);
     let confidence = json!({
-        "complete": command_passed && !records.is_empty(),
-        "partial": !command_passed || records.is_empty(),
+        "complete": !no_run && command_passed && !records.is_empty(),
+        "partial": no_run || !command_passed || records.is_empty(),
         "confidence_scope": "criterion_benchmark_execution",
         "required_inputs": ["cargo_bench", "criterion_estimates"],
         "observed_inputs": {"benchmark_count": records.len(), "command_executed": !no_run},
         "missing_input": if records.is_empty() { vec!["no Criterion estimates were found"] } else { Vec::<&str>::new() },
-        "stale_input": [],
+        "stale_input": if no_run { vec!["benchmark execution time is unknown because --no-run reused existing estimates"] } else { Vec::<&str>::new() },
         "unsupported_pattern": if command_passed { Vec::<String>::new() } else { vec!["cargo bench did not complete successfully".to_string()] },
     });
     let document = json!({

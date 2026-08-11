@@ -173,7 +173,7 @@ cargo run --bin rqlens -- performance --config rqlens.toml
 cargo run --bin rqlens -- performance --baseline baseline/analysis --config rqlens.toml
 ```
 
-This writes `performance.json`. `rqlens check --fail-on regression` also evaluates benchmark percentage increases when both current and baseline performance artifacts exist. Use `--no-run` to parse existing Criterion output without executing benches.
+This writes `performance.json`. `rqlens check --fail-on regression` also evaluates benchmark percentage increases when both current and baseline performance artifacts exist. Use `--no-run` to parse existing Criterion output without executing benches; reused estimates are explicitly partial because their execution time cannot be established.
 
 Validate whether risk rankings are associated with reviewed outcome labels across held-out projects:
 
