@@ -1,145 +1,102 @@
 # Fallow Comparison Opportunities
 
-This note captures ten improvement opportunities found by reviewing
-`rust-quality-lens` against `fallow-rs/fallow` at HEAD
-`56b0a0da804d1b6824d54c0a6ffbe1b7e592ce27`.
+This historical architecture review records nine improvement opportunities found by comparing `rust-quality-lens` with `fallow-rs/fallow` at commit `56b0a0da804d1b6824d54c0a6ffbe1b7e592ce27`.
 
-The intent is not to copy Fallow wholesale. The useful pattern is to adopt the
-parts that fit this project's next maturity step: clearer contracts, stronger
-conformance testing, CI-ready automation, and smaller internal boundaries.
+The intent was not to copy Fallow wholesale. The useful patterns were clearer contracts, stronger conformance testing, CI-ready automation, and smaller internal boundaries. Most near-term items are now implemented; this document is retained to explain why the current structure exists.
 
-## Current Signals
+## Original signals
 
-The local lens run completed successfully:
+The initial local review successfully ran:
 
-- `cargo run --bin rqlens -- catalog`
-- `cargo run --bin rqlens -- measure all`
-- `cargo test`
+```bash
+cargo run --bin rqlens -- catalog
+cargo run --bin rqlens -- measure all
+cargo test --workspace
+```
 
-The self-measurement found no escape-hatch rows and all discovered tests passed.
+The largest implementation hotspots were originally concentrated in
+`src/facts.rs`, `src/producers.rs`, `src/artifacts.rs`, and `src/main.rs`.
+Fallow's relevant contrast was a more productized shape: a multi-crate
+workspace, strict lint policy, typed output contracts, schemas, CI/action
+surfaces, conformance fixtures, fuzzing, benchmarks, packaging, and editor or
+agent integrations.
 
-The largest local hotspots were originally concentrated in:
+## Opportunities and current status
 
-- `src/facts.rs`
-- `src/producers.rs`
-- `src/artifacts.rs`
-- `src/main.rs`
+1. **Split the architecture — partially complete.**
 
-The second implementation pass reduced the CLI hotspot by moving shared scoring,
-classification, confidence, and provenance helpers into `src/measurement.rs`.
-The third pass started the producer split by moving clone detection into
-`src/producers/clones.rs`.
+   The repository is now a Cargo workspace and `rust_helpers` is a workspace
+   member. A heavier split into packages such as `rqlens-core`, `rqlens-types`,
+   `rqlens-extract`, and `rqlens-cli` remains deferred. The current module
+   boundaries should stabilize before adding cross-crate API costs.
 
-Fallow's relevant contrast is a more productized shape: a multi-crate workspace,
-strict lint policy, typed output contracts, schemas, CI/action surfaces,
-conformance fixtures, fuzzing, benchmarks, npm packaging, and editor/agent
-integrations.
+2. **Shrink producer hotspots — complete for the practical module split.**
 
-## Opportunities
+   `src/producers.rs` is now a small dispatcher. Producer implementations live
+   under `src/producers/`, including hotspots, clones, correctness, coverage,
+   escape hatches, reliability, API health, type health, topology, practices,
+   and map generation.
 
-1. Split the architecture.
+3. **Move scoring out of the CLI — complete.**
 
-   `Cargo.toml` defines a single package while `main.rs` mixes CLI, scoring
-   helpers, risk constants, and module wiring. Move toward a workspace shape
-   such as `rqlens-core`, `rqlens-types`, `rqlens-extract`, and `rqlens-cli`,
-   with `rust_helpers` as a workspace member.
+   `src/main.rs` parses commands and dispatches work. Shared confidence,
+   provenance, path, and scoring logic lives under `src/measurement/`, while
+   architecture formulas live in `src/risk_model.rs`.
 
-2. Shrink producer hotspots.
+4. **Add typed output contracts — partially complete.**
 
-   `src/producers.rs` owns every producer and is one of the measured risk
-   hotspots. Split it by producer: `hotspots.rs`, `clones.rs`,
-   `correctness.rs`, `escape_hatches.rs`, `type_health.rs`, `locality.rs`,
-   `leverage.rs`, and `map.rs`.
+   Review output and shared envelope surfaces have typed contract scaffolding,
+   and `rqlens artifact-schema` exposes machine-readable schemas for standard
+   producer artifacts. Some producer payloads are still assembled with
+   `serde_json::json!`; fully typed payloads and schemas for auxiliary reports
+   remain useful follow-up work.
 
-3. Move scoring out of the CLI.
+5. **Add config schema and initialization — complete.**
 
-   `src/main.rs` should stay thin: parse commands, load config, invoke the
-   engine, and write output. Model metadata, layer classification, confidence
-   helpers, type-risk scoring, and calibration constants belong in library
-   modules.
+   Configuration discovery, value validation, `rqlens init`, and
+   `rqlens config-schema` are implemented. The generated schema records the
+   supported keys, accepted values, and defaults for external validation.
 
-4. Add typed output contracts.
+6. **Introduce changed-code review mode — complete.**
 
-   Most public JSON is built directly with `serde_json::json!`. Add `serde`
-   structs for each artifact surface and generate JSON schemas for outputs such
-   as `map.json`, `hotspots.json`, `correctness_review.json`,
-   `rust_escape_hatches.json`, `type_health.json`, and `clones.json`.
+   `rqlens review --changed-since <rev>` and `rqlens review --diff-file <path>`
+   scope findings to changed Rust files. Review output includes hunk ranges,
+   changed entrypoints, and changed-line coverage when fresh coverage evidence
+   exists.
 
-5. Add config schema and init flow.
+7. **Avoid repeated Cargo helper overhead — complete for caching.**
 
-   Config loading currently accepts an optional TOML path and falls back to
-   defaults. Add `rqlens init`, config discovery, validation, and
-   `rqlens config-schema` so downstream tools can bootstrap and verify a repo
-   without relying on README examples.
+   Bundled syntax helpers are built and cached, then executed directly instead
+   of being invoked through repeated `cargo run` calls. Parallel extraction can
+   still be considered where deterministic output and shared caches permit it.
 
-6. Introduce changed-code review mode.
+8. **Strengthen lints and CI discipline — complete.**
 
-   The CLI exposes `measure` and `catalog`, but no PR-oriented surface. Add a
-   command such as `rqlens review --changed-since main` or
-   `rqlens review --diff-file <path>` to scope risk, tests, hotspots, and clone
-   findings to changed Rust files.
+   Workspace lint settings, formatter, check, Clippy, tests, rustdoc, helper
+   synchronization, package smoke tests, MSRV checks, cross-platform tests,
+   self-measurement, policy enforcement, and SARIF export are represented in
+   `.github/workflows/ci.yml` and repository scripts.
 
-7. Avoid cargo-run helper overhead.
+9. **Broaden golden and conformance testing — partially complete.**
 
-   Fact extraction now builds helpers once and executes cached helper binaries
-   directly. Further gains can come from parallelizing extraction where it is
-   safe.
+   The test suite includes mini and golden Rust fixtures, normalized snapshots,
+   artifact-envelope conformance checks, and CLI integration coverage. The
+   external validation corpus described in
+   [Validation Corpus](validation-corpus.md) still needs periodic, reproducible
+   execution and retained reports across more project types.
 
-8. Strengthen lints and CI discipline.
+## Remaining priorities
 
-   Add workspace lint settings, clippy gates, formatter checks, profile
-   settings, and a GitHub workflow or action that runs the catalog, tests,
-   helper tests, and measurements. Fallow's strict lints are a good model, but
-   RQL should adopt them incrementally to avoid a noisy first pass.
+The practical follow-up sequence is now:
 
-9. Broaden golden and conformance testing.
+1. Type the remaining public payload contracts and add schemas for auxiliary
+   performance, outcome, telemetry, validation, calibration, policy, SARIF, and
+   review outputs.
+2. Automate pinned external-corpus runs while retaining project revisions,
+   toolchains, configurations, fingerprints, and reviewed false positives.
+3. Re-evaluate a multi-crate core/types/extract/CLI split only when module APIs
+   are stable enough to justify the migration.
+4. Add safe extraction parallelism only with deterministic conformance tests.
 
-    The current tests check selected fields and fixtures, but not stable
-    whole-artifact contracts. Add normalized golden JSON snapshots and a small
-    conformance corpus of real Rust repos to track extractor and scoring
-    regressions over time.
-
-## Suggested Sequence
-
-1. Add schemas and typed output structs for the current artifact contracts.
-2. Split `src/producers.rs` into per-producer modules while preserving output.
-3. Move scoring and classification helpers out of `src/main.rs`.
-4. Add a CI workflow that runs `cargo fmt`, `cargo check --all-targets`,
-   `cargo test`, helper tests, `rqlens catalog`, and `rqlens measure all`.
-5. Add golden artifact snapshots for the existing fixtures.
-6. Add `rqlens init`, `rqlens config-schema`, and config discovery.
-7. Add changed-code review mode.
-8. Convert the helper crate into a workspace member and remove repeated
-   `cargo run` overhead.
-9. Build a small conformance corpus and track results over time.
-
-## Implementation Status
-
-The first implementation pass covered the bootstrap and automation items:
-
-- Workspace structure and shared lint/profile settings.
-- `rust_helpers` added as a workspace member.
-- GitHub CI for fmt, check, clippy, tests, catalog, and measurement smoke runs.
-- Config discovery, `rqlens init`, and `rqlens config-schema`.
-- Initial typed contract scaffolding for review output.
-- `rqlens review --changed-since` and `rqlens review --diff-file`.
-
-The second implementation pass covered follow-up hardening:
-
-- Extracted measurement helpers from `src/main.rs` into `src/measurement.rs`.
-- Added tests for config schema, init, and changed-file review scope.
-- Cleaned Clippy warning noise so workspace Clippy now passes cleanly.
-
-The third implementation pass covered the remaining practical gaps:
-
-- Split clone measurement into `src/producers/clones.rs`, starting the
-  per-producer module breakdown at the largest self-contained producer.
-- Added cached helper binary execution so extractors build once and run directly
-  instead of shelling through repeated `cargo run` calls.
-- Added `rqlens artifact-schema` for machine-readable public artifact schemas.
-- Added golden-style top-level artifact shape coverage for the mini fixture.
-
-The main deferred item is the heavier multi-crate split (`rqlens-core`,
-`rqlens-types`, `rqlens-extract`, `rqlens-cli`). The current workspace is ready
-for that move, but forcing it before more producer modules are split would add
-churn without much immediate user-visible payoff.
+The original comparison was a planning aid, not a compatibility claim with
+Fallow and not a commitment to adopt its packaging or integration surfaces.

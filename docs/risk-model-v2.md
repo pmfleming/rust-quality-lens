@@ -1,8 +1,12 @@
 # Architecture Risk Model v2
 
 Model `rqlens.architecture_risk`, version `2`, retains the raw facts and base
-category calibrations documented in `risk-model-v1.md` with the following
-intentional scoring changes.
+category calibrations documented in [version 1](risk-model-v1.md) with the
+following intentional scoring changes.
+
+> **Historical model.** New artifacts use [version 4](risk-model-v4.md). Keep
+> version 2 baselines only for interpreting version 2 output; baseline
+> comparison requires matching model versions.
 
 ## Aggregate Score
 

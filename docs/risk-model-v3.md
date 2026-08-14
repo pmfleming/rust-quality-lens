@@ -4,6 +4,10 @@ Model `rqlens.architecture_risk`, version `3`, keeps the version 2 aggregate and
 correctness formulas while changing hotspot granularity, graph identity, and
 classification bands. Artifact schema remains version 2.
 
+> **Historical model.** New artifacts use [version 4](risk-model-v4.md).
+> Version 3 scores remain useful for old-artifact interpretation but are not
+> directly comparable with compiler-assisted version 4 topology.
+
 ## Function and module hotspots
 
 Every parsed function and impl method now has its own source span, branch/path
@@ -62,8 +66,10 @@ sample. They are not defect probabilities or universal ecosystem norms. Static
 test discovery also leaves unexecuted tests unknown, so release gates should add
 test-run and coverage artifacts. Reproduce or extend the sample with:
 
-```text
-rqlens calibrate --project NAME=/checkout/path [--project NAME=/another/path ...]
+```bash
+rqlens calibrate \
+  --project NAME=/checkout/path \
+  --project OTHER=/another/path
 ```
 
 The complete machine-readable report is written to

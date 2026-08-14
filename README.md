@@ -6,6 +6,22 @@ The goal is to make quality, correctness, and architecture-map
 measurements portable across Rust projects without requiring each project to
 vendor dashboard code or project-specific scripts.
 
+RQLens emits versioned JSON evidence; it does not assign a universal quality
+score or provide a dashboard. See the [documentation index](docs/README.md) for
+design notes and model history.
+
+## Requirements
+
+- Rust 1.88 or newer (the workspace MSRV)
+- Cargo, with rustfmt, Clippy, and rustdoc for `verify`
+- rust-analyzer for compiler-assisted architecture identity (optional in
+  `auto` mode)
+- Git for history-based architecture and outcome evidence
+
+Coverage, auditing, feature-matrix, mutation, fuzzing, sanitizer, and Miri
+checks require their corresponding optional tools. Missing tools are reported
+explicitly and never treated as passing.
+
 ## What It Measures
 
 - verified Rust gates for rustfmt, compilation, Clippy, tests, doctests, and rustdoc
@@ -22,10 +38,22 @@ vendor dashboard code or project-specific scripts.
 - architecture risk map data
 
 The architecture map uses a versioned risk model so raw facts and derived risk
-scores remain separate. See `docs/risk-model-v4.md` for the current weights and
-empirical calibration.
-Recent extractor and scoring upgrades are summarized in
-`docs/measurement-upgrades.md`.
+scores remain separate. See the [current risk model](docs/risk-model-v4.md)
+for the weights and empirical calibration. Recent extractor and scoring
+upgrades are summarized in [Measurement Upgrades](docs/measurement-upgrades.md).
+
+## Installation
+
+From a source checkout, either run commands through Cargo as shown below or
+install the binary locally:
+
+```bash
+cargo install --path . --locked
+rqlens --version
+```
+
+After installation, replace `cargo run --bin rqlens --` in the examples with
+`rqlens`.
 
 ## Quick Start
 
@@ -64,30 +92,45 @@ sanitizers = []        # address, leak, memory, thread; usually nightly
 miri = false
 ```
 
-Or scaffold one:
+`project_root` is resolved relative to the configuration file. `output_dir`,
+explicit source roots, and `rust.helper_manifest` are then resolved from
+`project_root`. If `--config` is omitted, RQLens searches the current directory
+and its parents for `rqlens.toml`. Use `config-schema` for the supported option
+set and defaults.
 
-```powershell
+Or scaffold a configuration in the current directory:
+
+```bash
 cargo run --bin rqlens -- init
 ```
 
+Use `init --path <path>` to choose another location and `--force` to replace an
+existing file.
+
 Run all static, dynamic, and architecture producers:
 
-```powershell
+```bash
 cargo run --bin rqlens -- measure all --config rqlens.toml
 ```
 
+`measure all` includes coverage and an executed correctness run, so it can be
+expensive. Use an individual producer when a full run is unnecessary.
+
 Run the official Rust baseline and repository-practice checks:
 
-```powershell
+```bash
 cargo run --bin rqlens -- verify --config rqlens.toml
-cargo run --bin rqlens -- check --fail-on practice-failure --fail-on reliability-finding --config rqlens.toml
+cargo run --bin rqlens -- check \
+  --fail-on practice-failure \
+  --fail-on reliability-finding \
+  --config rqlens.toml
 ```
 
 Verification writes `rust_practices.json`. It keeps authoritative command gates separate from static findings and heuristic architecture scores.
 
 Export failed gates and source findings for GitHub code scanning:
 
-```powershell
+```bash
 cargo run --bin rqlens -- sarif --config rqlens.toml
 ```
 
@@ -121,7 +164,8 @@ Active waivers are recorded in `policy_report.json` and omitted from SARIF. Expi
 
 Run one producer:
 
-```powershell
+```bash
+cargo run --bin rqlens -- measure hotspots --config rqlens.toml
 cargo run --bin rqlens -- measure escape-hatches --config rqlens.toml
 cargo run --bin rqlens -- measure reliability --config rqlens.toml
 cargo run --bin rqlens -- measure api-health --config rqlens.toml
@@ -141,25 +185,45 @@ The Nix development shell and CI both include the coverage tool.
 
 Apply CI policies to generated artifacts:
 
-```powershell
+```bash
 cargo run --bin rqlens -- check --fail-on partial --fail-on test-failure --config rqlens.toml
 cargo run --bin rqlens -- check --baseline baseline/analysis --fail-on regression --max-regression 5 --config rqlens.toml
 ```
 
-Baseline regression checks compare both architecture risk and aggregate line coverage; `max-regression` is interpreted as risk-score points and coverage percentage points respectively.
+Baseline regression checks compare architecture risk and aggregate line coverage,
+plus Criterion estimates when both performance artifacts exist.
+`max-regression` is interpreted as risk-score points, coverage percentage
+points, or benchmark percentage increase for the corresponding evidence.
 
 Ingest normalized operational telemetry without coupling RQLens to a monitoring vendor:
 
-```powershell
+```bash
 cargo run --bin rqlens -- telemetry --input production-signals.json --max-age-hours 24 --config rqlens.toml
 cargo run --bin rqlens -- check --fail-on operational-failure --config rqlens.toml
 ```
 
-The input contains a `window.end` RFC 3339 timestamp and a `signals` array. Each signal requires `id`, `kind`, explicit `healthy`/`breached`/`unknown` status, numeric `value`, and `source`; optional module identities connect observations to architecture evidence. Stale windows and unknown statuses reduce confidence rather than silently passing.
+The input contains a `window.end` RFC 3339 timestamp and a `signals` array. Each signal requires `id`, `kind`, explicit `healthy`/`breached`/`unknown` status, numeric `value`, and `source`; optional module identities connect observations to architecture evidence. Stale windows and unknown statuses reduce confidence rather than silently passing. Replace the example timestamp with the end of the actual observation window.
+
+```json
+{
+  "window": { "end": "2026-08-11T12:00:00Z" },
+  "signals": [
+    {
+      "id": "api-error-rate",
+      "kind": "error-rate",
+      "status": "healthy",
+      "value": 0.2,
+      "unit": "percent",
+      "source": "production-monitoring",
+      "modules": ["app::lib::api"]
+    }
+  ]
+}
+```
 
 Collect inferred defect, revert, and security outcomes from Git history:
 
-```powershell
+```bash
 cargo run --bin rqlens -- outcomes --config rqlens.toml
 cargo run --bin rqlens -- outcomes --labels reviewed-outcomes.json --config rqlens.toml
 ```
@@ -168,7 +232,7 @@ The optional labels file is a JSON array with `commit`, `kind`, and optional `mo
 
 Capture Criterion benchmark estimates and compare them with a prior artifact:
 
-```powershell
+```bash
 cargo run --bin rqlens -- performance --config rqlens.toml
 cargo run --bin rqlens -- performance --baseline baseline/analysis --config rqlens.toml
 ```
@@ -177,7 +241,7 @@ This writes `performance.json`. `rqlens check --fail-on regression` also evaluat
 
 Validate whether risk rankings are associated with reviewed outcome labels across held-out projects:
 
-```powershell
+```bash
 cargo run --bin rqlens -- validate \
   --project app=/path/to/app/target/analysis \
   --project library=/path/to/library/target/analysis \
@@ -188,7 +252,7 @@ The report calculates precision-at-10, recall-at-10, mean percentile rank, and t
 
 Calibrate score distributions against multiple local checkouts:
 
-```powershell
+```bash
 cargo run --bin rqlens -- calibrate \
   --project app=/path/to/app \
   --project library=/path/to/library \
@@ -201,35 +265,46 @@ probabilities.
 
 Print the task catalog:
 
-```powershell
+```bash
 cargo run --bin rqlens -- catalog --config rqlens.toml
 ```
 
 Print the config schema:
 
-```powershell
+```bash
 cargo run --bin rqlens -- config-schema
 ```
 
-Print artifact schemas:
+The schema is the authoritative list of accepted keys and defaults, including
+Cargo feature selection (`no_default_features`, `features`, and `exclude`) and
+all optional verification gates.
 
-```powershell
+Print measurement artifact schemas:
+
+```bash
 cargo run --bin rqlens -- artifact-schema
 cargo run --bin rqlens -- artifact-schema map
 ```
 
+The `all` form returns schemas keyed by producer. Auxiliary performance,
+outcome, telemetry, validation, calibration, policy, SARIF, and review outputs
+are not currently included in this command.
+
 Review changed Rust files:
 
-```powershell
+```bash
 cargo run --bin rqlens -- review --changed-since main --config rqlens.toml
 cargo run --bin rqlens -- review --diff-file pr.diff --config rqlens.toml
 ```
 
-The review command writes `target/analysis/review.json`. It records changed hunk ranges and, when a fresh coverage artifact is available, reports executable changed-line coverage. It runs the standard
-project extraction and filters hotspot, clone, escape-hatch, and type-health
-rows to changed Rust files so module keys remain comparable to full-project
+The review command writes `target/analysis/review.json`. It records changed
+hunk ranges and, when a fresh coverage artifact is available, reports executable
+changed-line coverage. It runs the standard project extraction and filters
+hotspot, clone, escape-hatch, reliability, API-health, and type-health rows to
+changed Rust files so module keys remain comparable to full-project
 measurements. Review scope also reports changed tool entrypoints in
-`scope.entrypoints`.
+`scope.entrypoints`. With neither scope option, review uses `git diff HEAD`;
+when `--diff-file` is supplied, it takes precedence over `--changed-since`.
 
 ## Reading Outputs
 
@@ -239,14 +314,21 @@ RQLens deliberately separates three evidence classes:
 - **static findings**: concrete source or repository evidence requiring review
 - **heuristic signals**: calibrated complexity, duplication, coupling, and architecture triage
 
-These classes are not combined into a universal quality score. Missing tools never count as passing. See `docs/quality-model.md` for sources and interpretation.
+These classes are not combined into a universal quality score. Performance,
+repository outcomes, and operational telemetry remain separate contextual
+evidence. Missing tools never count as passing. See the
+[quality model](docs/quality-model.md) for sources and interpretation.
 
-Generated artifacts use a versioned envelope. Each document records `generated_at`, the producing `generator_version`, and a path-and-content `input_fingerprint` for traceability and stale-artifact detection. Array-oriented measurements are
-stored under `records`; structured measurements such as correctness, coverage,
-and the architecture map are stored under `data`. Every envelope carries
-artifact-level `measurement_confidence`, a summary, tool identity, and risk
-model identity, so an empty result remains distinguishable from incomplete
-extraction. Artifact schema version `2` is the current contract.
+Generated measurement artifacts use a versioned envelope. Each document records
+`generated_at`, the producing `generator_version`, and a path-and-content
+`input_fingerprint` for traceability and stale-artifact detection.
+Array-oriented measurements are stored under `records`; structured measurements
+such as correctness, coverage, and the architecture map are stored under
+`data`. Every measurement envelope carries artifact-level
+`measurement_confidence`, a summary, tool identity, and risk model identity, so
+an empty result remains distinguishable from incomplete extraction. Artifact
+schema version `2` is the current measurement contract; auxiliary performance,
+outcome, and telemetry documents currently use schema version `1`.
 
 `clones.json` reports multiple clone and duplication engines:
 
@@ -292,25 +374,47 @@ orchestration belongs to `project-management-board`.
 
 The CLI is Rust. Syntax-aware extraction uses bundled helper sources. In a source checkout the workspace helper crate is reused; packaged installations materialize the same versioned sources in the user cache before building them. This keeps `cargo install` packages independent of the original checkout.
 
-Baseline verification requires Cargo with rustfmt, Clippy, and rustdoc. Coverage requires `cargo-llvm-cov` and `llvm-tools-preview`. `cargo-audit` and `cargo-deny` are optional unless enabled in `[verification]`. Verification, correctness runs, and coverage share the configured workspace, target, feature, exclusion, and lockfile scope; doctests remain a separate library-only Cargo gate because Cargo does not combine `--doc` with `--all-targets`.
+Baseline verification requires Cargo with rustfmt, Clippy, and rustdoc. Coverage
+requires `cargo-llvm-cov` and `llvm-tools-preview`. Optional verification gates
+use `cargo-audit`, `cargo-deny`, `cargo-semver-checks`, `cargo-hack`,
+`cargo-mutants`, cargo-fuzz, and nightly Rust components for sanitizer or Miri
+runs. rust-analyzer is optional in semantic `auto` mode and mandatory for
+`required` mode. Verification, correctness runs, and coverage share the
+configured workspace, target, feature, exclusion, and lockfile scope; doctests
+remain a separate library-only Cargo gate because Cargo does not combine
+`--doc` with `--all-targets`.
 
 For production CI, commit `Cargo.lock` where appropriate and set `locked = true`; enable RustSec and cargo-deny (or run equivalent dedicated CI jobs), and keep a separate job that compiles with the declared MSRV. RQLens' dependency MSRV row is metadata evidence, not a substitute for executing the MSRV toolchain.
 
 ## Validation
 
-For changes inside this repository, run the same checks the lens uses on
-itself:
+For changes inside this repository, run the same core checks the lens uses in
+CI:
 
-```powershell
-cargo fmt
-cargo check --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo run --bin rqlens -- verify
-cargo run --bin rqlens -- measure all
+```bash
+cargo fmt --all -- --check
+bash scripts/check-bundled-helpers.sh
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+cargo run --locked --bin rqlens -- verify
+cargo run --locked --bin rqlens -- measure all
+bash scripts/check-self-metrics.sh
 bash scripts/check-package.sh
 ```
 
-The final command refreshes `target/analysis/*.json`. Check
+`measure all` refreshes `target/analysis/*.json`. Check
 `correctness_review.json.summary` for failed or unknown tests and
-`map.json.meta.summary.artifact_status` for missing or stale inputs.
+`map.json.summary.artifact_status` for missing or stale inputs. See
+[Contributing](CONTRIBUTING.md) for pull-request expectations.
+
+## Community and Security
+
+Contributions are welcome; see [Contributing](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately as
+described in the [Security Policy](SECURITY.md).
+
+## License
+
+Licensed under the [MIT License](LICENSE).

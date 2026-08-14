@@ -1,6 +1,6 @@
 # Validation Corpus
 
-RQLens rules must be tested against heterogeneous real projects rather than calibrated only against this repository.
+RQLens rules must be tested against heterogeneous real projects rather than calibrated only against this repository. This document records dated validation evidence; counts are snapshots, not claims about the current head of an external project.
 
 ## Local Scratchpad validation
 
@@ -25,7 +25,11 @@ The resulting Scratchpad changes were validated with 479 passing tests, Clippy, 
 
 ## Required expansion
 
-Before treating thresholds as broadly representative, pin and periodically run:
+The architecture calibration described in the risk-model documents includes
+pinned Scratchpad, ripgrep, Tokio, and nm-daemon revisions, but it does not
+replace full practice, safety, coverage, or platform validation. Before treating
+rule behavior or thresholds as broadly representative, pin and periodically
+run:
 
 - Tokio for async, cfg, and feature-heavy behavior
 - Serde for public APIs and procedural macros
@@ -34,8 +38,20 @@ Before treating thresholds as broadly representative, pin and periodically run:
 - Wasmtime for unsafe, fuzzing, performance, and security-sensitive behavior
 - an embedded `no_std` project
 
-For every corpus run, retain the revision, toolchain, enabled features, runtime, unsupported patterns, tool availability, and reviewed false positives. Percentiles remain triage aids and must not be described as defect probabilities.
+For every corpus run, retain the RQLens version, project revision, toolchain,
+enabled features, operating system, runtime, configuration, unsupported
+patterns, tool availability, input fingerprints, and reviewed false positives.
+Do not overwrite historical reports without retaining that provenance.
+Percentiles remain triage aids and must not be described as defect
+probabilities.
 
 ## Outcome validation protocol
 
-Capture architecture artifacts at a pinned revision before opening the outcome window. After the window closes, review defect, revert, security, and incident labels and attach stable module identities. Run `rqlens validate` on projects not used to choose score weights. Track precision-at-10, recall-at-10, mean percentile rank, and top-quartile lift, including projects with no outcomes. Commit-message inference may be used for exploration but not for claims of predictive validity.
+Capture architecture artifacts at a pinned revision before opening the outcome
+window. After the window closes, review defect, revert, security, and incident
+labels and attach stable module identities. Run `rqlens validate` on projects
+not used to choose score weights. Track precision-at-10, recall-at-10, mean
+percentile rank, and top-quartile lift, including projects with no outcomes.
+Keep projects with missing scores or no labels in the report rather than silently
+dropping them. Commit-message inference may be used for exploration with
+`--include-inferred`, but not for claims of predictive validity.

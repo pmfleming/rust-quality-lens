@@ -4,6 +4,11 @@ This document describes the versioned scoring model used by `map.architecture`
 and the shared calibration tables used by scored producer tools.
 The model id is `rqlens.architecture_risk`, version `1`.
 
+> **Historical model.** New artifacts use [version 4](risk-model-v4.md). This
+> document preserves version 1 semantics for old-artifact interpretation; do
+> not apply its classification thresholds to current output or compare scores
+> across model versions.
+
 ## Raw Facts
 
 Raw facts are measurements observed directly from source code, generated
@@ -21,8 +26,8 @@ Raw fact inputs include:
 - churn, commits, contributors, defect-keyword commits, and co-change facts from git history
 
 When a required input artifact is missing or stale, the affected derived scores
-are `null` rather than `0`, and the map records the missing or stale artifact in
-`measurement_confidence` and `meta.summary.artifact_status`.
+are `null` rather than `0`, and the current map contract records the missing or
+stale artifact in `measurement_confidence` and `summary.artifact_status`.
 
 ## Derived Scores
 
@@ -39,10 +44,10 @@ Derived risk scores are model outputs. They are not raw facts:
 
 ## Weights
 
-The canonical machine-readable weights and tool calibrations live in
-`src/risk_model.rs`, with metadata serialization helpers in `src/main.rs`.
-Architecture category weights are emitted into map metadata as
-`meta.risk_model_weights`; producer calibration tables are emitted as
+For current code, the canonical machine-readable category formulas live in
+`src/risk_model.rs`, while weights, calibrations, and classification metadata
+are emitted from `src/measurement/scoring.rs`. Architecture category weights
+are emitted into map metadata as `meta.risk_model_weights`; producer calibration tables are emitted as
 `meta.risk_model_tool_scores`.
 
 ### Maintainability
@@ -117,10 +122,11 @@ The current Rust implementation is split by responsibility:
 
 - `src/config.rs`: config loading and absolute path resolution
 - `src/catalog.rs`: task catalog contract consumed by dashboards and runners
-- `src/facts.rs`: syntax fact caching, module graph construction, Cargo target discovery, and test-status parsing
-- `src/producers.rs`: individual measurement producers
-- `src/artifacts.rs`: map artifact loading, artifact status, git history, cycle detection, and layer violations
+- `src/facts.rs` and `src/facts/`: run-context caching, module graphs, Cargo target discovery, and test execution
+- `src/producers.rs` and `src/producers/`: producer dispatch and individual measurements
+- `src/artifacts.rs` and `src/artifacts/`: map artifact loading, indexing, topology, history, cycles, and layer violations
 - `src/risk_model.rs`: shared `architecture_risk_scores(...)` function and score structs
+- `src/measurement/scoring.rs`: emitted model weights, calibrations, and current classification bands
 - `src/util.rs`: small filesystem, path, hashing, and JSON helpers
 
 The map producer calls `architecture_risk_scores(...)` for every module. If an

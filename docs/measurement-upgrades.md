@@ -5,11 +5,18 @@ portable, explicit, and trustworthy across Rust projects.
 
 ## Artifact Contract v2
 
-All generated measurement files now use a versioned envelope. Record-oriented
-outputs use `records`, structured outputs use `data`, and every artifact has
-top-level confidence and summary fields. Readers remain compatible with legacy
-unenveloped artifacts. A checked-in conformance snapshot guards the envelope
-surface.
+All standard producer measurement files use the version 2 envelope.
+Record-oriented outputs use `records`, structured outputs use `data`, and each
+measurement has top-level confidence and summary fields. Readers remain
+compatible with legacy unenveloped artifacts. A checked-in conformance snapshot
+guards the envelope surface. Auxiliary performance, repository-outcome,
+operational, validation, and calibration reports use their own version 1
+contracts rather than pretending to implement the producer envelope.
+
+Project measurement and evidence documents record generation time, generator
+version, and a source/manifest input fingerprint. Policy checks compare current
+inputs with stored fingerprints so stale artifacts cannot silently satisfy a
+fresh CI run.
 
 Correctness records now include `tested_modules`, derived from source-module
 ancestry and syntax dependencies. Test-command and compilation failures are
@@ -21,8 +28,10 @@ using resolved full type paths rather than physical-module plus short-name
 matching.
 
 Coverage is available through `measure coverage` using `cargo-llvm-cov`.
-`rqlens check` supports partial-input, test-failure, absolute-threshold, and
-baseline-regression policies for CI.
+`rqlens check` supports partial-input, test-failure, practice, reliability,
+operational, absolute-threshold, and baseline-regression policies for CI.
+Configured stable rule limits are evaluated after active waivers and explicit
+path/package exclusions.
 
 ## Extraction
 
@@ -82,7 +91,8 @@ counts and artifact status.
 
 Raw facts and derived risk are separated. The versioned model lives in
 `src/risk_model.rs`, is documented in
-`docs/risk-model-v4.md`, and is emitted into `map.json` metadata.
+[Architecture Risk Model v4](risk-model-v4.md), and is emitted into `map.json`
+metadata.
 
 Version 3 adds function-level hotspot rows, per-score component explanations,
 Cargo-qualified graph identities, baseline improvement/regression deltas,
@@ -182,6 +192,26 @@ discovery so duplicated integration-test bodies can be surfaced even when
 Module-responsibility signatures include target and entrypoint kind, which lets
 duplicated tool scaffolding group with other entrypoint scaffolding instead of
 with ordinary source modules.
+
+## Behavioral and contextual evidence
+
+Verification can optionally execute cargo-mutants, repeated tests, configured
+cargo-fuzz targets, compiler sanitizers, and Miri. Every gate records the exact
+command and distinguishes disabled, unavailable, failed, and timed-out tools.
+These checks add reachability evidence; they do not prove that unsafe code is
+sound or that unmutated code is defect-free.
+
+Separate commands preserve evidence that does not belong in a static quality
+score:
+
+- `performance` captures Criterion estimates and baseline percentage deltas;
+- `outcomes` separates reviewed labels from commit-message inference;
+- `telemetry` normalizes observed production signals and checks freshness;
+- `validate` tests ranking association against outcome labels across projects.
+
+Changed-code review records diff hunks and executable changed-line coverage when
+a fresh coverage artifact is available. It otherwise reports the missing or
+stale coverage evidence instead of assuming uncovered or covered lines.
 
 ## Generic Lens Rules
 
