@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::MeasureTool;
 use crate::config::LensConfig;
+use crate::tool::MeasureTool;
 use crate::util::write_json;
 
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -59,43 +59,13 @@ pub(crate) fn run_check(
     let threshold_violations = current_map
         .map(|map| threshold_violations(map, max_total_score))
         .unwrap_or_default();
-    let score_deltas = match baseline.as_ref() {
-        Some(path) => {
-            let current_document = documents
-                .get("map.json")
-                .context("map.json is required for baseline comparison")?;
-            let baseline_map = read_baseline_map(path, model_version(current_document))?;
-            current_map
-                .map(|current| score_deltas(current, &baseline_map))
-                .unwrap_or_default()
-        }
-        None => Vec::new(),
-    };
-    let mut regressions = score_deltas
-        .iter()
-        .filter(|delta| {
-            delta["delta"]
-                .as_f64()
-                .is_some_and(|delta| delta > max_regression)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut evidence_deltas = baseline
-        .as_ref()
-        .map(|path| coverage_regression(config, &documents, path, max_regression))
-        .transpose()?
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    if let Some(path) = baseline.as_ref() {
-        evidence_deltas.extend(performance_regressions(&documents, path, max_regression)?);
-    }
-    regressions.extend(
-        evidence_deltas
-            .iter()
-            .filter(|delta| delta["status"] == "regressed")
-            .cloned(),
-    );
+    let regression = regression_evidence(
+        config,
+        &documents,
+        current_map,
+        baseline.as_deref(),
+        max_regression,
+    )?;
 
     let policy_evidence = PolicyEvidence {
         partial_artifacts: &partial_artifacts,
@@ -103,7 +73,7 @@ pub(crate) fn run_check(
         practice_failures: &practices.errors,
         reliability_findings: &reliability.errors,
         operational_failures: &operational_failures,
-        regressions: &regressions,
+        regressions: &regression.regressions,
         threshold_violations: &threshold_violations,
     };
     let mut failed_policies = failed_cli_policies(fail_on, &policy_evidence);
@@ -136,9 +106,9 @@ pub(crate) fn run_check(
         "policy_rule_evaluations": policy_rule_evaluations,
         "policy_rule_violations": policy_rule_violations,
         "threshold_violations": threshold_violations,
-        "regressions": regressions,
-        "score_deltas": score_deltas,
-        "evidence_deltas": evidence_deltas,
+        "regressions": regression.regressions,
+        "score_deltas": regression.score_deltas,
+        "evidence_deltas": regression.evidence_deltas,
         "limits": {"max_total_score": max_total_score, "max_regression": max_regression},
     });
     let output = config.output_dir.join("policy_report.json");
@@ -151,6 +121,56 @@ pub(crate) fn run_check(
         );
     }
     Ok(())
+}
+
+#[derive(Default)]
+struct RegressionEvidence {
+    score_deltas: Vec<Value>,
+    evidence_deltas: Vec<Value>,
+    regressions: Vec<Value>,
+}
+
+fn regression_evidence(
+    config: &LensConfig,
+    documents: &BTreeMap<String, Value>,
+    current_map: Option<&Value>,
+    baseline: Option<&Path>,
+    max_regression: f64,
+) -> Result<RegressionEvidence> {
+    let Some(path) = baseline else {
+        return Ok(RegressionEvidence::default());
+    };
+    let current_document = documents
+        .get("map.json")
+        .context("map.json is required for baseline comparison")?;
+    let baseline_map = read_baseline_map(path, model_version(current_document))?;
+    let score_deltas = current_map
+        .map(|current| score_deltas(current, &baseline_map))
+        .unwrap_or_default();
+    let mut evidence_deltas = coverage_regression(config, documents, path, max_regression)?
+        .into_iter()
+        .collect::<Vec<_>>();
+    evidence_deltas.extend(performance_regressions(documents, path, max_regression)?);
+    let mut regressions = score_deltas
+        .iter()
+        .filter(|delta| {
+            delta["delta"]
+                .as_f64()
+                .is_some_and(|delta| delta > max_regression)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    regressions.extend(
+        evidence_deltas
+            .iter()
+            .filter(|delta| delta["status"] == "regressed")
+            .cloned(),
+    );
+    Ok(RegressionEvidence {
+        score_deltas,
+        evidence_deltas,
+        regressions,
+    })
 }
 
 struct PolicyEvidence<'a> {

@@ -5,13 +5,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::MeasureTool;
 use crate::artifacts::artifact_payload;
 use crate::config::{LensConfig, SemanticIdentityMode};
 use crate::contracts::artifact_document;
 use crate::facts::RunContext;
 use crate::measurement::{MODEL_ID, MODEL_VERSION};
 use crate::producers;
+use crate::tool::MeasureTool;
 use crate::util::{bundled_helper_manifest, round2, write_json};
 
 const CALIBRATION_TOOLS: [MeasureTool; 5] = [
@@ -249,6 +249,7 @@ fn parse_project(spec: &str) -> Result<(String, PathBuf)> {
     if name.trim().is_empty() || path.trim().is_empty() {
         bail!("invalid --project {spec:?}; expected NAME=PATH");
     }
+    let path = path.trim();
     let root =
         fs::canonicalize(path).with_context(|| format!("resolving calibration project {path}"))?;
     Ok((name.trim().to_string(), root))
@@ -391,4 +392,73 @@ fn git_revision(root: &Path) -> Value {
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|revision| Value::from(revision.trim().to_string()))
         .unwrap_or(Value::Null)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{calibration_source_roots, distribution, parse_project, safe_name, thresholds};
+    use serde_json::json;
+    use std::fs;
+
+    #[test]
+    fn calibration_statistics_use_empirical_percentiles() {
+        let values = [1.0, 2.0, 3.0, 10.0];
+        assert_eq!(
+            distribution(&values),
+            json!({
+                "count": 4,
+                "mean": 4.0,
+                "p50": 3.0,
+                "p75": 10.0,
+                "p90": 10.0,
+                "p95": 10.0,
+                "p99": 10.0,
+                "max": 10.0,
+            })
+        );
+        assert_eq!(
+            thresholds(&values),
+            json!({
+                "watch_at_p90": 10.0,
+                "high_at_p95": 10.0,
+                "extreme_at_p99": 10.0,
+            })
+        );
+    }
+
+    #[test]
+    fn calibration_project_specs_are_validated_and_normalized() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let specification = format!(" demo={} ", root.path().display());
+        let (name, path) = parse_project(&specification)?;
+        assert_eq!(name, "demo");
+        assert_eq!(path, fs::canonicalize(root.path())?);
+        assert!(parse_project("missing-separator").is_err());
+        assert!(parse_project("=missing-name").is_err());
+        assert_eq!(safe_name("workspace/core.v1"), "workspace_core_v1");
+        Ok(())
+    }
+
+    #[test]
+    fn calibration_source_roots_support_src_and_crate_layouts() -> anyhow::Result<()> {
+        let conventional = tempfile::tempdir()?;
+        fs::create_dir(conventional.path().join("src"))?;
+        assert_eq!(
+            calibration_source_roots(conventional.path()),
+            [conventional.path().join("src")]
+        );
+
+        let workspace = tempfile::tempdir()?;
+        fs::create_dir_all(workspace.path().join("crates/a/src"))?;
+        fs::create_dir_all(workspace.path().join("crates/b"))?;
+        fs::write(workspace.path().join("crates/b/main.rs"), "fn main() {}")?;
+        assert_eq!(
+            calibration_source_roots(workspace.path()),
+            [
+                workspace.path().join("crates/a/src"),
+                workspace.path().join("crates/b"),
+            ]
+        );
+        Ok(())
+    }
 }

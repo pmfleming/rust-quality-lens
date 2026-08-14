@@ -3,10 +3,10 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::MeasureTool;
 use crate::config::LensConfig;
 use crate::facts::RunContext;
 use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
+use crate::tool::MeasureTool;
 use crate::util::project_input_fingerprint;
 
 #[derive(Debug, Serialize)]

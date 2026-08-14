@@ -455,6 +455,9 @@ fn reference_symbol(raw: &str) -> String {
 
 fn is_semantic_candidate(raw: &str, source: &FileFacts, facts: &[FileFacts]) -> bool {
     let raw = raw.trim_start_matches("::").trim_end_matches("::*");
+    if matches!(raw, "crate" | "self" | "super") {
+        return false;
+    }
     let first = raw.split("::").next().unwrap_or_default();
     if matches!(first, "crate" | "self" | "super") {
         return true;
@@ -941,7 +944,8 @@ fn feature_cfgs(config: &LensConfig, source_path: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        definition_location, percent_decode, percent_encode, resolve, utf16_column_to_byte,
+        definition_location, is_semantic_candidate, percent_decode, percent_encode, resolve,
+        utf16_column_to_byte,
     };
     use crate::config::{LensConfig, SemanticIdentityMode};
     use crate::facts::{DependencyReferenceFact, FileFacts};
@@ -971,6 +975,16 @@ mod tests {
     #[test]
     fn converts_utf16_columns() {
         assert_eq!(utf16_column_to_byte("a🦀b", 3), 5);
+    }
+
+    #[test]
+    fn bare_relative_roots_are_not_semantic_dependencies() {
+        let source = FileFacts::test_fact("/project/src/lib.rs", "lib");
+        let facts = [source.clone()];
+        for raw_path in ["crate", "self", "super", "crate::*"] {
+            assert!(!is_semantic_candidate(raw_path, &source, &facts));
+        }
+        assert!(is_semantic_candidate("crate::domain", &source, &facts));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 {
-  "max_function_hotspot_score": 100.0,
+  "max_function_hotspot_score": 95.0,
   "max_ast_clone_records": 0,
   "max_token_clone_records": 205,
   "min_map_locality_score": 85.0,

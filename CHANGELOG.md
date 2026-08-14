@@ -33,3 +33,11 @@ All notable changes to this project will be documented here. The format follows 
 - Reused Criterion estimates from `performance --no-run` are marked partial because their execution time is unknown.
 - The self-metric gate tracks hotspots and duplication instead of treating total repository LOC as a quality regression.
 - Verified gates, static findings, and heuristic architecture signals are represented separately.
+- CLI argument definitions and measurement-tool metadata now live in focused modules, keeping the binary entrypoint thin.
+- Coverage collection and baseline-regression analysis are split into smaller, testable stages.
+- The self-metric maximum function-hotspot baseline is tightened from `100` to `95`.
+
+### Fixed
+
+- Bare `crate`, `self`, and `super` import prefixes no longer create false semantic dependency edges to the crate root or inflate cycle risk.
+- Calibration project specifications now trim surrounding path whitespace before canonicalization.

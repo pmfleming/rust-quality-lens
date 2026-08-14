@@ -1,6 +1,6 @@
-use crate::MeasureTool;
 use crate::config::LensConfig;
 use crate::semantic::{self, IdentityResolutionSummary};
+use crate::tool::MeasureTool;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

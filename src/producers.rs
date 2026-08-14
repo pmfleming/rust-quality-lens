@@ -1,9 +1,9 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::MeasureTool;
 use crate::config::LensConfig;
 use crate::facts::RunContext;
+use crate::tool::MeasureTool;
 
 mod api_health;
 mod clones;

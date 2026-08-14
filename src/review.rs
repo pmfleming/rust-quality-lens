@@ -1,9 +1,9 @@
-use crate::MeasureTool;
 use crate::config::LensConfig;
 use crate::contracts::{ReviewEntrypoint, ReviewMeasurement, ReviewOutput, ReviewScope};
 use crate::facts::FileFacts;
 use crate::facts::RunContext;
 use crate::producers::produce_measurement;
+use crate::tool::MeasureTool;
 use crate::util::{absolutize, normalize_slashes, project_input_fingerprint, write_json};
 use anyhow::{Context, Result};
 use std::collections::{BTreeSet, HashSet};

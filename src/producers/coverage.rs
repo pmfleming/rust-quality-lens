@@ -17,23 +17,48 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
             "unsupported_pattern",
         ));
     }
-
-    let version_args = ["llvm-cov", "--version"].map(str::to_string);
-    let mut version_request = CommandRequest::new("cargo", &version_args, &config.project_root);
-    version_request.timeout = Duration::from_secs(30);
-    let version = run_command(version_request);
-    if version.status != CommandStatus::Passed {
-        return Ok(unavailable(
-            version
-                .reason
-                .as_deref()
-                .unwrap_or("cargo-llvm-cov is not installed"),
-            "missing_input",
-        ));
+    if let Err(reason) = require_coverage_tool(config) {
+        return Ok(unavailable(&reason, "missing_input"));
     }
 
     let temp = tempfile::tempdir()?;
-    let output_path = temp.path().join("coverage.json");
+    let result = collect_coverage(config, context, &temp.path().join("coverage.json"));
+    Ok(result.unwrap_or_else(|reason| unavailable(&reason, "unsupported_pattern")))
+}
+
+fn require_coverage_tool(config: &LensConfig) -> std::result::Result<(), String> {
+    let arguments = ["llvm-cov", "--version"].map(str::to_string);
+    let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
+    request.timeout = Duration::from_secs(30);
+    let outcome = run_command(request);
+    if outcome.status == CommandStatus::Passed {
+        Ok(())
+    } else {
+        Err(outcome
+            .reason
+            .unwrap_or_else(|| "cargo-llvm-cov is not installed".to_string()))
+    }
+}
+
+fn collect_coverage(
+    config: &LensConfig,
+    context: &RunContext,
+    output_path: &std::path::Path,
+) -> std::result::Result<Value, String> {
+    execute_coverage(config, output_path)?;
+    let data = read_coverage_data(output_path)?;
+    let files = coverage_files(config, context, &data)?;
+    let totals = data
+        .get("totals")
+        .ok_or_else(|| "cargo llvm-cov output did not contain aggregate totals".to_string())?;
+    let summary = coverage_summary(totals, files.len())?;
+    Ok(complete_coverage(summary, files))
+}
+
+fn execute_coverage(
+    config: &LensConfig,
+    output_path: &std::path::Path,
+) -> std::result::Result<(), String> {
     let mut arguments = vec![
         "llvm-cov".to_string(),
         "--json".to_string(),
@@ -43,72 +68,54 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
     arguments.extend(config.verification.cargo_scope_arguments(true));
     let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
     request.timeout = Duration::from_secs(config.verification.timeout_seconds);
-    let output = run_command(request);
-    if output.status != CommandStatus::Passed {
-        let detail = format!(
+    let outcome = run_command(request);
+    if outcome.status == CommandStatus::Passed {
+        Ok(())
+    } else {
+        Err(format!(
             "cargo llvm-cov failed: {} {}",
-            output.stdout_tail, output.stderr_tail
-        );
-        return Ok(unavailable(&detail, "unsupported_pattern"));
+            outcome.stdout_tail, outcome.stderr_tail
+        ))
     }
+}
 
-    let bytes = match std::fs::read(&output_path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            return Ok(unavailable(
-                &format!("cargo llvm-cov did not write valid output: {error}"),
-                "unsupported_pattern",
-            ));
-        }
-    };
-    let export: Value = match serde_json::from_slice(&bytes) {
-        Ok(export) => export,
-        Err(error) => {
-            return Ok(unavailable(
-                &format!("cargo llvm-cov output was not valid JSON: {error}"),
-                "unsupported_pattern",
-            ));
-        }
-    };
-    let Some(data) = export["data"].as_array().and_then(|data| data.first()) else {
-        return Ok(unavailable(
-            "cargo llvm-cov output did not contain a coverage data set",
-            "unsupported_pattern",
-        ));
-    };
-    let Some(export_files) = data["files"].as_array() else {
-        return Ok(unavailable(
-            "cargo llvm-cov output did not contain file coverage",
-            "unsupported_pattern",
-        ));
-    };
-    let mut files = Vec::new();
-    for file in export_files {
-        match coverage_file(config, file, &context.source_facts) {
-            Ok(Some(row)) => files.push(row),
-            Ok(None) => {}
-            Err(reason) => return Ok(unavailable(&reason, "unsupported_pattern")),
-        }
-    }
+fn read_coverage_data(output_path: &std::path::Path) -> std::result::Result<Value, String> {
+    let bytes = std::fs::read(output_path)
+        .map_err(|error| format!("cargo llvm-cov did not write valid output: {error}"))?;
+    let export: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("cargo llvm-cov output was not valid JSON: {error}"))?;
+    export["data"]
+        .as_array()
+        .and_then(|data| data.first())
+        .cloned()
+        .ok_or_else(|| "cargo llvm-cov output did not contain a coverage data set".to_string())
+}
+
+fn coverage_files(
+    config: &LensConfig,
+    context: &RunContext,
+    data: &Value,
+) -> std::result::Result<Vec<Value>, String> {
+    let export_files = data["files"]
+        .as_array()
+        .ok_or_else(|| "cargo llvm-cov output did not contain file coverage".to_string())?;
+    let files = export_files
+        .iter()
+        .map(|file| coverage_file(config, file, &context.source_facts))
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     if files.is_empty() && !context.source_facts.is_empty() {
-        return Ok(unavailable(
-            "cargo llvm-cov reported no Rust files inside the configured project",
-            "unsupported_pattern",
-        ));
+        Err("cargo llvm-cov reported no Rust files inside the configured project".to_string())
+    } else {
+        Ok(files)
     }
-    let Some(totals) = data.get("totals") else {
-        return Ok(unavailable(
-            "cargo llvm-cov output did not contain aggregate totals",
-            "unsupported_pattern",
-        ));
-    };
-    let summary = match coverage_summary(totals, files.len()) {
-        Ok(summary) => summary,
-        Err(reason) => return Ok(unavailable(&reason, "unsupported_pattern")),
-    };
-    Ok(json!({
+}
+
+fn complete_coverage(summary: Value, files: Vec<Value>) -> Value {
+    json!({
         "summary": summary,
-        "files": files,
         "measurement_confidence": {
             "complete": true,
             "partial": false,
@@ -118,8 +125,9 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
             "missing_input": [],
             "stale_input": [],
             "unsupported_pattern": [],
-        }
-    }))
+        },
+        "files": files,
+    })
 }
 
 fn coverage_file(

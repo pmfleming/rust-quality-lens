@@ -157,6 +157,10 @@ visible without being scored like ordinary domain modules.
 Attribute evidence is kept separate from dependency extraction. Attribute names
 such as `cfg` or `test` do not become dependency edges; only attribute values
 that actually wire modules, such as `#[path = "..."]`, influence module wiring.
+Bare `crate`, `self`, and `super` prefixes emitted while traversing a `use` tree
+are not semantic candidates; a relative root must qualify another segment before
+it can create an edge. This prevents pseudo-dependencies on the crate root and
+false cycle penalties.
 
 Test-support detection now uses syntax-resolved test dependencies rather than
 file names, stems, or substring matches. This removes easy false positives where
