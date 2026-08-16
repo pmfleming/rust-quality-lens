@@ -367,6 +367,16 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
+        MeasureTool::FunctionRisk => object_schema(
+            "function_risk.json",
+            &["summary", "formula", "functions", "measurement_confidence"],
+            json!({
+                "summary": {"type": "object"},
+                "formula": {"type": "string"},
+                "functions": {"type": "array", "items": {"type": "object"}},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
+        ),
         MeasureTool::Practices => object_schema(
             "rust_practices.json",
             &[

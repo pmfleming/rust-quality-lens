@@ -24,6 +24,8 @@ pub(crate) enum MeasureTool {
     Leverage,
     Map,
     Coverage,
+    #[value(name = "function-risk")]
+    FunctionRisk,
     Practices,
 }
 
@@ -39,6 +41,7 @@ impl MeasureTool {
             Self::ApiHealth,
             Self::TypeHealth,
             Self::Coverage,
+            Self::FunctionRisk,
             Self::CorrectnessRun,
             Self::Locality,
             Self::Leverage,
@@ -87,6 +90,7 @@ impl MeasureTool {
             Self::Leverage => "leverage",
             Self::Map => "map",
             Self::Coverage => "coverage",
+            Self::FunctionRisk => "function-risk",
             Self::Practices => "practices",
         }
     }
@@ -106,6 +110,7 @@ impl MeasureTool {
             Self::Leverage => "leverage_metrics.json",
             Self::Map => "map.json",
             Self::Coverage => "coverage.json",
+            Self::FunctionRisk => "function_risk.json",
             Self::Practices => "rust_practices.json",
             Self::All => unreachable!("all has no direct output file"),
         }

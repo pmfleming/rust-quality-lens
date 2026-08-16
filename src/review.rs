@@ -13,6 +13,7 @@ use std::process::Command;
 
 const REVIEW_TOOLS: &[MeasureTool] = &[
     MeasureTool::Hotspots,
+    MeasureTool::FunctionRisk,
     MeasureTool::Clones,
     MeasureTool::EscapeHatches,
     MeasureTool::Reliability,
@@ -259,13 +260,20 @@ fn filter_payload(
                 .filter(|row| row_matches_changed_file(project_root, row, measured_files))
                 .collect(),
         ),
-        serde_json::Value::Object(mut object) if object.contains_key("violations") => {
-            if let Some(serde_json::Value::Array(rows)) = object.remove("violations") {
+        serde_json::Value::Object(mut object)
+            if object.contains_key("violations") || object.contains_key("functions") =>
+        {
+            let key = if object.contains_key("violations") {
+                "violations"
+            } else {
+                "functions"
+            };
+            if let Some(serde_json::Value::Array(rows)) = object.remove(key) {
                 let rows = rows
                     .into_iter()
                     .filter(|row| row_matches_changed_file(project_root, row, measured_files))
                     .collect::<Vec<_>>();
-                object.insert("violations".to_string(), serde_json::Value::Array(rows));
+                object.insert(key.to_string(), serde_json::Value::Array(rows));
             }
             serde_json::Value::Object(object)
         }

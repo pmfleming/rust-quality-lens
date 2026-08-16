@@ -11,6 +11,7 @@ mod clones;
 mod correctness;
 mod coverage;
 mod escape_hatches;
+mod function_risk;
 mod hotspots;
 mod map;
 mod practices;
@@ -39,6 +40,7 @@ pub(crate) fn produce_measurement(
         MeasureTool::Leverage => topology::leverage(context),
         MeasureTool::Map => map::produce(config, context),
         MeasureTool::Coverage => coverage::produce(config, context),
+        MeasureTool::FunctionRisk => function_risk::produce(config, context),
         MeasureTool::Practices => practices::produce(config),
         MeasureTool::All => unreachable!(),
     }

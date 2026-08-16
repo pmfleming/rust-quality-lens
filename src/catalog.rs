@@ -230,6 +230,18 @@ fn task_definitions() -> Vec<TaskDefinition> {
             expensive: true,
         },
         TaskDefinition {
+            tool: "function-risk",
+            id: "correctness.function_risk",
+            aliases: vec!["quality.crap"],
+            category: "correctness",
+            subcategory: "risk",
+            title: "Function Risk",
+            description: "Combines function cyclomatic complexity with fresh executable-line coverage using the CRAP formula.",
+            output_file: "function_risk.json",
+            depends_on: vec!["quality.hotspots", "correctness.coverage"],
+            expensive: false,
+        },
+        TaskDefinition {
             tool: "map",
             id: "map.architecture",
             aliases: vec![],
