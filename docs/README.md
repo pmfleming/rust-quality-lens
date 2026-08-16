@@ -22,6 +22,7 @@ When running from a source checkout, replace `rqlens` with `cargo run --bin rqle
 
 ## Risk model history
 
+- [Version 5 candidate](risk-model-v5-candidate.md) — deferred pending held-out validation of new evidence
 - [Version 4](risk-model-v4.md) — current model; compiler-assisted dependency identity
 - [Version 3](risk-model-v3.md) — historical; function hotspots and Cargo-qualified identities
 - [Version 2](risk-model-v2.md) — historical; corrected aggregate formula and coverage evidence

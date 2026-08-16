@@ -14,11 +14,12 @@ use crate::producers;
 use crate::tool::MeasureTool;
 use crate::util::{bundled_helper_manifest, round2, write_json};
 
-const CALIBRATION_TOOLS: [MeasureTool; 5] = [
+const CALIBRATION_TOOLS: [MeasureTool; 6] = [
     MeasureTool::Hotspots,
     MeasureTool::Correctness,
     MeasureTool::Locality,
     MeasureTool::Leverage,
+    MeasureTool::ModuleCohesion,
     MeasureTool::Map,
 ];
 
@@ -42,6 +43,8 @@ struct ProjectCalibration {
     function_scores: Vec<f64>,
     module_scores: Vec<f64>,
     total_scores: Vec<f64>,
+    cyclomatic_complexities: Vec<f64>,
+    cognitive_complexities: Vec<f64>,
     semantic: crate::semantic::IdentityResolutionSummary,
 }
 
@@ -51,6 +54,8 @@ struct CalibrationPool {
     function_scores: Vec<f64>,
     module_scores: Vec<f64>,
     total_scores: Vec<f64>,
+    cyclomatic_complexities: Vec<f64>,
+    cognitive_complexities: Vec<f64>,
     references: usize,
     resolved: usize,
     local: usize,
@@ -62,6 +67,10 @@ impl CalibrationPool {
         self.function_scores.extend(project.function_scores);
         self.module_scores.extend(project.module_scores);
         self.total_scores.extend(project.total_scores);
+        self.cyclomatic_complexities
+            .extend(project.cyclomatic_complexities);
+        self.cognitive_complexities
+            .extend(project.cognitive_complexities);
         self.references += project.semantic.reference_count;
         self.resolved += project.semantic.resolved_count;
         self.local += project.semantic.local_definition_count;
@@ -82,6 +91,8 @@ impl CalibrationPool {
                 "function_hotspot_score": distribution(&self.function_scores),
                 "module_hotspot_score": distribution(&self.module_scores),
                 "total_score": distribution(&self.total_scores),
+                "cyclomatic_complexity": distribution(&self.cyclomatic_complexities),
+                "cognitive_complexity": distribution(&self.cognitive_complexities),
             },
             "semantic_identity": {
                 "reference_count": self.references,
@@ -94,6 +105,16 @@ impl CalibrationPool {
                 "function_hotspot": thresholds(&self.function_scores),
                 "module_hotspot": thresholds(&self.module_scores),
                 "total_score": thresholds(&self.total_scores),
+            },
+            "risk_model_v5_candidate": {
+                "status": "deferred",
+                "reason": "New CRAP, architecture-rule, and cohesion evidence has not yet been validated against held-out reviewed outcomes.",
+                "required_before_activation": [
+                    "fresh function coverage across the calibration corpus",
+                    "project-specific architecture rules for each corpus project",
+                    "held-out reviewed outcome labels",
+                    "risk-ranking lift without degrading identity confidence"
+                ]
             },
             "limitations": [
                 "Percentile thresholds are empirical triage bands, not defect probabilities.",
@@ -116,16 +137,18 @@ fn calibrate_project(
     let payloads = calibration_payloads(&config, &context)?;
     let hotspots = &payloads["hotspots"];
     let map = &payloads["map"];
+    let cohesion = &payloads["module-cohesion"];
     let function_scores = scores_where(hotspots, "function", "score");
     let module_scores = scores_where(hotspots, "module", "score");
     let total_scores = map_scores(map, "total_score");
+    let cyclomatic_complexities = scores_where(hotspots, "function", "cyclomatic_complexity");
+    let cognitive_complexities = scores_where(hotspots, "function", "cognitive_complexity");
     let report = project_report(
         name,
         root,
         &config,
         &context,
-        hotspots,
-        map,
+        (hotspots, map, cohesion),
         (&function_scores, &module_scores, &total_scores),
     );
     Ok(ProjectCalibration {
@@ -133,6 +156,8 @@ fn calibrate_project(
         function_scores,
         module_scores,
         total_scores,
+        cyclomatic_complexities,
+        cognitive_complexities,
         semantic: context.identity_resolution.clone(),
     })
 }
@@ -188,10 +213,10 @@ fn project_report(
     root: PathBuf,
     config: &LensConfig,
     context: &RunContext,
-    hotspots: &Value,
-    map: &Value,
+    evidence: (&Value, &Value, &Value),
     scores: (&[f64], &[f64], &[f64]),
 ) -> Value {
+    let (hotspots, map, cohesion) = evidence;
     let (function_scores, module_scores, total_scores) = scores;
     let identity_backends =
         context
@@ -228,6 +253,7 @@ fn project_report(
         "semantic_identity": context.identity_resolution.to_json(),
         "unknown_module_count": unknown_modules,
         "unknown_module_percent": percent(unknown_modules, module_count),
+        "change_entropy": cohesion["summary"]["change_entropy"],
         "distributions": {
             "function_hotspot_score": distribution(function_scores),
             "module_hotspot_score": distribution(module_scores),

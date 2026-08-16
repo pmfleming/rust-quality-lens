@@ -30,6 +30,7 @@ All notable changes to this project will be documented here. The format follows 
 - Clone summaries with duplicated-line percentage and conservative declaration-only token filtering.
 - Module responsibility-focus and Git change-entropy evidence.
 - A versioned external evidence ingestion contract for focused tool adapters.
+- Calibration distributions for standard complexity and change entropy, plus an explicit deferred risk-model-v5 candidate decision.
 - Versioned cyclomatic and cognitive complexity facts on function hotspots, with module aggregates.
 - `tree-sitter-rust` recovery of function spans and raw complexity for files that fail full `syn` parsing, with text-only evidence retained as the final fallback.
 
