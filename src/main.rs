@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! Command-line interface for Rust quality measurement and verification.
 
 use anyhow::Result;

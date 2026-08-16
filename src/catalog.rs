@@ -146,6 +146,18 @@ fn task_definitions() -> Vec<TaskDefinition> {
             expensive: false,
         },
         TaskDefinition {
+            tool: "semantic-api",
+            id: "quality.semantic_api",
+            aliases: vec!["quality.public_api"],
+            category: "quality",
+            subcategory: "api",
+            title: "Reachable Public API",
+            description: "Optionally inventories compiler-derived reachable public API through cargo-public-api.",
+            output_file: "semantic_api.json",
+            depends_on: vec![],
+            expensive: true,
+        },
+        TaskDefinition {
             tool: "type-health",
             id: "quality.type_health",
             aliases: vec!["quality.type-health"],

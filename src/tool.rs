@@ -17,6 +17,8 @@ pub(crate) enum MeasureTool {
     ArchitectureRules,
     #[value(name = "api-health")]
     ApiHealth,
+    #[value(name = "semantic-api")]
+    SemanticApi,
     Correctness,
     #[value(name = "correctness-run")]
     CorrectnessRun,
@@ -39,6 +41,7 @@ impl MeasureTool {
             Self::ArchitectureRules,
             Self::TestQuality,
             Self::ApiHealth,
+            Self::SemanticApi,
             Self::TypeHealth,
             Self::Coverage,
             Self::FunctionRisk,
@@ -56,7 +59,7 @@ impl MeasureTool {
     }
 
     pub(crate) fn requires_source_facts(&self) -> bool {
-        !matches!(self, Self::All | Self::Practices)
+        !matches!(self, Self::All | Self::Practices | Self::SemanticApi)
     }
 
     pub(crate) fn requires_correctness_facts(&self) -> bool {
@@ -84,6 +87,7 @@ impl MeasureTool {
             Self::ArchitectureRules => "architecture-rules",
             Self::TestQuality => "test-quality",
             Self::ApiHealth => "api-health",
+            Self::SemanticApi => "semantic-api",
             Self::Correctness => "correctness",
             Self::CorrectnessRun => "correctness-run",
             Self::Locality => "locality",
@@ -105,6 +109,7 @@ impl MeasureTool {
             Self::ArchitectureRules => "architecture_rules.json",
             Self::TestQuality => "test_quality.json",
             Self::ApiHealth => "api_health.json",
+            Self::SemanticApi => "semantic_api.json",
             Self::Correctness | Self::CorrectnessRun => "correctness_review.json",
             Self::Locality => "locality_metrics.json",
             Self::Leverage => "leverage_metrics.json",

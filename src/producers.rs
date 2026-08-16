@@ -16,6 +16,7 @@ mod hotspots;
 mod map;
 mod practices;
 mod reliability;
+mod semantic_api;
 mod test_quality;
 mod topology;
 mod type_health;
@@ -34,6 +35,7 @@ pub(crate) fn produce_measurement(
         MeasureTool::ArchitectureRules => architecture_rules::produce(config, context),
         MeasureTool::TestQuality => test_quality::produce(config, context),
         MeasureTool::ApiHealth => api_health::produce(config, context),
+        MeasureTool::SemanticApi => semantic_api::produce(config),
         MeasureTool::Correctness => correctness::produce(config, context, false),
         MeasureTool::CorrectnessRun => correctness::produce(config, context, true),
         MeasureTool::Locality => topology::locality(context),

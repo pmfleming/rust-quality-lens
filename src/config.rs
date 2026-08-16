@@ -44,6 +44,7 @@ struct RawVerificationConfig {
     deny: Option<bool>,
     semver: Option<bool>,
     semver_baseline_rev: Option<String>,
+    public_api: Option<bool>,
     feature_matrix: Option<bool>,
     mutation: Option<bool>,
     flaky_test_runs: Option<usize>,
@@ -67,6 +68,7 @@ pub(crate) struct VerificationConfig {
     pub(crate) deny: bool,
     pub(crate) semver: bool,
     pub(crate) semver_baseline_rev: Option<String>,
+    pub(crate) public_api: bool,
     pub(crate) feature_matrix: bool,
     pub(crate) mutation: bool,
     pub(crate) flaky_test_runs: usize,
@@ -91,6 +93,7 @@ impl Default for VerificationConfig {
             deny: false,
             semver: false,
             semver_baseline_rev: None,
+            public_api: false,
             feature_matrix: false,
             mutation: false,
             flaky_test_runs: 1,
@@ -357,6 +360,7 @@ impl From<Option<RawVerificationConfig>> for VerificationConfig {
             deny: raw.deny.unwrap_or_default(),
             semver: raw.semver.unwrap_or_default(),
             semver_baseline_rev: raw.semver_baseline_rev,
+            public_api: raw.public_api.unwrap_or_default(),
             feature_matrix: raw.feature_matrix.unwrap_or_default(),
             mutation: raw.mutation.unwrap_or_default(),
             flaky_test_runs: raw.flaky_test_runs.unwrap_or(1).max(1),
@@ -636,6 +640,8 @@ locked = false
 audit = false
 deny = false
 semver = false
+# Optional compiler-derived reachable API inventory (cargo-public-api):
+public_api = false
 feature_matrix = false
 # Optional behavioral evidence (requires cargo-mutants):
 mutation = false
@@ -716,6 +722,7 @@ pub(crate) fn config_schema() -> Value {
                     "deny": {"type": "boolean", "default": false},
                     "semver": {"type": "boolean", "default": false},
                     "semver_baseline_rev": {"type": "string"},
+                    "public_api": {"type": "boolean", "default": false},
                     "feature_matrix": {"type": "boolean", "default": false},
                     "mutation": {"type": "boolean", "default": false},
                     "flaky_test_runs": {"type": "integer", "minimum": 1, "default": 1},
