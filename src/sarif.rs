@@ -198,6 +198,7 @@ mod tests {
             identity_timeout_seconds: 1,
             identity_offline: true,
             verification: Default::default(),
+            architecture: Default::default(),
             policy: Default::default(),
         };
         let output = write(&config, None)?;

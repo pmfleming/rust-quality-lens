@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+use crate::architecture;
 use crate::artifacts::MapEvidence;
 use crate::config::LensConfig;
 use crate::facts::{ModuleGraph, ModuleInfo, RunContext, module_graph};
@@ -15,6 +16,7 @@ use crate::util::normalize_slashes;
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let graph = module_graph(&context.source_facts);
     let evidence = MapEvidence::load(config, &graph);
+    let architecture_evaluation = architecture::evaluate(&config.architecture, &graph);
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut unknown_metric_counts = BTreeMap::new();
@@ -37,6 +39,11 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         "unknown_module_count": unknown_module_count,
         "unknown_metrics": unknown_metric_counts,
         "artifact_status": evidence.status_json(),
+        "architecture_rules": {
+            "configured": config.architecture.rules.len(),
+            "violations": architecture_evaluation.violations.len(),
+            "unresolved_references": architecture_evaluation.unresolved_references,
+        },
     });
     let mut measurement_confidence =
         evidence.measurement_confidence(&config.source_roots, &graph.facts);

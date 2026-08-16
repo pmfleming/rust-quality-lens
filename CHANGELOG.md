@@ -22,6 +22,7 @@ All notable changes to this project will be documented here. The format follows 
 - Owned, reasoned, expiring policy waivers with path scoping and SARIF suppression.
 - Stable per-rule finding limits with severity and path/package exclusions.
 - Executable changed-line coverage in changed-code review output.
+- Cargo-qualified configurable architecture rules with `*` and `**` module matching.
 - Versioned cyclomatic and cognitive complexity facts on function hotspots, with module aggregates.
 - `tree-sitter-rust` recovery of function spans and raw complexity for files that fail full `syn` parsing, with text-only evidence retained as the final fallback.
 

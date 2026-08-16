@@ -17,6 +17,7 @@ struct RawConfig {
     output_dir: Option<PathBuf>,
     rust: Option<RawRustConfig>,
     verification: Option<RawVerificationConfig>,
+    architecture: Option<ArchitectureConfig>,
     policy: Option<PolicyConfig>,
 }
 
@@ -147,6 +148,55 @@ impl VerificationConfig {
             }
         }
         arguments
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub(crate) struct ArchitectureConfig {
+    #[serde(default)]
+    pub(crate) rules: Vec<ArchitectureRule>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct ArchitectureRule {
+    pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) from: Vec<String>,
+    #[serde(default)]
+    pub(crate) allow: Vec<String>,
+    #[serde(default)]
+    pub(crate) deny: Vec<String>,
+    #[serde(default)]
+    pub(crate) level: PolicyRuleLevel,
+}
+
+impl ArchitectureConfig {
+    fn validate(&self) -> Result<()> {
+        let mut ids = BTreeSet::new();
+        for rule in &self.rules {
+            if rule.id.trim().is_empty() || rule.from.is_empty() {
+                bail!("architecture rules require a non-empty id and from patterns");
+            }
+            if rule.allow.is_empty() && rule.deny.is_empty() {
+                bail!(
+                    "architecture rule {} requires allow or deny patterns",
+                    rule.id
+                );
+            }
+            if !ids.insert(&rule.id) {
+                bail!("duplicate architecture rule ID {}", rule.id);
+            }
+            if rule
+                .from
+                .iter()
+                .chain(&rule.allow)
+                .chain(&rule.deny)
+                .any(|pattern| pattern.trim().is_empty())
+            {
+                bail!("architecture rule {} has an empty module pattern", rule.id);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -348,6 +398,7 @@ pub(crate) struct LensConfig {
     pub(crate) identity_timeout_seconds: u64,
     pub(crate) identity_offline: bool,
     pub(crate) verification: VerificationConfig,
+    pub(crate) architecture: ArchitectureConfig,
     pub(crate) policy: PolicyConfig,
 }
 
@@ -371,6 +422,7 @@ impl LensConfig {
                 output_dir: None,
                 rust: None,
                 verification: None,
+                architecture: None,
                 policy: None,
             },
         };
@@ -421,6 +473,8 @@ impl LensConfig {
             .max(1);
         let verification = VerificationConfig::from(raw.verification);
         validate_sanitizers(&verification.sanitizers)?;
+        let architecture = raw.architecture.unwrap_or_default();
+        architecture.validate()?;
         let policy = raw.policy.unwrap_or_default();
         policy.validate()?;
         let project_name = raw.project_name.unwrap_or_else(|| {
@@ -441,6 +495,7 @@ impl LensConfig {
             identity_timeout_seconds,
             identity_offline,
             verification,
+            architecture,
             policy,
         })
     }
@@ -592,6 +647,13 @@ fuzz_seconds = 30
 sanitizers = [] # address, leak, memory, or thread
 miri = false
 
+# Optional Cargo-qualified architecture constraints:
+# [[architecture.rules]]
+# id = "domain-does-not-use-infrastructure"
+# from = ["app::lib::domain::**"]
+# deny = ["app::lib::infrastructure::**"]
+# level = "error"
+
 # Stable rule limits prevent new findings while allowing an explicit baseline:
 # [policy.rules."rust.reliability.expect"]
 # level = "error"
@@ -661,6 +723,29 @@ pub(crate) fn config_schema() -> Value {
                     "fuzz_seconds": {"type": "integer", "minimum": 1, "default": 30},
                     "sanitizers": {"type": "array", "items": {"type": "string", "enum": ["address", "leak", "memory", "thread"]}, "default": []},
                     "miri": {"type": "boolean", "default": false}
+                }
+            },
+            "architecture": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "rules": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["id", "from"],
+                            "properties": {
+                                "id": {"type": "string", "minLength": 1},
+                                "from": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+                                "allow": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": []},
+                                "deny": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": []},
+                                "level": {"type": "string", "enum": ["off", "advisory", "warning", "error"], "default": "error"}
+                            },
+                            "anyOf": [{"required": ["allow"]}, {"required": ["deny"]}]
+                        },
+                        "default": []
+                    }
                 }
             },
             "policy": {

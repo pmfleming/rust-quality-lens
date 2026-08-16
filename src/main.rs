@@ -5,6 +5,7 @@ use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
 
+mod architecture;
 mod artifacts;
 mod calibration;
 mod catalog;
