@@ -180,7 +180,7 @@ fn merge_clone_instances(existing: &mut [CloneInstance], incoming: Vec<CloneInst
 }
 
 fn token_clone_row(key: &str, instances: Vec<CloneInstance>, confidence: &Value) -> Option<Value> {
-    if instances.len() < 2 {
+    if instances.len() < 2 || instances.iter().all(declaration_only_instance) {
         return None;
     }
     let file_count = instances
@@ -218,6 +218,22 @@ fn token_clone_row(key: &str, instances: Vec<CloneInstance>, confidence: &Value)
         })).collect::<Vec<_>>(),
         "measurement_confidence": confidence,
     }))
+}
+
+fn declaration_only_instance(instance: &CloneInstance) -> bool {
+    instance
+        .snippet
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .all(|line| {
+            line == "}"
+                || line == "{"
+                || line.starts_with("#[")
+                || line.starts_with("pub(crate) struct ")
+                || line.starts_with("pub struct ")
+                || (line.ends_with(',') && line.contains(':') && !line.contains('('))
+        })
 }
 
 fn ast_clone_rows(config: &LensConfig, facts: &[AstCloneFact], confidence: Value) -> Vec<Value> {
@@ -554,4 +570,27 @@ fn non_overlapping_clone_instances(mut instances: Vec<CloneInstance>) -> Vec<Clo
         retained.push(instance);
     }
     retained
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CloneInstance, declaration_only_instance};
+
+    #[test]
+    fn declaration_only_windows_are_not_reported_as_code_clones() {
+        let declaration = CloneInstance {
+            file_path: "src/lib.rs".to_string(),
+            start_line: 1,
+            end_line: 5,
+            snippet: "pub struct Demo {\nname: String,\ncount: usize,\n}".to_string(),
+        };
+        let executable = CloneInstance {
+            file_path: "src/lib.rs".to_string(),
+            start_line: 1,
+            end_line: 5,
+            snippet: "fn run() {\nservice.call();\n}".to_string(),
+        };
+        assert!(declaration_only_instance(&declaration));
+        assert!(!declaration_only_instance(&executable));
+    }
 }

@@ -27,6 +27,7 @@ All notable changes to this project will be documented here. The format follows 
 - Function-level CRAP evidence from cyclomatic complexity and fresh executable-line coverage.
 - Optional compiler-derived reachable API inventory through cargo-public-api.
 - Optional cargo-geiger unsafe inventory and configurable unused-dependency verification.
+- Clone summaries with duplicated-line percentage and conservative declaration-only token filtering.
 - Versioned cyclomatic and cognitive complexity facts on function hotspots, with module aggregates.
 - `tree-sitter-rust` recovery of function spans and raw complexity for files that fail full `syn` parsing, with text-only evidence retained as the final fallback.
 

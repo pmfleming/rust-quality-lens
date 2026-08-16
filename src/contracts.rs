@@ -49,7 +49,7 @@ pub(crate) fn artifact_document(
         "risk_model_id": MODEL_ID,
         "risk_model_version": MODEL_VERSION,
         "measurement_confidence": confidence,
-        "summary": artifact_summary(&payload),
+        "summary": artifact_summary(tool, context, &payload),
     });
     if let Some(object) = document.as_object_mut() {
         object.insert(
@@ -65,8 +65,11 @@ pub(crate) fn artifact_document(
     document
 }
 
-fn artifact_summary(payload: &Value) -> Value {
+fn artifact_summary(tool: &MeasureTool, context: &RunContext, payload: &Value) -> Value {
     if let Some(records) = payload.as_array() {
+        if matches!(tool, MeasureTool::Clones) {
+            return clone_summary(records, context);
+        }
         json!({"record_count": records.len()})
     } else {
         payload
@@ -75,6 +78,44 @@ fn artifact_summary(payload: &Value) -> Value {
             .cloned()
             .unwrap_or_else(|| json!({}))
     }
+}
+
+fn clone_summary(records: &[Value], context: &RunContext) -> Value {
+    let mut duplicate_lines = std::collections::BTreeSet::new();
+    for instance in records
+        .iter()
+        .filter(|record| record["engine"] == "token")
+        .flat_map(|record| record["instances"].as_array().into_iter().flatten())
+    {
+        let (Some(path), Some(start), Some(end)) = (
+            instance["file_path"].as_str(),
+            instance["start_line"].as_u64(),
+            instance["end_line"].as_u64(),
+        ) else {
+            continue;
+        };
+        for line in start..=end {
+            duplicate_lines.insert((path.to_string(), line));
+        }
+    }
+    let source_lines = context
+        .source_facts
+        .iter()
+        .map(|fact| fact.source.source_nonblank_line_count)
+        .sum::<usize>();
+    let duplication_percent = if source_lines == 0 {
+        0.0
+    } else {
+        crate::util::round2(duplicate_lines.len() as f64 / source_lines as f64 * 100.0)
+    };
+    json!({
+        "record_count": records.len(),
+        "token_record_count": records.iter().filter(|record| record["engine"] == "token").count(),
+        "ast_record_count": records.iter().filter(|record| record["engine"] == "ast").count(),
+        "duplicated_line_count": duplicate_lines.len(),
+        "source_nonblank_line_count": source_lines,
+        "duplication_percent": duplication_percent,
+    })
 }
 
 #[derive(Debug, Serialize)]
