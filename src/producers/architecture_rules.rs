@@ -10,7 +10,8 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
     let graph = module_graph(&context.source_facts);
     let evaluation = architecture::evaluate(&config.architecture, &graph);
     let mut confidence = source_confidence(&config.source_roots, &context.source_facts);
-    if evaluation.unresolved_references > 0
+    if !config.architecture.rules.is_empty()
+        && evaluation.unresolved_references > 0
         && let Some(object) = confidence.as_object_mut()
     {
         object.insert("complete".to_string(), Value::Bool(false));

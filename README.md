@@ -27,6 +27,10 @@ explicitly and never treated as passing.
 - verified Rust gates for rustfmt, compilation, Clippy, tests, doctests, and rustdoc
 - safety-contract findings and explicit panic paths such as undocumented unsafe, `unwrap`, `expect`, and `panic!`
 - project maturity evidence for MSRV, licensing, contribution, security, and release documentation
+- configured Cargo-qualified architecture boundary enforcement
+- test assertion, system-under-test call, and ignored-test evidence
+- function-level CRAP evidence from complexity and fresh coverage
+- optional reachable public API, unsafe dependency, and unused-dependency checks
 - function- and module-level complexity hotspots with score explanations
 - token, AST, module-responsibility, and test-body duplication groups
 - Rust escape hatches such as unsafe, FFI, raw memory, globals, and lint suppressions
@@ -169,6 +173,11 @@ cargo run --bin rqlens -- measure hotspots --config rqlens.toml
 cargo run --bin rqlens -- measure escape-hatches --config rqlens.toml
 cargo run --bin rqlens -- measure reliability --config rqlens.toml
 cargo run --bin rqlens -- measure api-health --config rqlens.toml
+cargo run --bin rqlens -- measure semantic-api --config rqlens.toml
+cargo run --bin rqlens -- measure architecture-rules --config rqlens.toml
+cargo run --bin rqlens -- measure test-quality --config rqlens.toml
+cargo run --bin rqlens -- measure function-risk --config rqlens.toml
+cargo run --bin rqlens -- measure module-cohesion --config rqlens.toml
 cargo run --bin rqlens -- measure clones --config rqlens.toml
 cargo run --bin rqlens -- measure type-health --config rqlens.toml
 cargo run --bin rqlens -- measure correctness --config rqlens.toml

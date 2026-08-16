@@ -464,6 +464,7 @@ impl<'ast> Visit<'ast> for TestBodyQuality {
         let name = path_to_string(&item.path);
         if name.contains("assert") || name.contains("snapshot") {
             self.assertion_count += 1;
+            self.sut_call_count += usize::from(item.tokens.to_string().contains('('));
         } else {
             self.sut_call_count += 1;
         }
@@ -1817,14 +1818,15 @@ fn direct_test() { panic!("expected test panic"); }
 fn checks_value() {
     let value = crate::calculate();
     assert_eq!(value, 42);
+    assert!(crate::is_valid());
 }
 "#,
         );
         let Some(test) = facts.tests.first() else {
             panic!("test fact should exist");
         };
-        assert_eq!(test.assertion_count, 1);
-        assert_eq!(test.sut_call_count, 1);
+        assert_eq!(test.assertion_count, 2);
+        assert_eq!(test.sut_call_count, 2);
         assert!(test.ignored);
     }
 

@@ -40,7 +40,7 @@ pub(crate) fn evaluate(config: &ArchitectureConfig, graph: &ModuleGraph) -> Arch
             .facts
             .iter()
             .flat_map(|fact| &fact.graph.resolved_dependencies)
-            .filter(|dependency| dependency.status != "resolved")
+            .filter(|dependency| !dependency.status.starts_with("resolved_"))
             .count(),
     }
 }
@@ -58,32 +58,32 @@ fn evaluate_rule(
         {
             continue;
         }
-        for target in targets {
-            let denied = rule
-                .deny
-                .iter()
-                .any(|pattern| module_matches(pattern, target));
-            let outside_allowlist = !rule.allow.is_empty()
-                && !rule
-                    .allow
-                    .iter()
-                    .any(|pattern| module_matches(pattern, target));
-            if denied || outside_allowlist {
-                let reason = if denied {
-                    "matches a denied dependency pattern"
-                } else {
-                    "is outside the allowed dependency patterns"
-                };
-                violations.push(ArchitectureViolation {
-                    rule_id: rule.id.clone(),
-                    level: rule.level,
-                    source_module_id: source.clone(),
-                    target_module_id: target.clone(),
-                    message: format!("{source} depends on {target}, which {reason}"),
-                });
-            }
-        }
+        violations.extend(targets.iter().filter_map(|target| {
+            let reason = violation_reason(rule, target)?;
+            Some(ArchitectureViolation {
+                rule_id: rule.id.clone(),
+                level: rule.level,
+                source_module_id: source.clone(),
+                target_module_id: target.clone(),
+                message: format!("{source} depends on {target}, which {reason}"),
+            })
+        }));
     }
+}
+
+fn violation_reason(rule: &ArchitectureRule, target: &str) -> Option<&'static str> {
+    if rule
+        .deny
+        .iter()
+        .any(|pattern| module_matches(pattern, target))
+    {
+        return Some("matches a denied dependency pattern");
+    }
+    let allowed = rule
+        .allow
+        .iter()
+        .any(|pattern| module_matches(pattern, target));
+    (!rule.allow.is_empty() && !allowed).then_some("is outside the allowed dependency patterns")
 }
 
 pub(crate) fn module_matches(pattern: &str, module_id: &str) -> bool {

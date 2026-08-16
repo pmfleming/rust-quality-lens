@@ -16,6 +16,7 @@ require() {
 max_hotspot=$(metric max_function_hotspot_score)
 max_ast_clones=$(metric max_ast_clone_records)
 max_clones=$(metric max_token_clone_records)
+max_duplication=$(metric max_duplication_percent)
 min_locality=$(metric min_map_locality_score)
 min_leverage=$(metric min_map_leverage_score)
 
@@ -30,6 +31,9 @@ require "$analysis/clones.json" \
 require "$analysis/clones.json" \
   "[.records[] | select(.engine == \"token\")] | length <= $max_clones" \
   "token clone count exceeds $max_clones"
+require "$analysis/clones.json" \
+  ".summary.duplication_percent <= $max_duplication" \
+  "duplicated-line percentage exceeds $max_duplication"
 require "$analysis/locality_metrics.json" \
   "[.records[] | select(.module_key == \"producers::map\") | .locality_score][0] >= $min_locality" \
   "map locality fell below $min_locality"

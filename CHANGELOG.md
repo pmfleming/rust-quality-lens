@@ -47,7 +47,7 @@ All notable changes to this project will be documented here. The format follows 
 - CLI argument definitions and measurement-tool metadata now live in focused modules, keeping the binary entrypoint thin.
 - Coverage collection and baseline-regression analysis are split into smaller, testable stages.
 - The self-metric maximum function-hotspot baseline is tightened from `100` to `95`.
-- Syntax complexity visitors share common traversal logic, and run-context input requirements are centralized in measurement-tool metadata. The token-clone ceiling is rebased from `205` to `214` for the added fallback implementation while the AST-clone ceiling remains zero.
+- Syntax complexity visitors share common traversal logic, and run-context input requirements are centralized in measurement-tool metadata. The token-clone ceiling is rebased from `205` to `244` for the fallback and new evidence producers, a duplicated-line percentage ceiling is added, and the AST-clone ceiling remains zero.
 
 ### Fixed
 

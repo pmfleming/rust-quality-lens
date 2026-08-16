@@ -73,7 +73,10 @@ mod tests {
     #[test]
     fn public_api_text_is_normalized_into_signatures() {
         let items = parse_items("Public API of demo\npub struct Demo\npub fn run()\n");
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0]["signature"], "pub struct Demo");
+        let signatures = items
+            .iter()
+            .filter_map(|item| item["signature"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(signatures, ["pub struct Demo", "pub fn run()"]);
     }
 }

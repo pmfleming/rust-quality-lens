@@ -11,8 +11,20 @@ pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<Path
     let mut rules = BTreeMap::<String, Value>::new();
     let mut results = Vec::new();
     add_reliability_results(config, &mut rules, &mut results)?;
-    add_architecture_results(config, &mut rules, &mut results)?;
-    add_test_quality_results(config, &mut rules, &mut results)?;
+    add_finding_document(
+        config,
+        "architecture_rules.json",
+        "violations",
+        &mut rules,
+        &mut results,
+    )?;
+    add_finding_document(
+        config,
+        "test_quality.json",
+        "findings",
+        &mut rules,
+        &mut results,
+    )?;
     add_practice_results(config, &mut rules, &mut results)?;
     let document = json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -50,37 +62,19 @@ fn add_reliability_results(
     Ok(())
 }
 
-fn add_architecture_results(
+fn add_finding_document(
     config: &LensConfig,
+    file_name: &str,
+    payload_key: &str,
     rules: &mut BTreeMap<String, Value>,
     results: &mut Vec<Value>,
 ) -> Result<()> {
-    let Some(document) = read_optional(config.output_dir.join("architecture_rules.json"))? else {
+    let Some(document) = read_optional(config.output_dir.join(file_name))? else {
         return Ok(());
     };
     add_source_findings(
         config,
-        payload(&document)["violations"]
-            .as_array()
-            .into_iter()
-            .flatten(),
-        rules,
-        results,
-    );
-    Ok(())
-}
-
-fn add_test_quality_results(
-    config: &LensConfig,
-    rules: &mut BTreeMap<String, Value>,
-    results: &mut Vec<Value>,
-) -> Result<()> {
-    let Some(document) = read_optional(config.output_dir.join("test_quality.json"))? else {
-        return Ok(());
-    };
-    add_source_findings(
-        config,
-        payload(&document)["findings"]
+        payload(&document)[payload_key]
             .as_array()
             .into_iter()
             .flatten(),
