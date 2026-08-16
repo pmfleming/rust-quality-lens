@@ -42,6 +42,9 @@ struct RawVerificationConfig {
     exclude: Option<Vec<String>>,
     audit: Option<bool>,
     deny: Option<bool>,
+    geiger: Option<bool>,
+    unused_dependencies: Option<bool>,
+    unused_dependency_backend: Option<String>,
     semver: Option<bool>,
     semver_baseline_rev: Option<String>,
     public_api: Option<bool>,
@@ -66,6 +69,9 @@ pub(crate) struct VerificationConfig {
     pub(crate) exclude: Vec<String>,
     pub(crate) audit: bool,
     pub(crate) deny: bool,
+    pub(crate) geiger: bool,
+    pub(crate) unused_dependencies: bool,
+    pub(crate) unused_dependency_backend: String,
     pub(crate) semver: bool,
     pub(crate) semver_baseline_rev: Option<String>,
     pub(crate) public_api: bool,
@@ -91,6 +97,9 @@ impl Default for VerificationConfig {
             exclude: Vec::new(),
             audit: false,
             deny: false,
+            geiger: false,
+            unused_dependencies: false,
+            unused_dependency_backend: "cargo-shear".to_string(),
             semver: false,
             semver_baseline_rev: None,
             public_api: false,
@@ -358,6 +367,11 @@ impl From<Option<RawVerificationConfig>> for VerificationConfig {
             exclude: raw.exclude.unwrap_or_default(),
             audit: raw.audit.unwrap_or_default(),
             deny: raw.deny.unwrap_or_default(),
+            geiger: raw.geiger.unwrap_or_default(),
+            unused_dependencies: raw.unused_dependencies.unwrap_or_default(),
+            unused_dependency_backend: raw
+                .unused_dependency_backend
+                .unwrap_or_else(|| "cargo-shear".to_string()),
             semver: raw.semver.unwrap_or_default(),
             semver_baseline_rev: raw.semver_baseline_rev,
             public_api: raw.public_api.unwrap_or_default(),
@@ -369,6 +383,16 @@ impl From<Option<RawVerificationConfig>> for VerificationConfig {
             sanitizers: raw.sanitizers.unwrap_or_default(),
             miri: raw.miri.unwrap_or_default(),
         }
+    }
+}
+
+fn validate_unused_dependency_backend(backend: &str) -> Result<()> {
+    if matches!(backend, "cargo-shear" | "cargo-udeps" | "cargo-machete") {
+        Ok(())
+    } else {
+        bail!(
+            "unsupported unused dependency backend {backend}; expected cargo-shear, cargo-udeps, or cargo-machete"
+        )
     }
 }
 
@@ -477,6 +501,7 @@ impl LensConfig {
             .max(1);
         let verification = VerificationConfig::from(raw.verification);
         validate_sanitizers(&verification.sanitizers)?;
+        validate_unused_dependency_backend(&verification.unused_dependency_backend)?;
         let architecture = raw.architecture.unwrap_or_default();
         architecture.validate()?;
         let policy = raw.policy.unwrap_or_default();
@@ -639,6 +664,9 @@ all_features = false
 locked = false
 audit = false
 deny = false
+geiger = false
+unused_dependencies = false
+unused_dependency_backend = "cargo-shear"
 semver = false
 # Optional compiler-derived reachable API inventory (cargo-public-api):
 public_api = false
@@ -720,6 +748,9 @@ pub(crate) fn config_schema() -> Value {
                     "exclude": {"type": "array", "items": {"type": "string"}, "default": []},
                     "audit": {"type": "boolean", "default": false},
                     "deny": {"type": "boolean", "default": false},
+                    "geiger": {"type": "boolean", "default": false},
+                    "unused_dependencies": {"type": "boolean", "default": false},
+                    "unused_dependency_backend": {"type": "string", "enum": ["cargo-shear", "cargo-udeps", "cargo-machete"], "default": "cargo-shear"},
                     "semver": {"type": "boolean", "default": false},
                     "semver_baseline_rev": {"type": "string"},
                     "public_api": {"type": "boolean", "default": false},

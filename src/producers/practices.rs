@@ -14,6 +14,8 @@ pub(super) fn produce(config: &LensConfig) -> Result<Value> {
     checks.extend([
         audit_check(config),
         deny_check(config),
+        geiger_check(config),
+        unused_dependencies_check(config),
         semver_check(config),
         feature_matrix_check(config),
         mutation_check(config),
@@ -158,6 +160,50 @@ fn deny_check(config: &LensConfig) -> Value {
             "https://embarkstudios.github.io/cargo-deny/",
         )
     }
+}
+
+fn geiger_check(config: &LensConfig) -> Value {
+    if config.verification.geiger {
+        cargo_check(
+            config,
+            "rust.supply-chain.unsafe-inventory",
+            "Unsafe usage inventory completes for the dependency graph",
+            vec!["geiger".to_string()],
+            "https://github.com/geiger-rs/cargo-geiger",
+            BTreeMap::new(),
+        )
+    } else {
+        skipped_check(
+            "rust.supply-chain.unsafe-inventory",
+            "Dependency unsafe usage inventory",
+            "enable verification.geiger to require cargo-geiger",
+            "https://github.com/geiger-rs/cargo-geiger",
+        )
+    }
+}
+
+fn unused_dependencies_check(config: &LensConfig) -> Value {
+    if !config.verification.unused_dependencies {
+        return skipped_check(
+            "rust.dependencies.unused",
+            "No unused direct dependencies",
+            "enable verification.unused_dependencies to require the configured backend",
+            "https://github.com/Cargo-Cult/cargo-shear",
+        );
+    }
+    let subcommand = config
+        .verification
+        .unused_dependency_backend
+        .strip_prefix("cargo-")
+        .unwrap_or(&config.verification.unused_dependency_backend);
+    cargo_check(
+        config,
+        "rust.dependencies.unused",
+        "Configured unused-dependency check passes",
+        vec![subcommand.to_string()],
+        "https://github.com/Cargo-Cult/cargo-shear",
+        BTreeMap::new(),
+    )
 }
 
 fn semver_check(config: &LensConfig) -> Value {
