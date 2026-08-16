@@ -206,6 +206,18 @@ fn task_definitions() -> Vec<TaskDefinition> {
             expensive: false,
         },
         TaskDefinition {
+            tool: "module-cohesion",
+            id: "quality.module_cohesion",
+            aliases: vec!["quality.change_entropy"],
+            category: "quality",
+            subcategory: "architecture",
+            title: "Module Cohesion and Change Entropy",
+            description: "Reports responsibility spread, dependency pressure, and Git change entropy without treating them as defect predictions.",
+            output_file: "module_cohesion.json",
+            depends_on: vec![],
+            expensive: false,
+        },
+        TaskDefinition {
             tool: "correctness",
             id: "correctness.catalog",
             aliases: vec![],

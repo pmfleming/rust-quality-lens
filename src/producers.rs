@@ -8,6 +8,7 @@ use crate::tool::MeasureTool;
 mod api_health;
 mod architecture_rules;
 mod clones;
+mod cohesion;
 mod correctness;
 mod coverage;
 mod escape_hatches;
@@ -40,6 +41,7 @@ pub(crate) fn produce_measurement(
         MeasureTool::CorrectnessRun => correctness::produce(config, context, true),
         MeasureTool::Locality => topology::locality(context),
         MeasureTool::Leverage => topology::leverage(context),
+        MeasureTool::ModuleCohesion => cohesion::produce(config, context),
         MeasureTool::Map => map::produce(config, context),
         MeasureTool::Coverage => coverage::produce(config, context),
         MeasureTool::FunctionRisk => function_risk::produce(config, context),

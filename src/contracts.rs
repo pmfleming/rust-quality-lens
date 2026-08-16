@@ -31,6 +31,7 @@ pub(crate) fn artifact_document(
         MeasureTool::ArchitectureRules
             | MeasureTool::Locality
             | MeasureTool::Leverage
+            | MeasureTool::ModuleCohesion
             | MeasureTool::Map
     ) && let Some(object) = confidence.as_object_mut()
     {
@@ -390,6 +391,15 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "is_entrypoint": {"type": "boolean"},
                 "leverage_score": {"type": "number"},
                 "pressure_score": {"type": "number"},
+            }),
+        ),
+        MeasureTool::ModuleCohesion => object_schema(
+            "module_cohesion.json",
+            &["summary", "records", "measurement_confidence"],
+            json!({
+                "summary": {"type": "object"},
+                "records": {"type": "array", "items": {"type": "object"}},
+                "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
         MeasureTool::Map => object_schema(

@@ -24,6 +24,8 @@ pub(crate) enum MeasureTool {
     CorrectnessRun,
     Locality,
     Leverage,
+    #[value(name = "module-cohesion")]
+    ModuleCohesion,
     Map,
     Coverage,
     #[value(name = "function-risk")]
@@ -48,6 +50,7 @@ impl MeasureTool {
             Self::CorrectnessRun,
             Self::Locality,
             Self::Leverage,
+            Self::ModuleCohesion,
             Self::Map,
         ]
     }
@@ -72,7 +75,11 @@ impl MeasureTool {
     pub(crate) fn requires_semantic_identity(&self) -> bool {
         matches!(
             self,
-            Self::ArchitectureRules | Self::Locality | Self::Leverage | Self::Map
+            Self::ArchitectureRules
+                | Self::Locality
+                | Self::Leverage
+                | Self::ModuleCohesion
+                | Self::Map
         )
     }
 
@@ -92,6 +99,7 @@ impl MeasureTool {
             Self::CorrectnessRun => "correctness-run",
             Self::Locality => "locality",
             Self::Leverage => "leverage",
+            Self::ModuleCohesion => "module-cohesion",
             Self::Map => "map",
             Self::Coverage => "coverage",
             Self::FunctionRisk => "function-risk",
@@ -113,6 +121,7 @@ impl MeasureTool {
             Self::Correctness | Self::CorrectnessRun => "correctness_review.json",
             Self::Locality => "locality_metrics.json",
             Self::Leverage => "leverage_metrics.json",
+            Self::ModuleCohesion => "module_cohesion.json",
             Self::Map => "map.json",
             Self::Coverage => "coverage.json",
             Self::FunctionRisk => "function_risk.json",
