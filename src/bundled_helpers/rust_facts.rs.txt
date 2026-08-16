@@ -26,6 +26,8 @@ struct FileFacts {
     entrypoint_kind: Option<String>,
     is_entrypoint: bool,
     parse_status: String,
+    syntax_backend: String,
+    syntax_error_count: usize,
     source_metrics_available: bool,
     dependencies: Vec<String>,
     dependency_references: Vec<DependencyReferenceFact>,
@@ -233,6 +235,8 @@ impl FactVisitor {
             target_kind,
             entrypoint_kind,
             is_entrypoint,
+            syntax_backend: if parse_status == "ok" { "syn" } else { "text" }.to_string(),
+            syntax_error_count: 0,
             parse_status,
             source_metrics_available: true,
             dependencies: self.dependencies,
@@ -1048,10 +1052,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         let file = match syn::parse_file(&content) {
             Ok(file) => file,
             Err(error) => {
-                results.push(
-                    FactVisitor::new(path, &content)
-                        .into_facts_with_status(format!("parse_error: {error}")),
-                );
+                results.push(tree_sitter_fallback(path, &content, &error.to_string()));
                 continue;
             }
         };
@@ -1064,6 +1065,245 @@ fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn tree_sitter_fallback(path: &str, content: &str, syn_error: &str) -> FileFacts {
+    let mut facts =
+        FactVisitor::new(path, content).into_facts_with_status(format!("parse_error: {syn_error}"));
+    let mut parser = tree_sitter::Parser::new();
+    let language = tree_sitter_rust::LANGUAGE.into();
+    if let Err(error) = parser.set_language(&language) {
+        facts
+            .unsupported_patterns
+            .push(format!("tree-sitter-rust initialization failed: {error}"));
+        return facts;
+    }
+    let Some(tree) = parser.parse(content, None) else {
+        facts
+            .unsupported_patterns
+            .push("tree-sitter-rust did not return a syntax tree".to_string());
+        return facts;
+    };
+
+    let root = tree.root_node();
+    facts.syntax_backend = "tree-sitter-rust".to_string();
+    facts.syntax_error_count = tree_sitter_error_count(root);
+    facts.functions = tree_sitter_functions(root, content, path);
+    facts.function_count = facts.functions.len();
+    facts.parse_status = format!(
+        "parse_error: {syn_error}; tree_sitter_recovered=true; tree_sitter_error_nodes={}",
+        facts.syntax_error_count
+    );
+    facts
+}
+
+fn tree_sitter_error_count(node: tree_sitter::Node<'_>) -> usize {
+    let mut count = usize::from(node.is_error() || node.is_missing());
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        count += tree_sitter_error_count(child);
+    }
+    count
+}
+
+fn tree_sitter_functions(
+    node: tree_sitter::Node<'_>,
+    source: &str,
+    path: &str,
+) -> Vec<FunctionFact> {
+    let mut functions = Vec::new();
+    collect_tree_sitter_functions(node, source.as_bytes(), path, &mut functions);
+    functions
+}
+
+fn collect_tree_sitter_functions(
+    node: tree_sitter::Node<'_>,
+    source: &[u8],
+    path: &str,
+    functions: &mut Vec<FunctionFact>,
+) {
+    if node.kind() == "function_item"
+        && let (Some(name_node), Some(body)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("body"),
+        )
+        && let Ok(name) = name_node.utf8_text(source)
+    {
+        let (module_key, owner) = tree_sitter_function_context(node, source, path);
+        let qualified_name = owner.map_or_else(
+            || format!("{module_key}::{name}"),
+            |owner| format!("{module_key}::{owner}::{name}"),
+        );
+        let mut complexity = TreeSitterComplexity {
+            cyclomatic_complexity: 1,
+            ..TreeSitterComplexity::default()
+        };
+        tree_sitter_complexity(body, 0, &mut complexity);
+        let start_line = node.start_position().row + 1;
+        let end_line = body.end_position().row + 1;
+        functions.push(FunctionFact {
+            name: name.to_string(),
+            qualified_name,
+            module_key,
+            path: normalize_path(path),
+            start_line,
+            end_line,
+            source_line_count: end_line.saturating_sub(start_line) + 1,
+            branch_pressure: 0,
+            path_pressure: 0,
+            max_nesting_depth: 0,
+            cyclomatic_complexity: complexity.cyclomatic_complexity,
+            cognitive_complexity: complexity.cognitive_complexity,
+        });
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_tree_sitter_functions(child, source, path, functions);
+    }
+}
+
+fn tree_sitter_function_context(
+    node: tree_sitter::Node<'_>,
+    source: &[u8],
+    path: &str,
+) -> (String, Option<String>) {
+    let base = module_key_for_path(path);
+    let mut modules = Vec::new();
+    let mut owner = None;
+    let mut ancestor = node.parent();
+    while let Some(parent) = ancestor {
+        if parent.kind() == "mod_item"
+            && let Some(name) = parent.child_by_field_name("name")
+            && let Ok(name) = name.utf8_text(source)
+        {
+            modules.push(name.to_string());
+        }
+        if owner.is_none()
+            && parent.kind() == "impl_item"
+            && let Some(ty) = parent.child_by_field_name("type")
+            && let Ok(ty) = ty.utf8_text(source)
+        {
+            owner = Some(ty.split_whitespace().collect::<Vec<_>>().join(" "));
+        }
+        ancestor = parent.parent();
+    }
+    modules.reverse();
+    let module_key = if modules.is_empty() {
+        base
+    } else {
+        let prefix = if matches!(base.as_str(), "lib" | "main") {
+            Vec::new()
+        } else {
+            vec![base]
+        };
+        prefix
+            .into_iter()
+            .chain(modules)
+            .collect::<Vec<_>>()
+            .join("::")
+    };
+    (module_key, owner)
+}
+
+#[derive(Default)]
+struct TreeSitterComplexity {
+    cyclomatic_complexity: usize,
+    cognitive_complexity: usize,
+}
+
+fn tree_sitter_complexity(
+    node: tree_sitter::Node<'_>,
+    nesting: usize,
+    metrics: &mut TreeSitterComplexity,
+) {
+    let mut child_nesting = nesting;
+    match node.kind() {
+        "if_expression" => {
+            metrics.cyclomatic_complexity += 1;
+            if node
+                .parent()
+                .is_none_or(|parent| parent.kind() != "else_clause")
+            {
+                metrics.cognitive_complexity += 1 + nesting;
+                child_nesting += 1;
+            }
+        }
+        "for_expression" | "while_expression" | "loop_expression" | "match_expression" => {
+            if node.kind() != "match_expression" {
+                metrics.cyclomatic_complexity += 1;
+            }
+            metrics.cognitive_complexity += 1 + nesting;
+            child_nesting += 1;
+        }
+        "match_arm" => metrics.cyclomatic_complexity += 1,
+        "try_expression" => metrics.cyclomatic_complexity += 1,
+        "else_clause" => metrics.cognitive_complexity += 1,
+        "closure_expression" => child_nesting += 1,
+        "binary_expression" if tree_sitter_logical_operator(node).is_some() => {
+            metrics.cyclomatic_complexity += 1;
+            let parent_is_logical = node
+                .parent()
+                .is_some_and(|parent| tree_sitter_logical_operator(parent).is_some());
+            if !parent_is_logical {
+                metrics.cognitive_complexity += tree_sitter_logical_sequence(node);
+            }
+        }
+        "break_expression" | "continue_expression" => {
+            let mut cursor = node.walk();
+            if node
+                .named_children(&mut cursor)
+                .any(|child| child.kind() == "label")
+            {
+                metrics.cognitive_complexity += 1;
+            }
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        tree_sitter_complexity(child, child_nesting, metrics);
+    }
+}
+
+fn tree_sitter_logical_operator(node: tree_sitter::Node<'_>) -> Option<&'static str> {
+    if node.kind() != "binary_expression" {
+        return None;
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .find_map(|child| match child.kind() {
+            "&&" => Some("&&"),
+            "||" => Some("||"),
+            _ => None,
+        })
+}
+
+fn tree_sitter_logical_sequence(node: tree_sitter::Node<'_>) -> usize {
+    fn collect(node: tree_sitter::Node<'_>, operators: &mut Vec<&'static str>) {
+        if let Some(operator) = tree_sitter_logical_operator(node) {
+            let mut cursor = node.walk();
+            let children = node.named_children(&mut cursor).collect::<Vec<_>>();
+            if let Some(left) = children.first() {
+                collect(*left, operators);
+            }
+            operators.push(operator);
+            if let Some(right) = children.last()
+                && children.len() > 1
+            {
+                collect(*right, operators);
+            }
+        }
+    }
+
+    let mut operators = Vec::new();
+    collect(node, &mut operators);
+    usize::from(!operators.is_empty())
+        + operators
+            .windows(2)
+            .filter(|pair| pair[0] != pair[1])
+            .count()
+}
+
 fn failed_record(path: &str, parse_status: String) -> FileFacts {
     FileFacts {
         path: normalize_path(path),
@@ -1072,6 +1312,8 @@ fn failed_record(path: &str, parse_status: String) -> FileFacts {
         entrypoint_kind: entrypoint_kind_for_path(path).map(str::to_string),
         is_entrypoint: entrypoint_kind_for_path(path).is_some(),
         parse_status,
+        syntax_backend: "none".to_string(),
+        syntax_error_count: 0,
         source_metrics_available: false,
         dependencies: Vec::new(),
         dependency_references: Vec::new(),
@@ -1536,11 +1778,69 @@ fn nested(left: bool, right: bool) {
             .into_facts_with_status("parse_error: expected pattern".to_string());
 
         assert!(facts.source_metrics_available);
+        assert_eq!(facts.syntax_backend, "text");
         assert!(facts.parse_status.starts_with("parse_error:"));
         assert_eq!(facts.source_line_count, 3);
         assert_eq!(facts.source_nonblank_line_count, 1);
         assert_eq!(facts.source_comment_line_count, 2);
         assert!(facts.has_crate_docs);
         assert!(facts.functions.is_empty());
+    }
+
+    #[test]
+    fn tree_sitter_recovers_functions_from_a_partially_invalid_file() {
+        let source = r#"
+fn recovered(left: bool, right: bool) -> bool {
+    if left && right { true } else { false }
+}
+
+fn broken( {
+"#;
+        let facts = super::tree_sitter_fallback("src/lib.rs", source, "expected pattern");
+
+        assert_eq!(facts.syntax_backend, "tree-sitter-rust");
+        assert!(facts.syntax_error_count > 0);
+        assert!(facts.parse_status.contains("tree_sitter_recovered=true"));
+        let Some(function) = facts
+            .functions
+            .iter()
+            .find(|function| function.name == "recovered")
+        else {
+            panic!("valid function should be recovered");
+        };
+        assert_eq!(function.cyclomatic_complexity, 3);
+        assert_eq!(function.cognitive_complexity, 3);
+    }
+
+    #[test]
+    fn tree_sitter_standard_metrics_match_syn_on_valid_rust() {
+        let source = r#"
+fn nested(left: bool, right: bool) {
+    if left && right {
+        while left {
+            if right { break; }
+        }
+    }
+}
+"#;
+        let syn_facts = facts(source);
+        let tree_sitter_facts =
+            super::tree_sitter_fallback("src/lib.rs", source, "forced fallback");
+        let Some(syn_function) = syn_facts.functions.first() else {
+            panic!("syn function should exist");
+        };
+        let Some(tree_sitter_function) = tree_sitter_facts.functions.first() else {
+            panic!("tree-sitter function should exist");
+        };
+
+        assert_eq!(tree_sitter_facts.syntax_error_count, 0);
+        assert_eq!(
+            tree_sitter_function.cyclomatic_complexity,
+            syn_function.cyclomatic_complexity
+        );
+        assert_eq!(
+            tree_sitter_function.cognitive_complexity,
+            syn_function.cognitive_complexity
+        );
     }
 }

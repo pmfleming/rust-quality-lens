@@ -339,12 +339,16 @@ branches, logical-operator sequences, labeled jumps, and closure nesting.
 Module rows provide sum, average, and maximum aggregates. These raw metrics do
 not change the calibrated hotspot score.
 
-When a Rust file cannot be parsed but remains readable, RQLens preserves its
-text-level line and comment counts. Hotspot output contains a partial module row
-with unknown (`null`) syntax-derived scores, and architecture output retains the
-module with unknown syntax-derived risk inputs. Confidence reports the parse
-failure and distinguishes complete syntax facts, partial source metrics, and
-unreadable files.
+When `syn` cannot parse a readable Rust file, RQLens uses `tree-sitter-rust` as
+a recovery backend. It preserves text-level line and comment counts and recovers
+function spans plus raw cyclomatic and cognitive complexity where possible.
+Recovered hotspot rows remain partial and keep calibrated scores `null`;
+Tree-sitter evidence therefore cannot silently change architecture risk. The
+architecture map retains the module with unknown syntax-derived risk inputs.
+Confidence reports the original parse failure, Tree-sitter error-node count,
+complete syntax facts, partial source metrics, and unreadable files. If
+Tree-sitter cannot return a tree, the existing text-only fallback remains
+available.
 
 `clones.json` reports multiple clone and duplication engines:
 

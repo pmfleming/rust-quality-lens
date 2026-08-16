@@ -44,6 +44,10 @@ pub(crate) struct FileFacts {
     #[serde(default)]
     pub(crate) is_entrypoint: bool,
     pub(crate) parse_status: String,
+    #[serde(default)]
+    pub(crate) syntax_backend: String,
+    #[serde(default)]
+    pub(crate) syntax_error_count: usize,
     #[serde(default = "default_true")]
     pub(crate) source_metrics_available: bool,
     #[serde(flatten)]
@@ -70,6 +74,8 @@ impl FileFacts {
             entrypoint_kind: None,
             is_entrypoint: false,
             parse_status: "ok".to_string(),
+            syntax_backend: "syn".to_string(),
+            syntax_error_count: 0,
             source_metrics_available: true,
             graph: FileGraphFacts::default(),
             source: SourceMetrics::default(),

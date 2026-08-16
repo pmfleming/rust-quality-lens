@@ -24,11 +24,19 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
 
 fn hotspot_rows(fact: &FileFacts, confidence: &Value) -> Vec<Value> {
     if fact.parse_status != "ok" {
-        return fact
-            .source_metrics_available
-            .then(|| partial_module_hotspot_row(fact, confidence))
-            .into_iter()
-            .collect();
+        if !fact.source_metrics_available {
+            return Vec::new();
+        }
+        let mut rows = vec![partial_module_hotspot_row(fact, confidence)];
+        if fact.syntax_backend == "tree-sitter-rust" {
+            rows.extend(
+                fact.items
+                    .functions
+                    .iter()
+                    .map(|function| partial_function_hotspot_row(fact, function, confidence)),
+            );
+        }
+        return rows;
     }
     let function_scores = fact
         .items
@@ -210,6 +218,20 @@ fn module_hotspot_row(
 }
 
 fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
+    let recovered_functions = if fact.syntax_backend == "tree-sitter-rust" {
+        fact.items.functions.as_slice()
+    } else {
+        &[]
+    };
+    let cyclomatic_sum = recovered_functions
+        .iter()
+        .map(|function| function.cyclomatic_complexity)
+        .sum::<usize>();
+    let cognitive_sum = recovered_functions
+        .iter()
+        .map(|function| function.cognitive_complexity)
+        .sum::<usize>();
+    let function_count = recovered_functions.len();
     json!({
         "name": normalize_slashes(&fact.path),
         "module_key": fact.module_key,
@@ -223,13 +245,13 @@ fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
         "end_line": fact.source.source_line_count,
         "sloc": fact.source.source_nonblank_line_count,
         "cloc": fact.source.source_comment_line_count,
-        "function_count": Value::Null,
-        "cyclomatic_complexity_sum": Value::Null,
-        "cyclomatic_complexity_average": Value::Null,
-        "cyclomatic_complexity_max": Value::Null,
-        "cognitive_complexity_sum": Value::Null,
-        "cognitive_complexity_average": Value::Null,
-        "cognitive_complexity_max": Value::Null,
+        "function_count": if fact.syntax_backend == "tree-sitter-rust" { Value::from(function_count) } else { Value::Null },
+        "cyclomatic_complexity_sum": if fact.syntax_backend == "tree-sitter-rust" { Value::from(cyclomatic_sum) } else { Value::Null },
+        "cyclomatic_complexity_average": if function_count > 0 { Value::from(round2(cyclomatic_sum as f64 / function_count as f64)) } else { Value::Null },
+        "cyclomatic_complexity_max": recovered_functions.iter().map(|function| function.cyclomatic_complexity).max().map(Value::from).unwrap_or(Value::Null),
+        "cognitive_complexity_sum": if fact.syntax_backend == "tree-sitter-rust" { Value::from(cognitive_sum) } else { Value::Null },
+        "cognitive_complexity_average": if function_count > 0 { Value::from(round2(cognitive_sum as f64 / function_count as f64)) } else { Value::Null },
+        "cognitive_complexity_max": recovered_functions.iter().map(|function| function.cognitive_complexity).max().map(Value::from).unwrap_or(Value::Null),
         "complexity_metric_model_id": COMPLEXITY_METRIC_MODEL_ID,
         "complexity_metric_model_version": COMPLEXITY_METRIC_MODEL_VERSION,
         "max_function_score": Value::Null,
@@ -243,10 +265,54 @@ fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
         "signals": "syntax unavailable",
         "complexity_density": Value::Null,
         "parse_status": fact.parse_status,
+        "syntax_backend": fact.syntax_backend,
+        "syntax_error_count": fact.syntax_error_count,
         "evidence_status": "partial",
         "risk_model_id": MODEL_ID,
         "risk_model_version": MODEL_VERSION,
         "risk_calibration": "hotspots_module",
+        "measurement_confidence": confidence,
+    })
+}
+
+fn partial_function_hotspot_row(
+    fact: &FileFacts,
+    function: &FunctionFact,
+    confidence: &Value,
+) -> Value {
+    json!({
+        "name": function.qualified_name,
+        "qualified_name": function.qualified_name,
+        "function_name": function.name,
+        "module_key": function.module_key,
+        "module_id": fact.module_id,
+        "package_name": fact.package_name,
+        "target_name": fact.target_name,
+        "identity_backend": fact.identity_backend,
+        "path": function.path,
+        "kind": "function",
+        "start_line": function.start_line,
+        "end_line": function.end_line,
+        "sloc": function.source_line_count,
+        "branch_pressure": Value::Null,
+        "path_pressure": Value::Null,
+        "max_nesting_depth": Value::Null,
+        "cyclomatic_complexity": function.cyclomatic_complexity,
+        "cognitive_complexity": function.cognitive_complexity,
+        "complexity_metric_model_id": COMPLEXITY_METRIC_MODEL_ID,
+        "complexity_metric_model_version": COMPLEXITY_METRIC_MODEL_VERSION,
+        "score": Value::Null,
+        "quality_score": Value::Null,
+        "risk_level": "unknown",
+        "score_components": [],
+        "signals": ["tree-sitter-rust fallback"],
+        "parse_status": fact.parse_status,
+        "syntax_backend": fact.syntax_backend,
+        "syntax_error_count": fact.syntax_error_count,
+        "evidence_status": "partial",
+        "risk_model_id": MODEL_ID,
+        "risk_model_version": MODEL_VERSION,
+        "risk_calibration": "hotspots_function",
         "measurement_confidence": confidence,
     })
 }

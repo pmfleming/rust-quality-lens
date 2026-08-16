@@ -58,10 +58,14 @@ fragile:
   confidence signals
 
 Unsupported patterns are reported rather than silently treated as absent.
-Readable files that fail full `syn` parsing retain text-level line, nonblank,
-comment, crate-documentation, path, and Cargo target evidence. Their syntax
-facts remain explicitly unavailable: hotspot rows use `null` scores and map
-risk inputs that require syntax stay unknown rather than becoming zero.
+Readable files that fail full `syn` parsing are reparsed with
+`tree-sitter-rust`. This recovery path retains text-level line, nonblank,
+comment, crate-documentation, path, and Cargo target evidence and recovers
+function spans plus raw complexity where possible. Recovered facts carry the
+`tree-sitter-rust` backend and error-node count. They remain explicitly partial:
+hotspot scores are `null` and map risk inputs that require complete syntax stay
+unknown rather than becoming zero. A Tree-sitter failure degrades to the
+text-only evidence path.
 
 Function facts also include versioned, standard-form raw complexity metrics.
 Cyclomatic complexity starts at one and counts Rust decisions, match arms,

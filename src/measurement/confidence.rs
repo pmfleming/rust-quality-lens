@@ -62,6 +62,14 @@ pub(crate) fn source_confidence(paths: &[String], facts: &[FileFacts]) -> Value 
         .iter()
         .filter(|fact| !fact.source_metrics_available)
         .count();
+    let tree_sitter_fallback_files = facts
+        .iter()
+        .filter(|fact| fact.syntax_backend == "tree-sitter-rust")
+        .count();
+    let tree_sitter_error_nodes = facts
+        .iter()
+        .map(|fact| fact.syntax_error_count)
+        .sum::<usize>();
     json!({
         "complete": complete,
         "partial": !complete,
@@ -72,6 +80,8 @@ pub(crate) fn source_confidence(paths: &[String], facts: &[FileFacts]) -> Value 
             "rust_syntax_fact_files": syntax_fact_files,
             "partial_source_metric_files": partial_source_metric_files,
             "unreadable_source_files": unreadable_source_files,
+            "tree_sitter_fallback_files": tree_sitter_fallback_files,
+            "tree_sitter_error_nodes": tree_sitter_error_nodes,
             "cargo_metadata_identity_files": cargo_metadata_identity_files,
             "cargo_manifest_identity_files": facts.iter().filter(|fact| fact.identity_backend == "cargo_manifest").count(),
             "identity_fallback_files": identity_fallback_files,

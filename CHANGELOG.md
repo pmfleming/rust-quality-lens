@@ -23,7 +23,7 @@ All notable changes to this project will be documented here. The format follows 
 - Stable per-rule finding limits with severity and path/package exclusions.
 - Executable changed-line coverage in changed-code review output.
 - Versioned cyclomatic and cognitive complexity facts on function hotspots, with module aggregates.
-- Partial text-level source evidence for readable Rust files that fail syntax parsing.
+- `tree-sitter-rust` recovery of function spans and raw complexity for files that fail full `syn` parsing, with text-only evidence retained as the final fallback.
 
 ### Changed
 

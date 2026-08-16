@@ -178,6 +178,8 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "complexity_metric_model_id": {"type": "string", "const": "rqlens.rust_standard_complexity"},
                 "complexity_metric_model_version": {"type": "integer", "const": 1},
                 "parse_status": {"type": "string"},
+                "syntax_backend": {"type": "string", "enum": ["tree-sitter-rust", "text"]},
+                "syntax_error_count": {"type": "integer", "minimum": 0},
                 "evidence_status": {"type": "string", "enum": ["partial"]},
                 "score_components": {"type": "array", "items": {"type": "object"}},
                 "measurement_confidence": measurement_confidence_schema(),

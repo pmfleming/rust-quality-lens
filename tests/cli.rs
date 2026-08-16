@@ -257,7 +257,7 @@ output_dir = "target/analysis"
     .expect("syntax-error config should be written");
     fs::write(
         root.join("src/lib.rs"),
-        "//! Partially measurable crate.\n\npub fn broken( {\n    // source metrics survive\n",
+        "//! Partially measurable crate.\n\npub fn recovered(flag: bool) -> bool {\n    if flag { true } else { false }\n}\n\npub fn broken( {\n    // source metrics survive\n",
     )
     .expect("malformed Rust source should be written");
     root
@@ -1186,25 +1186,41 @@ fn syntax_failures_preserve_partial_source_evidence() {
 
     let payload = read_json(fixture.join("target/analysis/hotspots.json"));
     let rows = payload.as_array().expect("hotspots should be records");
-    assert_eq!(rows.len(), 1);
-    let row = &rows[0];
-    assert_eq!(row["kind"], "module");
+    let row = rows
+        .iter()
+        .find(|row| row["kind"] == "module")
+        .expect("partial module row should be emitted");
     assert_eq!(row["evidence_status"], "partial");
+    assert_eq!(row["syntax_backend"], "tree-sitter-rust");
     assert!(
         row["parse_status"]
             .as_str()
             .unwrap()
             .starts_with("parse_error:")
     );
-    assert_eq!(row["sloc"], 1);
+    assert_eq!(row["sloc"], 4);
     assert_eq!(row["cloc"], 2);
     assert!(row["score"].is_null());
+    assert!(row["cyclomatic_complexity_sum"].as_u64().is_some());
+    let function = rows
+        .iter()
+        .find(|row| row["function_name"] == "recovered")
+        .expect("tree-sitter should recover the valid function");
+    assert_eq!(function["evidence_status"], "partial");
+    assert_eq!(function["syntax_backend"], "tree-sitter-rust");
+    assert_eq!(function["cyclomatic_complexity"], 2);
+    assert_eq!(function["cognitive_complexity"], 2);
+    assert!(function["score"].is_null());
     assert_eq!(
         row["measurement_confidence"]["observed_inputs"]["rust_syntax_fact_files"],
         0
     );
     assert_eq!(
         row["measurement_confidence"]["observed_inputs"]["partial_source_metric_files"],
+        1
+    );
+    assert_eq!(
+        row["measurement_confidence"]["observed_inputs"]["tree_sitter_fallback_files"],
         1
     );
 }
