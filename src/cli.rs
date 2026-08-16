@@ -29,6 +29,7 @@ pub(crate) enum Commands {
     Performance(PerformanceArgs),
     Outcomes(OutcomesArgs),
     Telemetry(TelemetryArgs),
+    Ingest(IngestArgs),
     Validate(ValidationArgs),
 }
 
@@ -124,6 +125,16 @@ pub(crate) struct TelemetryArgs {
     pub(crate) input: PathBuf,
     #[arg(long, default_value_t = 24)]
     pub(crate) max_age_hours: u64,
+    #[arg(long)]
+    pub(crate) config: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub(crate) struct IngestArgs {
+    #[arg(long)]
+    pub(crate) adapter: String,
+    #[arg(long)]
+    pub(crate) input: PathBuf,
     #[arg(long)]
     pub(crate) config: Option<PathBuf>,
 }

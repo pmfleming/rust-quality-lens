@@ -290,6 +290,16 @@ The `all` form returns schemas keyed by producer. Auxiliary performance,
 outcome, telemetry, validation, calibration, policy, SARIF, and review outputs
 are not currently included in this command.
 
+Ingest normalized evidence from a focused external analyzer:
+
+```bash
+rqlens ingest --adapter cargo-crap --input cargo-crap-evidence.json --config rqlens.toml
+```
+
+The input requires `tool.name`, `tool.version`, explicit `status`, `scope`,
+`findings`, `metrics`, and `confidence` fields. RQLens validates and envelopes
+the evidence without treating external metrics as native risk-model inputs.
+
 Review changed Rust files:
 
 ```bash

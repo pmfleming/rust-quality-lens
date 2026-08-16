@@ -29,6 +29,7 @@ All notable changes to this project will be documented here. The format follows 
 - Optional cargo-geiger unsafe inventory and configurable unused-dependency verification.
 - Clone summaries with duplicated-line percentage and conservative declaration-only token filtering.
 - Module responsibility-focus and Git change-entropy evidence.
+- A versioned external evidence ingestion contract for focused tool adapters.
 - Versioned cyclomatic and cognitive complexity facts on function hotspots, with module aggregates.
 - `tree-sitter-rust` recovery of function spans and raw complexity for files that fail full `syn` parsing, with text-only evidence retained as the final fallback.
 

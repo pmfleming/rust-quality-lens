@@ -15,6 +15,7 @@ mod cli;
 mod command_runner;
 mod config;
 mod contracts;
+mod external;
 mod facts;
 mod measurement;
 mod outcomes;
@@ -67,6 +68,10 @@ fn run_command(command: Commands) -> Result<()> {
                 args.max_age_hours.max(1),
             )?,
             "operational evidence",
+        ),
+        Commands::Ingest(args) => write_report(
+            external::ingest(&LensConfig::load(args.config)?, &args.adapter, &args.input)?,
+            "external evidence",
         ),
         Commands::Validate(args) => write_report(
             validation::run(&args.projects, args.output_dir, args.include_inferred)?,
