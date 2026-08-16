@@ -34,6 +34,7 @@ pub(crate) fn run_check(
     let practices = classify_findings(config, practice_findings(&documents));
     let reliability = classify_findings(config, reliability_findings(&documents));
     let architecture = classify_findings(config, architecture_findings(&documents));
+    let test_quality = classify_findings(config, test_quality_findings(&documents));
     let operational_failures = operational_failures(&documents);
     let policy_rule_evaluations = evaluate_policy_rules(
         &config.policy,
@@ -41,7 +42,8 @@ pub(crate) fn run_check(
             .active
             .iter()
             .chain(&reliability.active)
-            .chain(&architecture.active),
+            .chain(&architecture.active)
+            .chain(&test_quality.active),
     );
     let policy_rule_violations = policy_rule_evaluations
         .iter()
@@ -55,6 +57,7 @@ pub(crate) fn run_check(
     let mut waived_findings = practices.waived;
     waived_findings.extend(reliability.waived);
     waived_findings.extend(architecture.waived);
+    waived_findings.extend(test_quality.waived);
     let expired_waivers = config
         .policy
         .expired_waivers()
@@ -114,6 +117,8 @@ pub(crate) fn run_check(
         "reliability_warnings": reliability.warnings,
         "architecture_violations": architecture.errors,
         "architecture_warnings": architecture.warnings,
+        "test_quality_findings": test_quality.errors,
+        "test_quality_warnings": test_quality.warnings,
         "operational_failures": operational_failures,
         "waived_findings": waived_findings,
         "expired_waivers": expired_waivers,
@@ -328,6 +333,15 @@ fn operational_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
         .filter(|record| record["status"] == "breached")
         .cloned()
         .collect()
+}
+
+fn test_quality_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
+    documents
+        .get("test_quality.json")
+        .map(artifact_payload)
+        .and_then(|payload| payload["findings"].as_array())
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn architecture_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {

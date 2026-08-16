@@ -17,6 +17,7 @@ const REVIEW_TOOLS: &[MeasureTool] = &[
     MeasureTool::EscapeHatches,
     MeasureTool::Reliability,
     MeasureTool::ArchitectureRules,
+    MeasureTool::TestQuality,
     MeasureTool::ApiHealth,
     MeasureTool::TypeHealth,
 ];

@@ -122,6 +122,18 @@ fn task_definitions() -> Vec<TaskDefinition> {
             expensive: false,
         },
         TaskDefinition {
+            tool: "test-quality",
+            id: "quality.test_quality",
+            aliases: vec![],
+            category: "correctness",
+            subcategory: "tests",
+            title: "Test Quality",
+            description: "Reports assertion, system-under-test call, and ignored-test evidence.",
+            output_file: "test_quality.json",
+            depends_on: vec!["correctness.catalog"],
+            expensive: false,
+        },
+        TaskDefinition {
             tool: "api-health",
             id: "quality.api_health",
             aliases: vec!["quality.documentation"],

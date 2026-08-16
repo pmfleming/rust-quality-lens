@@ -12,6 +12,7 @@ pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<Path
     let mut results = Vec::new();
     add_reliability_results(config, &mut rules, &mut results)?;
     add_architecture_results(config, &mut rules, &mut results)?;
+    add_test_quality_results(config, &mut rules, &mut results)?;
     add_practice_results(config, &mut rules, &mut results)?;
     let document = json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -60,6 +61,26 @@ fn add_architecture_results(
     add_source_findings(
         config,
         payload(&document)["violations"]
+            .as_array()
+            .into_iter()
+            .flatten(),
+        rules,
+        results,
+    );
+    Ok(())
+}
+
+fn add_test_quality_results(
+    config: &LensConfig,
+    rules: &mut BTreeMap<String, Value>,
+    results: &mut Vec<Value>,
+) -> Result<()> {
+    let Some(document) = read_optional(config.output_dir.join("test_quality.json"))? else {
+        return Ok(());
+    };
+    add_source_findings(
+        config,
+        payload(&document)["findings"]
             .as_array()
             .into_iter()
             .flatten(),

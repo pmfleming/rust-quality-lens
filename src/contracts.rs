@@ -253,6 +253,16 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
+        MeasureTool::TestQuality => object_schema(
+            "test_quality.json",
+            &["summary", "tests", "findings", "measurement_confidence"],
+            json!({
+                "summary": {"type": "object"},
+                "tests": {"type": "array", "items": {"type": "object"}},
+                "findings": {"type": "array", "items": {"type": "object"}},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
+        ),
         MeasureTool::ApiHealth => array_schema(
             "api_health.json",
             &[

@@ -84,6 +84,9 @@ struct TestFact {
     line: usize,
     attribute: String,
     module_key: String,
+    assertion_count: usize,
+    sut_call_count: usize,
+    ignored: bool,
 }
 
 #[derive(Serialize)]
@@ -365,6 +368,7 @@ impl FactVisitor {
         for attr in &func.attrs {
             let path = path_to_string(attr.path());
             if is_test_attribute(&path) {
+                let quality = test_body_quality(&func.block);
                 self.tests.push(TestFact {
                     name: func.sig.ident.to_string(),
                     qualified_name: self.qualified_test_name(&func.sig.ident.to_string()),
@@ -372,6 +376,12 @@ impl FactVisitor {
                     line: span_start_line(attr.span()),
                     attribute: path,
                     module_key: self.current_module_key(),
+                    assertion_count: quality.assertion_count,
+                    sut_call_count: quality.sut_call_count,
+                    ignored: func
+                        .attrs
+                        .iter()
+                        .any(|attribute| path_to_string(attribute.path()) == "ignore"),
                 });
                 self.has_inline_tests = true;
                 return;
@@ -434,6 +444,40 @@ impl FactVisitor {
             cyclomatic_complexity: standard_complexity.cyclomatic_complexity,
             cognitive_complexity: standard_complexity.cognitive_complexity,
         });
+    }
+}
+
+#[derive(Default)]
+struct TestBodyQuality {
+    assertion_count: usize,
+    sut_call_count: usize,
+}
+
+fn test_body_quality(body: &syn::Block) -> TestBodyQuality {
+    let mut quality = TestBodyQuality::default();
+    quality.visit_block(body);
+    quality
+}
+
+impl<'ast> Visit<'ast> for TestBodyQuality {
+    fn visit_macro(&mut self, item: &'ast syn::Macro) {
+        let name = path_to_string(&item.path);
+        if name.contains("assert") || name.contains("snapshot") {
+            self.assertion_count += 1;
+        } else {
+            self.sut_call_count += 1;
+        }
+        visit::visit_macro(self, item);
+    }
+
+    fn visit_expr_call(&mut self, expression: &'ast ExprCall) {
+        self.sut_call_count += 1;
+        visit::visit_expr_call(self, expression);
+    }
+
+    fn visit_expr_method_call(&mut self, expression: &'ast syn::ExprMethodCall) {
+        self.sut_call_count += 1;
+        visit::visit_expr_method_call(self, expression);
     }
 }
 
@@ -1762,6 +1806,26 @@ fn direct_test() { panic!("expected test panic"); }
             .count();
         assert_eq!(test_scoped, 2);
         assert_eq!(test_scoped, facts.quality_findings.len());
+    }
+
+    #[test]
+    fn test_quality_counts_assertions_calls_and_ignored_tests() {
+        let facts = facts(
+            r#"
+#[test]
+#[ignore]
+fn checks_value() {
+    let value = crate::calculate();
+    assert_eq!(value, 42);
+}
+"#,
+        );
+        let Some(test) = facts.tests.first() else {
+            panic!("test fact should exist");
+        };
+        assert_eq!(test.assertion_count, 1);
+        assert_eq!(test.sut_call_count, 1);
+        assert!(test.ignored);
     }
 
     #[test]

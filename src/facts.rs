@@ -205,6 +205,12 @@ pub(crate) struct TestFact {
     pub(crate) line: usize,
     #[serde(default)]
     pub(crate) module_key: String,
+    #[serde(default)]
+    pub(crate) assertion_count: usize,
+    #[serde(default)]
+    pub(crate) sut_call_count: usize,
+    #[serde(default)]
+    pub(crate) ignored: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -11,6 +11,8 @@ pub(crate) enum MeasureTool {
     #[value(name = "type-health")]
     TypeHealth,
     Reliability,
+    #[value(name = "test-quality")]
+    TestQuality,
     #[value(name = "architecture-rules")]
     ArchitectureRules,
     #[value(name = "api-health")]
@@ -33,6 +35,7 @@ impl MeasureTool {
             Self::EscapeHatches,
             Self::Reliability,
             Self::ArchitectureRules,
+            Self::TestQuality,
             Self::ApiHealth,
             Self::TypeHealth,
             Self::Coverage,
@@ -56,7 +59,7 @@ impl MeasureTool {
     pub(crate) fn requires_correctness_facts(&self) -> bool {
         matches!(
             self,
-            Self::Clones | Self::Correctness | Self::CorrectnessRun
+            Self::Clones | Self::TestQuality | Self::Correctness | Self::CorrectnessRun
         )
     }
 
@@ -76,6 +79,7 @@ impl MeasureTool {
             Self::TypeHealth => "type-health",
             Self::Reliability => "reliability",
             Self::ArchitectureRules => "architecture-rules",
+            Self::TestQuality => "test-quality",
             Self::ApiHealth => "api-health",
             Self::Correctness => "correctness",
             Self::CorrectnessRun => "correctness-run",
@@ -95,6 +99,7 @@ impl MeasureTool {
             Self::TypeHealth => "type_health.json",
             Self::Reliability => "reliability_findings.json",
             Self::ArchitectureRules => "architecture_rules.json",
+            Self::TestQuality => "test_quality.json",
             Self::ApiHealth => "api_health.json",
             Self::Correctness | Self::CorrectnessRun => "correctness_review.json",
             Self::Locality => "locality_metrics.json",
