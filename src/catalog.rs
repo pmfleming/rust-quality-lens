@@ -110,6 +110,18 @@ fn task_definitions() -> Vec<TaskDefinition> {
             expensive: false,
         },
         TaskDefinition {
+            tool: "architecture-rules",
+            id: "quality.architecture_rules",
+            aliases: vec!["quality.boundaries"],
+            category: "quality",
+            subcategory: "architecture",
+            title: "Architecture Rules",
+            description: "Evaluates configured Cargo-qualified module dependency boundaries.",
+            output_file: "architecture_rules.json",
+            depends_on: vec![],
+            expensive: false,
+        },
+        TaskDefinition {
             tool: "api-health",
             id: "quality.api_health",
             aliases: vec!["quality.documentation"],

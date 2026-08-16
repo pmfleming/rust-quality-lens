@@ -6,6 +6,7 @@ use crate::facts::RunContext;
 use crate::tool::MeasureTool;
 
 mod api_health;
+mod architecture_rules;
 mod clones;
 mod correctness;
 mod coverage;
@@ -28,6 +29,7 @@ pub(crate) fn produce_measurement(
         MeasureTool::EscapeHatches => escape_hatches::produce(config, context),
         MeasureTool::TypeHealth => type_health::produce(config, context),
         MeasureTool::Reliability => reliability::produce(config, context),
+        MeasureTool::ArchitectureRules => architecture_rules::produce(config, context),
         MeasureTool::ApiHealth => api_health::produce(config, context),
         MeasureTool::Correctness => correctness::produce(config, context, false),
         MeasureTool::CorrectnessRun => correctness::produce(config, context, true),

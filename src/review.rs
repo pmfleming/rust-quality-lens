@@ -16,6 +16,7 @@ const REVIEW_TOOLS: &[MeasureTool] = &[
     MeasureTool::Clones,
     MeasureTool::EscapeHatches,
     MeasureTool::Reliability,
+    MeasureTool::ArchitectureRules,
     MeasureTool::ApiHealth,
     MeasureTool::TypeHealth,
 ];
@@ -251,14 +252,24 @@ fn filter_payload(
     payload: serde_json::Value,
     measured_files: &HashSet<String>,
 ) -> serde_json::Value {
-    let serde_json::Value::Array(rows) = payload else {
-        return payload;
-    };
-    serde_json::Value::Array(
-        rows.into_iter()
-            .filter(|row| row_matches_changed_file(project_root, row, measured_files))
-            .collect(),
-    )
+    match payload {
+        serde_json::Value::Array(rows) => serde_json::Value::Array(
+            rows.into_iter()
+                .filter(|row| row_matches_changed_file(project_root, row, measured_files))
+                .collect(),
+        ),
+        serde_json::Value::Object(mut object) if object.contains_key("violations") => {
+            if let Some(serde_json::Value::Array(rows)) = object.remove("violations") {
+                let rows = rows
+                    .into_iter()
+                    .filter(|row| row_matches_changed_file(project_root, row, measured_files))
+                    .collect::<Vec<_>>();
+                object.insert("violations".to_string(), serde_json::Value::Array(rows));
+            }
+            serde_json::Value::Object(object)
+        }
+        payload => payload,
+    }
 }
 
 fn row_matches_changed_file(

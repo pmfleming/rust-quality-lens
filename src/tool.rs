@@ -11,6 +11,8 @@ pub(crate) enum MeasureTool {
     #[value(name = "type-health")]
     TypeHealth,
     Reliability,
+    #[value(name = "architecture-rules")]
+    ArchitectureRules,
     #[value(name = "api-health")]
     ApiHealth,
     Correctness,
@@ -30,6 +32,7 @@ impl MeasureTool {
             Self::Clones,
             Self::EscapeHatches,
             Self::Reliability,
+            Self::ArchitectureRules,
             Self::ApiHealth,
             Self::TypeHealth,
             Self::Coverage,
@@ -58,7 +61,10 @@ impl MeasureTool {
     }
 
     pub(crate) fn requires_semantic_identity(&self) -> bool {
-        matches!(self, Self::Locality | Self::Leverage | Self::Map)
+        matches!(
+            self,
+            Self::ArchitectureRules | Self::Locality | Self::Leverage | Self::Map
+        )
     }
 
     pub(crate) fn name(&self) -> &'static str {
@@ -69,6 +75,7 @@ impl MeasureTool {
             Self::EscapeHatches => "escape-hatches",
             Self::TypeHealth => "type-health",
             Self::Reliability => "reliability",
+            Self::ArchitectureRules => "architecture-rules",
             Self::ApiHealth => "api-health",
             Self::Correctness => "correctness",
             Self::CorrectnessRun => "correctness-run",
@@ -87,6 +94,7 @@ impl MeasureTool {
             Self::EscapeHatches => "rust_escape_hatches.json",
             Self::TypeHealth => "type_health.json",
             Self::Reliability => "reliability_findings.json",
+            Self::ArchitectureRules => "architecture_rules.json",
             Self::ApiHealth => "api_health.json",
             Self::Correctness | Self::CorrectnessRun => "correctness_review.json",
             Self::Locality => "locality_metrics.json",

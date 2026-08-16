@@ -28,7 +28,10 @@ pub(crate) fn artifact_document(
         .unwrap_or_else(|| source_confidence(&config.source_roots, &context.source_facts));
     if matches!(
         tool,
-        MeasureTool::Locality | MeasureTool::Leverage | MeasureTool::Map
+        MeasureTool::ArchitectureRules
+            | MeasureTool::Locality
+            | MeasureTool::Leverage
+            | MeasureTool::Map
     ) && let Some(object) = confidence.as_object_mut()
     {
         object.insert(
@@ -238,6 +241,15 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "scope": {"type": "string", "enum": ["production", "test"]},
                 "message": {"type": "string"},
                 "source": {"type": "string"},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
+        ),
+        MeasureTool::ArchitectureRules => object_schema(
+            "architecture_rules.json",
+            &["summary", "violations", "measurement_confidence"],
+            json!({
+                "summary": {"type": "object"},
+                "violations": {"type": "array", "items": {"type": "object"}},
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),

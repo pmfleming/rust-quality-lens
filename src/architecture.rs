@@ -109,7 +109,9 @@ fn match_segments(pattern: &[&str], value: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::module_matches;
+    use super::{evaluate, module_matches};
+    use crate::config::{ArchitectureConfig, ArchitectureRule, PolicyRuleLevel};
+    use crate::facts::{FileFacts, module_graph};
 
     #[test]
     fn module_patterns_support_single_and_recursive_wildcards() {
@@ -123,5 +125,37 @@ mod tests {
         ));
         assert!(!module_matches("app::*::domain", "app::lib::domain::model"));
         assert!(!module_matches("app::bin::**", "app::lib::domain"));
+    }
+
+    #[test]
+    fn denied_edges_produce_architecture_violations() {
+        let mut domain = FileFacts::test_fact("/app/src/domain.rs", "domain");
+        domain.package_name = "app".to_string();
+        domain.target_name = "app".to_string();
+        domain.module_id = "app::app::domain".to_string();
+        domain
+            .graph
+            .dependencies
+            .push("crate::infrastructure".to_string());
+        let mut infrastructure =
+            FileFacts::test_fact("/app/src/infrastructure.rs", "infrastructure");
+        infrastructure.package_name = "app".to_string();
+        infrastructure.target_name = "app".to_string();
+        infrastructure.module_id = "app::app::infrastructure".to_string();
+        let graph = module_graph(&[domain, infrastructure]);
+        let evaluation = evaluate(
+            &ArchitectureConfig {
+                rules: vec![ArchitectureRule {
+                    id: "domain-boundary".to_string(),
+                    from: vec!["app::app::domain".to_string()],
+                    allow: Vec::new(),
+                    deny: vec!["app::app::infrastructure".to_string()],
+                    level: PolicyRuleLevel::Error,
+                }],
+            },
+            &graph,
+        );
+        assert_eq!(evaluation.violations.len(), 1);
+        assert_eq!(evaluation.violations[0].rule_id, "domain-boundary");
     }
 }

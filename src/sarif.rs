@@ -11,6 +11,7 @@ pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<Path
     let mut rules = BTreeMap::<String, Value>::new();
     let mut results = Vec::new();
     add_reliability_results(config, &mut rules, &mut results)?;
+    add_architecture_results(config, &mut rules, &mut results)?;
     add_practice_results(config, &mut rules, &mut results)?;
     let document = json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -39,7 +40,42 @@ fn add_reliability_results(
     let Some(document) = read_optional(config.output_dir.join("reliability_findings.json"))? else {
         return Ok(());
     };
-    for finding in payload(&document).as_array().into_iter().flatten() {
+    add_source_findings(
+        config,
+        payload(&document).as_array().into_iter().flatten(),
+        rules,
+        results,
+    );
+    Ok(())
+}
+
+fn add_architecture_results(
+    config: &LensConfig,
+    rules: &mut BTreeMap<String, Value>,
+    results: &mut Vec<Value>,
+) -> Result<()> {
+    let Some(document) = read_optional(config.output_dir.join("architecture_rules.json"))? else {
+        return Ok(());
+    };
+    add_source_findings(
+        config,
+        payload(&document)["violations"]
+            .as_array()
+            .into_iter()
+            .flatten(),
+        rules,
+        results,
+    );
+    Ok(())
+}
+
+fn add_source_findings<'a>(
+    config: &LensConfig,
+    findings: impl Iterator<Item = &'a Value>,
+    rules: &mut BTreeMap<String, Value>,
+    results: &mut Vec<Value>,
+) {
+    for finding in findings {
         if finding["severity"] == "advisory" {
             continue;
         }
@@ -82,7 +118,6 @@ fn add_reliability_results(
         }
         results.push(Value::Object(result));
     }
-    Ok(())
 }
 
 fn add_practice_results(

@@ -33,10 +33,15 @@ pub(crate) fn run_check(
     let test_failures = test_failures(&documents);
     let practices = classify_findings(config, practice_findings(&documents));
     let reliability = classify_findings(config, reliability_findings(&documents));
+    let architecture = classify_findings(config, architecture_findings(&documents));
     let operational_failures = operational_failures(&documents);
     let policy_rule_evaluations = evaluate_policy_rules(
         &config.policy,
-        practices.active.iter().chain(&reliability.active),
+        practices
+            .active
+            .iter()
+            .chain(&reliability.active)
+            .chain(&architecture.active),
     );
     let policy_rule_violations = policy_rule_evaluations
         .iter()
@@ -49,6 +54,7 @@ pub(crate) fn run_check(
         .count();
     let mut waived_findings = practices.waived;
     waived_findings.extend(reliability.waived);
+    waived_findings.extend(architecture.waived);
     let expired_waivers = config
         .policy
         .expired_waivers()
@@ -80,12 +86,18 @@ pub(crate) fn run_check(
     if policy_rule_errors > 0 {
         failed_policies.push("configured-rules".to_string());
     }
+    if !architecture.errors.is_empty() {
+        failed_policies.push("architecture-rules".to_string());
+    }
     let mut enabled_policies = fail_on
         .iter()
         .map(|policy| policy.as_str().to_string())
         .collect::<Vec<_>>();
     if !config.policy.rules.is_empty() {
         enabled_policies.push("configured-rules".to_string());
+    }
+    if !config.architecture.rules.is_empty() {
+        enabled_policies.push("architecture-rules".to_string());
     }
     let report = json!({
         "version": 2,
@@ -100,6 +112,8 @@ pub(crate) fn run_check(
         "practice_warnings": practices.warnings,
         "reliability_findings": reliability.errors,
         "reliability_warnings": reliability.warnings,
+        "architecture_violations": architecture.errors,
+        "architecture_warnings": architecture.warnings,
         "operational_failures": operational_failures,
         "waived_findings": waived_findings,
         "expired_waivers": expired_waivers,
@@ -314,6 +328,15 @@ fn operational_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
         .filter(|record| record["status"] == "breached")
         .cloned()
         .collect()
+}
+
+fn architecture_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
+    documents
+        .get("architecture_rules.json")
+        .map(artifact_payload)
+        .and_then(|payload| payload["violations"].as_array())
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn reliability_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
