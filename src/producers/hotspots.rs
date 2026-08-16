@@ -7,12 +7,14 @@ use crate::facts::{FileFacts, FunctionFact, RunContext};
 use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
 use crate::util::{normalize_slashes, round2};
 
+const COMPLEXITY_METRIC_MODEL_ID: &str = "rqlens.rust_standard_complexity";
+const COMPLEXITY_METRIC_MODEL_VERSION: u64 = 1;
+
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let facts = &context.source_facts;
     let confidence = source_confidence(&config.source_roots, facts);
     let mut rows = facts
         .iter()
-        .filter(|fact| fact.parse_status == "ok")
         .flat_map(|fact| hotspot_rows(fact, &confidence))
         .collect::<Vec<_>>();
 
@@ -21,6 +23,13 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
 }
 
 fn hotspot_rows(fact: &FileFacts, confidence: &Value) -> Vec<Value> {
+    if fact.parse_status != "ok" {
+        return fact
+            .source_metrics_available
+            .then(|| partial_module_hotspot_row(fact, confidence))
+            .into_iter()
+            .collect();
+    }
     let function_scores = fact
         .items
         .functions
@@ -73,6 +82,10 @@ fn function_hotspot_row(
         "branch_pressure": function.branch_pressure,
         "path_pressure": function.path_pressure,
         "max_nesting_depth": function.max_nesting_depth,
+        "cyclomatic_complexity": function.cyclomatic_complexity,
+        "cognitive_complexity": function.cognitive_complexity,
+        "complexity_metric_model_id": COMPLEXITY_METRIC_MODEL_ID,
+        "complexity_metric_model_version": COMPLEXITY_METRIC_MODEL_VERSION,
         "score": score,
         "quality_score": score,
         "risk_level": risk_level(score, 19.15, 32.98, 80.08),
@@ -132,6 +145,25 @@ fn module_hotspot_row(
     let size_contribution = size_pressure * 0.50;
     let quality_score =
         round2(max_contribution + p95_contribution + mean_contribution + size_contribution);
+    let cyclomatic_sum = function_scores
+        .iter()
+        .map(|(function, _)| function.cyclomatic_complexity)
+        .sum::<usize>();
+    let cognitive_sum = function_scores
+        .iter()
+        .map(|(function, _)| function.cognitive_complexity)
+        .sum::<usize>();
+    let cyclomatic_max = function_scores
+        .iter()
+        .map(|(function, _)| function.cyclomatic_complexity)
+        .max()
+        .unwrap_or_default();
+    let cognitive_max = function_scores
+        .iter()
+        .map(|(function, _)| function.cognitive_complexity)
+        .max()
+        .unwrap_or_default();
+    let function_count = function_scores.len();
     json!({
         "name": normalize_slashes(&fact.path),
         "module_key": fact.module_key,
@@ -146,7 +178,15 @@ fn module_hotspot_row(
         "sloc": sloc,
         "cloc": fact.source.source_comment_line_count,
         "nom_fn": fact.source.function_count,
-        "function_count": function_scores.len(),
+        "function_count": function_count,
+        "cyclomatic_complexity_sum": cyclomatic_sum,
+        "cyclomatic_complexity_average": if function_count > 0 { round2(cyclomatic_sum as f64 / function_count as f64) } else { 0.0 },
+        "cyclomatic_complexity_max": cyclomatic_max,
+        "cognitive_complexity_sum": cognitive_sum,
+        "cognitive_complexity_average": if function_count > 0 { round2(cognitive_sum as f64 / function_count as f64) } else { 0.0 },
+        "cognitive_complexity_max": cognitive_max,
+        "complexity_metric_model_id": COMPLEXITY_METRIC_MODEL_ID,
+        "complexity_metric_model_version": COMPLEXITY_METRIC_MODEL_VERSION,
         "max_function_score": round2(maximum),
         "p95_function_score": round2(p95),
         "mean_function_score": round2(mean),
@@ -162,6 +202,48 @@ fn module_hotspot_row(
         ],
         "signals": if sloc >= 250.0 || maximum >= 60.0 { "watch" } else { "stable" },
         "complexity_density": if sloc > 0.0 { round2(quality_score / sloc) } else { 0.0 },
+        "risk_model_id": MODEL_ID,
+        "risk_model_version": MODEL_VERSION,
+        "risk_calibration": "hotspots_module",
+        "measurement_confidence": confidence,
+    })
+}
+
+fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
+    json!({
+        "name": normalize_slashes(&fact.path),
+        "module_key": fact.module_key,
+        "module_id": fact.module_id,
+        "package_name": fact.package_name,
+        "target_name": fact.target_name,
+        "identity_backend": fact.identity_backend,
+        "kind": "module",
+        "path": normalize_slashes(&fact.path),
+        "start_line": 1,
+        "end_line": fact.source.source_line_count,
+        "sloc": fact.source.source_nonblank_line_count,
+        "cloc": fact.source.source_comment_line_count,
+        "function_count": Value::Null,
+        "cyclomatic_complexity_sum": Value::Null,
+        "cyclomatic_complexity_average": Value::Null,
+        "cyclomatic_complexity_max": Value::Null,
+        "cognitive_complexity_sum": Value::Null,
+        "cognitive_complexity_average": Value::Null,
+        "cognitive_complexity_max": Value::Null,
+        "complexity_metric_model_id": COMPLEXITY_METRIC_MODEL_ID,
+        "complexity_metric_model_version": COMPLEXITY_METRIC_MODEL_VERSION,
+        "max_function_score": Value::Null,
+        "p95_function_score": Value::Null,
+        "mean_function_score": Value::Null,
+        "quality_score": Value::Null,
+        "size_score": round2((fact.source.source_nonblank_line_count as f64 / 10.0).min(20.0)),
+        "score": Value::Null,
+        "risk_level": "unknown",
+        "score_components": [],
+        "signals": "syntax unavailable",
+        "complexity_density": Value::Null,
+        "parse_status": fact.parse_status,
+        "evidence_status": "partial",
         "risk_model_id": MODEL_ID,
         "risk_model_version": MODEL_VERSION,
         "risk_calibration": "hotspots_module",

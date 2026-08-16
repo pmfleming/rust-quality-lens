@@ -58,6 +58,17 @@ fragile:
   confidence signals
 
 Unsupported patterns are reported rather than silently treated as absent.
+Readable files that fail full `syn` parsing retain text-level line, nonblank,
+comment, crate-documentation, path, and Cargo target evidence. Their syntax
+facts remain explicitly unavailable: hotspot rows use `null` scores and map
+risk inputs that require syntax stay unknown rather than becoming zero.
+
+Function facts also include versioned, standard-form raw complexity metrics.
+Cyclomatic complexity starts at one and counts Rust decisions, match arms,
+`?`, and short-circuit boolean operators. Cognitive complexity counts nested
+control flow, else branches, logical-operator sequences, labeled jumps, and
+closure nesting. Module hotspot rows aggregate these raw values without feeding
+them into the calibrated hotspot score.
 
 ## Measurement Confidence
 

@@ -22,6 +22,8 @@ All notable changes to this project will be documented here. The format follows 
 - Owned, reasoned, expiring policy waivers with path scoping and SARIF suppression.
 - Stable per-rule finding limits with severity and path/package exclusions.
 - Executable changed-line coverage in changed-code review output.
+- Versioned cyclomatic and cognitive complexity facts on function hotspots, with module aggregates.
+- Partial text-level source evidence for readable Rust files that fail syntax parsing.
 
 ### Changed
 
@@ -39,5 +41,6 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Fixed
 
+- `measure all` coverage of the escape-hatch producer is guarded by a regression test.
 - Bare `crate`, `self`, and `super` import prefixes no longer create false semantic dependency edges to the crate root or inflate cycle risk.
 - Calibration project specifications now trim surrounding path whitespace before canonicalization.

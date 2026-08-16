@@ -44,6 +44,8 @@ pub(crate) struct FileFacts {
     #[serde(default)]
     pub(crate) is_entrypoint: bool,
     pub(crate) parse_status: String,
+    #[serde(default = "default_true")]
+    pub(crate) source_metrics_available: bool,
     #[serde(flatten)]
     pub(crate) graph: FileGraphFacts,
     #[serde(flatten)]
@@ -68,6 +70,7 @@ impl FileFacts {
             entrypoint_kind: None,
             is_entrypoint: false,
             parse_status: "ok".to_string(),
+            source_metrics_available: true,
             graph: FileGraphFacts::default(),
             source: SourceMetrics::default(),
             items: FileItems::default(),
@@ -78,6 +81,10 @@ impl FileFacts {
 
 fn default_target_kind() -> String {
     "module".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -147,6 +154,10 @@ pub(crate) struct FunctionFact {
     pub(crate) branch_pressure: usize,
     pub(crate) path_pressure: usize,
     pub(crate) max_nesting_depth: usize,
+    #[serde(default)]
+    pub(crate) cyclomatic_complexity: usize,
+    #[serde(default)]
+    pub(crate) cognitive_complexity: usize,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

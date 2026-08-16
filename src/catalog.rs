@@ -68,7 +68,7 @@ fn task_definitions() -> Vec<TaskDefinition> {
             category: "quality",
             subcategory: "hotspots",
             title: "Hotspots",
-            description: "Ranks file-level branch, path, size, and maintainability pressure using RQLens-specific proxies.",
+            description: "Reports standard cyclomatic and cognitive complexity, then ranks function and module branch, path, nesting, and size pressure using RQLens-specific proxies.",
             output_file: "hotspots.json",
             depends_on: vec![],
             expensive: false,

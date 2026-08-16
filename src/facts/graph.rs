@@ -85,7 +85,7 @@ pub(crate) fn module_graph(facts: &[FileFacts]) -> ModuleGraph {
 fn module_index(facts: &[FileFacts]) -> BTreeMap<String, ModuleInfo> {
     let mut modules = BTreeMap::new();
     for fact in facts {
-        if fact.parse_status == "ok" {
+        if fact.source_metrics_available {
             modules.insert(
                 fact.module_id.clone(),
                 ModuleInfo {
@@ -316,6 +316,21 @@ mod tests {
         assert!(is_module_path_probe(Some("crate::module::use")));
         assert!(is_module_path_probe(Some("crate::module::self")));
         assert!(!is_module_path_probe(Some("crate::module::function")));
+    }
+
+    #[test]
+    fn partial_source_metrics_keep_syntax_failed_modules_visible() {
+        let mut fact = FileFacts::test_fact("/workspace/src/broken.rs", "broken");
+        fact.module_id = "test::shared::broken".to_string();
+        fact.parse_status = "parse_error: expected expression".to_string();
+        fact.source.source_nonblank_line_count = 12;
+
+        let graph = module_graph(&[fact]);
+        let Some(module) = graph.modules.get("test::shared::broken") else {
+            panic!("partially measured module should remain in the graph");
+        };
+        assert_eq!(module.source_nonblank_line_count, 12);
+        assert!(graph.dependencies["test::shared::broken"].is_empty());
     }
 
     #[test]

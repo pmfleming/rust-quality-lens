@@ -235,6 +235,34 @@ output_dir = "target/analysis"
     root
 }
 
+fn write_syntax_error_fixture(name: &str) -> PathBuf {
+    let root = repo_root().join("target").join("test-fixtures").join(name);
+    if root.exists() {
+        fs::remove_dir_all(&root).expect("old syntax-error fixture should be removable");
+    }
+    fs::create_dir_all(root.join("src")).expect("syntax-error fixture src should be created");
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"syntax-error-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .expect("syntax-error manifest should be written");
+    fs::write(
+        root.join("rqlens.toml"),
+        r#"project_name = "syntax-error-fixture"
+project_root = "."
+source_roots = ["src"]
+output_dir = "target/analysis"
+"#,
+    )
+    .expect("syntax-error config should be written");
+    fs::write(
+        root.join("src/lib.rs"),
+        "//! Partially measurable crate.\n\npub fn broken( {\n    // source metrics survive\n",
+    )
+    .expect("malformed Rust source should be written");
+    root
+}
+
 fn write_entrypoint_fixture(name: &str) -> PathBuf {
     let root = repo_root().join("target").join("test-fixtures").join(name);
     if root.exists() {
@@ -572,13 +600,26 @@ fn generated_artifacts_keep_expected_top_level_shapes() {
             && row.get("score_components").is_some()
             && row.get("measurement_confidence").is_some()
     }));
-    assert!(
-        hotspots
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["kind"] == "function")
+    let function = hotspots
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "function")
+        .expect("function hotspot should be emitted");
+    assert!(function["cyclomatic_complexity"].as_u64().is_some());
+    assert!(function["cognitive_complexity"].as_u64().is_some());
+    assert_eq!(
+        function["complexity_metric_model_id"],
+        "rqlens.rust_standard_complexity"
     );
+    let module = hotspots
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "module")
+        .expect("module hotspot should be emitted");
+    assert!(module["cyclomatic_complexity_sum"].as_u64().is_some());
+    assert!(module["cognitive_complexity_sum"].as_u64().is_some());
     let correctness = read_json(analysis.join("correctness_review.json"));
     for key in ["version", "generated_from", "summary", "tests"] {
         assert!(correctness.get(key).is_some(), "missing {key}");
@@ -1130,6 +1171,42 @@ fn hotspots_report_syntax_fact_confidence() {
         serde_json::json!(["rust_source_files", "rust_syntax_facts"])
     );
     assert!(confidence["missing_input"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn syntax_failures_preserve_partial_source_evidence() {
+    let fixture = write_syntax_error_fixture("partial-syntax-evidence");
+    let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
+    let output = run(&["measure", "hotspots", "--config", &config]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let payload = read_json(fixture.join("target/analysis/hotspots.json"));
+    let rows = payload.as_array().expect("hotspots should be records");
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row["kind"], "module");
+    assert_eq!(row["evidence_status"], "partial");
+    assert!(
+        row["parse_status"]
+            .as_str()
+            .unwrap()
+            .starts_with("parse_error:")
+    );
+    assert_eq!(row["sloc"], 1);
+    assert_eq!(row["cloc"], 2);
+    assert!(row["score"].is_null());
+    assert_eq!(
+        row["measurement_confidence"]["observed_inputs"]["rust_syntax_fact_files"],
+        0
+    );
+    assert_eq!(
+        row["measurement_confidence"]["observed_inputs"]["partial_source_metric_files"],
+        1
+    );
 }
 
 #[test]

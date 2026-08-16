@@ -330,6 +330,22 @@ an empty result remains distinguishable from incomplete extraction. Artifact
 schema version `2` is the current measurement contract; auxiliary performance,
 outcome, and telemetry documents currently use schema version `1`.
 
+Function rows in `hotspots.json` include raw `cyclomatic_complexity` and
+`cognitive_complexity` under metric model
+`rqlens.rust_standard_complexity`, version 1. Cyclomatic complexity starts at
+one and counts Rust decisions, match arms, `?`, and short-circuit boolean
+operators. Cognitive complexity counts nested control-flow structures, else
+branches, logical-operator sequences, labeled jumps, and closure nesting.
+Module rows provide sum, average, and maximum aggregates. These raw metrics do
+not change the calibrated hotspot score.
+
+When a Rust file cannot be parsed but remains readable, RQLens preserves its
+text-level line and comment counts. Hotspot output contains a partial module row
+with unknown (`null`) syntax-derived scores, and architecture output retains the
+module with unknown syntax-derived risk inputs. Confidence reports the parse
+failure and distinguishes complete syntax facts, partial source metrics, and
+unreadable files.
+
 `clones.json` reports multiple clone and duplication engines:
 
 - `token`: normalized token-window repeats

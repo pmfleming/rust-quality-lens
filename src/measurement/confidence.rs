@@ -50,6 +50,18 @@ pub(crate) fn source_confidence(paths: &[String], facts: &[FileFacts]) -> Value 
         .iter()
         .filter(|fact| fact.identity_backend == "cargo_metadata")
         .count();
+    let syntax_fact_files = facts
+        .iter()
+        .filter(|fact| fact.parse_status == "ok")
+        .count();
+    let partial_source_metric_files = facts
+        .iter()
+        .filter(|fact| fact.parse_status != "ok" && fact.source_metrics_available)
+        .count();
+    let unreadable_source_files = facts
+        .iter()
+        .filter(|fact| !fact.source_metrics_available)
+        .count();
     json!({
         "complete": complete,
         "partial": !complete,
@@ -57,7 +69,9 @@ pub(crate) fn source_confidence(paths: &[String], facts: &[FileFacts]) -> Value 
         "required_inputs": ["rust_source_files", "rust_syntax_facts"],
         "observed_inputs": {
             "rust_source_files": files.len(),
-            "rust_syntax_fact_files": facts.len(),
+            "rust_syntax_fact_files": syntax_fact_files,
+            "partial_source_metric_files": partial_source_metric_files,
+            "unreadable_source_files": unreadable_source_files,
             "cargo_metadata_identity_files": cargo_metadata_identity_files,
             "cargo_manifest_identity_files": facts.iter().filter(|fact| fact.identity_backend == "cargo_manifest").count(),
             "identity_fallback_files": identity_fallback_files,

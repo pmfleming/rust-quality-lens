@@ -12,10 +12,10 @@ use std::path::Path;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::{
-    Attribute, BinOp, ExprBinary, ExprCall, ExprForLoop, ExprIf, ExprLoop, ExprMatch, ExprPath,
-    ExprRawAddr, ExprTry, ExprWhile, Fields, ForeignItem, ImplItem, ImplItemFn, Item, ItemEnum,
-    ItemFn, ItemForeignMod, ItemImpl, ItemStatic, ItemStruct, ItemUse, ReturnType, Type, TypePath,
-    UseTree,
+    Attribute, BinOp, ExprBinary, ExprBreak, ExprCall, ExprClosure, ExprContinue, ExprForLoop,
+    ExprIf, ExprLoop, ExprMatch, ExprPath, ExprRawAddr, ExprTry, ExprWhile, Fields, ForeignItem,
+    ImplItem, ImplItemFn, Item, ItemEnum, ItemFn, ItemForeignMod, ItemImpl, ItemStatic, ItemStruct,
+    ItemUse, ReturnType, Type, TypePath, UseTree,
 };
 
 #[derive(Serialize)]
@@ -26,6 +26,7 @@ struct FileFacts {
     entrypoint_kind: Option<String>,
     is_entrypoint: bool,
     parse_status: String,
+    source_metrics_available: bool,
     dependencies: Vec<String>,
     dependency_references: Vec<DependencyReferenceFact>,
     child_modules: Vec<String>,
@@ -95,6 +96,8 @@ struct FunctionFact {
     branch_pressure: usize,
     path_pressure: usize,
     max_nesting_depth: usize,
+    cyclomatic_complexity: usize,
+    cognitive_complexity: usize,
 }
 
 #[derive(Serialize)]
@@ -196,7 +199,11 @@ impl FactVisitor {
         }
     }
 
-    fn into_facts(mut self) -> FileFacts {
+    fn into_facts(self) -> FileFacts {
+        self.into_facts_with_status("ok".to_string())
+    }
+
+    fn into_facts_with_status(mut self, parse_status: String) -> FileFacts {
         let target_kind = target_kind_for_path(&self.path).to_string();
         let entrypoint_kind = entrypoint_kind_for_path(&self.path).map(str::to_string);
         let is_entrypoint = entrypoint_kind.is_some();
@@ -226,7 +233,8 @@ impl FactVisitor {
             target_kind,
             entrypoint_kind,
             is_entrypoint,
-            parse_status: "ok".to_string(),
+            parse_status,
+            source_metrics_available: true,
             dependencies: self.dependencies,
             dependency_references: self.dependency_references,
             child_modules: self.child_modules,
@@ -401,6 +409,11 @@ impl FactVisitor {
             ..FunctionComplexity::default()
         };
         complexity.visit_block(body);
+        let mut standard_complexity = StandardComplexity {
+            cyclomatic_complexity: 1,
+            ..StandardComplexity::default()
+        };
+        standard_complexity.visit_block(body);
         let start_line = span.start().line;
         let end_line = body.brace_token.span.close().end().line;
         self.functions.push(FunctionFact {
@@ -414,6 +427,8 @@ impl FactVisitor {
             branch_pressure: complexity.branch_pressure,
             path_pressure: complexity.path_pressure,
             max_nesting_depth: complexity.max_nesting_depth,
+            cyclomatic_complexity: standard_complexity.cyclomatic_complexity,
+            cognitive_complexity: standard_complexity.cognitive_complexity,
         });
     }
 }
@@ -473,6 +488,137 @@ impl<'ast> Visit<'ast> for FunctionComplexity {
     fn visit_expr_try(&mut self, expression: &'ast ExprTry) {
         self.branch_pressure += 1;
         visit::visit_expr_try(self, expression);
+    }
+}
+
+#[derive(Default)]
+struct StandardComplexity {
+    cyclomatic_complexity: usize,
+    cognitive_complexity: usize,
+    cognitive_nesting: usize,
+    logical_expression_depth: usize,
+    next_if_is_else_if: bool,
+}
+
+impl StandardComplexity {
+    fn enter_cognitive_structure(&mut self) {
+        self.cognitive_complexity += 1 + self.cognitive_nesting;
+        self.cognitive_nesting += 1;
+    }
+
+    fn leave_cognitive_structure(&mut self) {
+        self.cognitive_nesting = self.cognitive_nesting.saturating_sub(1);
+    }
+
+    fn logical_sequence_complexity(expression: &ExprBinary) -> usize {
+        fn operators(expression: &syn::Expr, result: &mut Vec<bool>) {
+            if let syn::Expr::Binary(binary) = expression
+                && matches!(binary.op, BinOp::And(_) | BinOp::Or(_))
+            {
+                operators(&binary.left, result);
+                result.push(matches!(binary.op, BinOp::And(_)));
+                operators(&binary.right, result);
+            }
+        }
+
+        let mut sequence = Vec::new();
+        operators(&syn::Expr::Binary(expression.clone()), &mut sequence);
+        sequence
+            .windows(2)
+            .filter(|pair| pair[0] != pair[1])
+            .count()
+            + usize::from(!sequence.is_empty())
+    }
+}
+
+impl<'ast> Visit<'ast> for StandardComplexity {
+    fn visit_expr_if(&mut self, expression: &'ast ExprIf) {
+        self.cyclomatic_complexity += 1;
+        let is_else_if = std::mem::take(&mut self.next_if_is_else_if);
+        if !is_else_if {
+            self.enter_cognitive_structure();
+        }
+
+        self.visit_expr(&expression.cond);
+        self.visit_block(&expression.then_branch);
+        if let Some((_, alternative)) = &expression.else_branch {
+            self.cognitive_complexity += 1;
+            if matches!(alternative.as_ref(), syn::Expr::If(_)) {
+                self.next_if_is_else_if = true;
+            }
+            self.visit_expr(alternative);
+        }
+
+        if !is_else_if {
+            self.leave_cognitive_structure();
+        }
+    }
+
+    fn visit_expr_match(&mut self, expression: &'ast ExprMatch) {
+        self.cyclomatic_complexity += expression.arms.len();
+        self.enter_cognitive_structure();
+        visit::visit_expr_match(self, expression);
+        self.leave_cognitive_structure();
+    }
+
+    fn visit_expr_for_loop(&mut self, expression: &'ast ExprForLoop) {
+        self.cyclomatic_complexity += 1;
+        self.enter_cognitive_structure();
+        visit::visit_expr_for_loop(self, expression);
+        self.leave_cognitive_structure();
+    }
+
+    fn visit_expr_while(&mut self, expression: &'ast ExprWhile) {
+        self.cyclomatic_complexity += 1;
+        self.enter_cognitive_structure();
+        visit::visit_expr_while(self, expression);
+        self.leave_cognitive_structure();
+    }
+
+    fn visit_expr_loop(&mut self, expression: &'ast ExprLoop) {
+        self.cyclomatic_complexity += 1;
+        self.enter_cognitive_structure();
+        visit::visit_expr_loop(self, expression);
+        self.leave_cognitive_structure();
+    }
+
+    fn visit_expr_binary(&mut self, expression: &'ast ExprBinary) {
+        if matches!(expression.op, BinOp::And(_) | BinOp::Or(_)) {
+            self.cyclomatic_complexity += 1;
+            if self.logical_expression_depth == 0 {
+                self.cognitive_complexity += Self::logical_sequence_complexity(expression);
+            }
+            self.logical_expression_depth += 1;
+            visit::visit_expr_binary(self, expression);
+            self.logical_expression_depth = self.logical_expression_depth.saturating_sub(1);
+        } else {
+            visit::visit_expr_binary(self, expression);
+        }
+    }
+
+    fn visit_expr_try(&mut self, expression: &'ast ExprTry) {
+        self.cyclomatic_complexity += 1;
+        visit::visit_expr_try(self, expression);
+    }
+
+    fn visit_expr_closure(&mut self, expression: &'ast ExprClosure) {
+        self.cognitive_nesting += 1;
+        visit::visit_expr_closure(self, expression);
+        self.cognitive_nesting = self.cognitive_nesting.saturating_sub(1);
+    }
+
+    fn visit_expr_break(&mut self, expression: &'ast ExprBreak) {
+        if expression.label.is_some() {
+            self.cognitive_complexity += 1;
+        }
+        visit::visit_expr_break(self, expression);
+    }
+
+    fn visit_expr_continue(&mut self, expression: &'ast ExprContinue) {
+        if expression.label.is_some() {
+            self.cognitive_complexity += 1;
+        }
+        visit::visit_expr_continue(self, expression);
     }
 }
 
@@ -902,7 +1048,10 @@ fn run() -> Result<(), Box<dyn Error>> {
         let file = match syn::parse_file(&content) {
             Ok(file) => file,
             Err(error) => {
-                results.push(failed_record(path, format!("parse_error: {error}")));
+                results.push(
+                    FactVisitor::new(path, &content)
+                        .into_facts_with_status(format!("parse_error: {error}")),
+                );
                 continue;
             }
         };
@@ -923,6 +1072,7 @@ fn failed_record(path: &str, parse_status: String) -> FileFacts {
         entrypoint_kind: entrypoint_kind_for_path(path).map(str::to_string),
         is_entrypoint: entrypoint_kind_for_path(path).is_some(),
         parse_status,
+        source_metrics_available: false,
         dependencies: Vec::new(),
         dependency_references: Vec::new(),
         child_modules: Vec::new(),
@@ -1375,5 +1525,22 @@ fn nested(left: bool, right: bool) {
         assert_eq!(function.max_nesting_depth, 3);
         assert!(function.branch_pressure >= 6);
         assert!(function.path_pressure >= 4);
+        assert_eq!(function.cyclomatic_complexity, 5);
+        assert_eq!(function.cognitive_complexity, 7);
+    }
+
+    #[test]
+    fn syntax_failures_preserve_text_source_metrics() {
+        let source = "//! Partial file\nfn broken( {\n    // retained comment\n";
+        let facts = FactVisitor::new("src/broken.rs", source)
+            .into_facts_with_status("parse_error: expected pattern".to_string());
+
+        assert!(facts.source_metrics_available);
+        assert!(facts.parse_status.starts_with("parse_error:"));
+        assert_eq!(facts.source_line_count, 3);
+        assert_eq!(facts.source_nonblank_line_count, 1);
+        assert_eq!(facts.source_comment_line_count, 2);
+        assert!(facts.has_crate_docs);
+        assert!(facts.functions.is_empty());
     }
 }

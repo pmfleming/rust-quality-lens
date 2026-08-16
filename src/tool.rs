@@ -83,3 +83,17 @@ impl MeasureTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::MeasureTool;
+
+    #[test]
+    fn measure_all_includes_escape_hatches() {
+        assert!(
+            MeasureTool::all_tools()
+                .iter()
+                .any(|tool| matches!(tool, MeasureTool::EscapeHatches))
+        );
+    }
+}
