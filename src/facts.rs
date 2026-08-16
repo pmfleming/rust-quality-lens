@@ -242,68 +242,70 @@ pub(crate) struct RunContext {
 
 impl RunContext {
     pub(crate) fn new(config: &LensConfig, tools: &[MeasureTool]) -> Result<Self> {
-        let needs_source_facts = tools.iter().any(|tool| {
-            matches!(
-                tool,
-                MeasureTool::Hotspots
-                    | MeasureTool::Clones
-                    | MeasureTool::EscapeHatches
-                    | MeasureTool::Reliability
-                    | MeasureTool::ApiHealth
-                    | MeasureTool::TypeHealth
-                    | MeasureTool::Correctness
-                    | MeasureTool::CorrectnessRun
-                    | MeasureTool::Locality
-                    | MeasureTool::Leverage
-                    | MeasureTool::Map
-                    | MeasureTool::Coverage
-            )
-        });
-        let needs_correctness_facts = tools.iter().any(|tool| {
-            matches!(
-                tool,
-                MeasureTool::Clones | MeasureTool::Correctness | MeasureTool::CorrectnessRun
-            )
-        });
-        let mut source_facts = if needs_source_facts {
-            helpers::rust_facts_for_paths(config, &config.source_roots)?
-        } else {
-            Vec::new()
-        };
-        let needs_semantic_identity = tools.iter().any(|tool| {
-            matches!(
-                tool,
-                MeasureTool::Locality | MeasureTool::Leverage | MeasureTool::Map
-            )
-        });
-        let reference_count = source_facts
-            .iter()
-            .map(|fact| fact.graph.dependency_references.len())
-            .sum();
-        let identity_resolution = if needs_semantic_identity {
-            semantic::resolve(config, &mut source_facts)?
-        } else {
-            IdentityResolutionSummary::disabled(config.identity_resolution, reference_count)
-        };
+        let needs_source_facts = tools.iter().any(MeasureTool::requires_source_facts);
+        let needs_correctness_facts = tools.iter().any(MeasureTool::requires_correctness_facts);
+        let mut source_facts = load_source_facts(config, needs_source_facts)?;
+        let identity_resolution = resolve_identities(config, tools, &mut source_facts)?;
         let correctness_paths = if needs_correctness_facts {
             correctness_paths(config)
         } else {
             Vec::new()
         };
-        let correctness_facts = if needs_correctness_facts {
-            if correctness_paths == config.source_roots && needs_source_facts {
-                source_facts.clone()
-            } else {
-                helpers::rust_facts_for_paths(config, &correctness_paths)?
-            }
-        } else {
-            Vec::new()
-        };
+        let correctness_facts = load_correctness_facts(
+            config,
+            &source_facts,
+            &correctness_paths,
+            needs_source_facts,
+            needs_correctness_facts,
+        )?;
         Ok(Self {
             source_facts,
             correctness_facts,
             correctness_paths,
             identity_resolution,
         })
+    }
+}
+
+fn load_source_facts(config: &LensConfig, required: bool) -> Result<Vec<FileFacts>> {
+    if required {
+        helpers::rust_facts_for_paths(config, &config.source_roots)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+fn resolve_identities(
+    config: &LensConfig,
+    tools: &[MeasureTool],
+    source_facts: &mut [FileFacts],
+) -> Result<IdentityResolutionSummary> {
+    if tools.iter().any(MeasureTool::requires_semantic_identity) {
+        return semantic::resolve(config, source_facts);
+    }
+    let reference_count = source_facts
+        .iter()
+        .map(|fact| fact.graph.dependency_references.len())
+        .sum();
+    Ok(IdentityResolutionSummary::disabled(
+        config.identity_resolution,
+        reference_count,
+    ))
+}
+
+fn load_correctness_facts(
+    config: &LensConfig,
+    source_facts: &[FileFacts],
+    paths: &[String],
+    source_facts_loaded: bool,
+    required: bool,
+) -> Result<Vec<FileFacts>> {
+    if !required {
+        return Ok(Vec::new());
+    }
+    if paths == config.source_roots && source_facts_loaded {
+        Ok(source_facts.to_vec())
+    } else {
+        helpers::rust_facts_for_paths(config, paths)
     }
 }

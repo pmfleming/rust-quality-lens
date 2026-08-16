@@ -535,6 +535,28 @@ impl StandardComplexity {
     }
 }
 
+macro_rules! standard_structure_visitor {
+    ($method:ident, $visit:ident, $expression:ty) => {
+        fn $method(&mut self, expression: &'ast $expression) {
+            self.cyclomatic_complexity += 1;
+            self.enter_cognitive_structure();
+            visit::$visit(self, expression);
+            self.leave_cognitive_structure();
+        }
+    };
+}
+
+macro_rules! standard_jump_visitor {
+    ($method:ident, $visit:ident, $expression:ty) => {
+        fn $method(&mut self, expression: &'ast $expression) {
+            if expression.label.is_some() {
+                self.cognitive_complexity += 1;
+            }
+            visit::$visit(self, expression);
+        }
+    };
+}
+
 impl<'ast> Visit<'ast> for StandardComplexity {
     fn visit_expr_if(&mut self, expression: &'ast ExprIf) {
         self.cyclomatic_complexity += 1;
@@ -565,26 +587,9 @@ impl<'ast> Visit<'ast> for StandardComplexity {
         self.leave_cognitive_structure();
     }
 
-    fn visit_expr_for_loop(&mut self, expression: &'ast ExprForLoop) {
-        self.cyclomatic_complexity += 1;
-        self.enter_cognitive_structure();
-        visit::visit_expr_for_loop(self, expression);
-        self.leave_cognitive_structure();
-    }
-
-    fn visit_expr_while(&mut self, expression: &'ast ExprWhile) {
-        self.cyclomatic_complexity += 1;
-        self.enter_cognitive_structure();
-        visit::visit_expr_while(self, expression);
-        self.leave_cognitive_structure();
-    }
-
-    fn visit_expr_loop(&mut self, expression: &'ast ExprLoop) {
-        self.cyclomatic_complexity += 1;
-        self.enter_cognitive_structure();
-        visit::visit_expr_loop(self, expression);
-        self.leave_cognitive_structure();
-    }
+    standard_structure_visitor!(visit_expr_for_loop, visit_expr_for_loop, ExprForLoop);
+    standard_structure_visitor!(visit_expr_while, visit_expr_while, ExprWhile);
+    standard_structure_visitor!(visit_expr_loop, visit_expr_loop, ExprLoop);
 
     fn visit_expr_binary(&mut self, expression: &'ast ExprBinary) {
         if matches!(expression.op, BinOp::And(_) | BinOp::Or(_)) {
@@ -611,19 +616,8 @@ impl<'ast> Visit<'ast> for StandardComplexity {
         self.cognitive_nesting = self.cognitive_nesting.saturating_sub(1);
     }
 
-    fn visit_expr_break(&mut self, expression: &'ast ExprBreak) {
-        if expression.label.is_some() {
-            self.cognitive_complexity += 1;
-        }
-        visit::visit_expr_break(self, expression);
-    }
-
-    fn visit_expr_continue(&mut self, expression: &'ast ExprContinue) {
-        if expression.label.is_some() {
-            self.cognitive_complexity += 1;
-        }
-        visit::visit_expr_continue(self, expression);
-    }
+    standard_jump_visitor!(visit_expr_break, visit_expr_break, ExprBreak);
+    standard_jump_visitor!(visit_expr_continue, visit_expr_continue, ExprContinue);
 }
 
 impl<'ast> Visit<'ast> for FactVisitor {
@@ -1171,37 +1165,41 @@ fn tree_sitter_function_context(
     let mut owner = None;
     let mut ancestor = node.parent();
     while let Some(parent) = ancestor {
-        if parent.kind() == "mod_item"
-            && let Some(name) = parent.child_by_field_name("name")
-            && let Ok(name) = name.utf8_text(source)
-        {
-            modules.push(name.to_string());
-        }
-        if owner.is_none()
-            && parent.kind() == "impl_item"
-            && let Some(ty) = parent.child_by_field_name("type")
-            && let Ok(ty) = ty.utf8_text(source)
-        {
-            owner = Some(ty.split_whitespace().collect::<Vec<_>>().join(" "));
+        match parent.kind() {
+            "mod_item" => modules.extend(tree_sitter_field_text(parent, "name", source)),
+            "impl_item" if owner.is_none() => {
+                owner = tree_sitter_field_text(parent, "type", source)
+                    .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "));
+            }
+            _ => {}
         }
         ancestor = parent.parent();
     }
     modules.reverse();
-    let module_key = if modules.is_empty() {
-        base
-    } else {
-        let prefix = if matches!(base.as_str(), "lib" | "main") {
-            Vec::new()
-        } else {
-            vec![base]
-        };
-        prefix
-            .into_iter()
-            .chain(modules)
-            .collect::<Vec<_>>()
-            .join("::")
-    };
-    (module_key, owner)
+    (tree_sitter_module_key(base, modules), owner)
+}
+
+fn tree_sitter_field_text(
+    node: tree_sitter::Node<'_>,
+    field: &str,
+    source: &[u8],
+) -> Option<String> {
+    node.child_by_field_name(field)?
+        .utf8_text(source)
+        .ok()
+        .map(str::to_string)
+}
+
+fn tree_sitter_module_key(base: String, modules: Vec<String>) -> String {
+    if modules.is_empty() {
+        return base;
+    }
+    let prefix = (!matches!(base.as_str(), "lib" | "main")).then_some(base);
+    prefix
+        .into_iter()
+        .chain(modules)
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 #[derive(Default)]
@@ -1215,54 +1213,88 @@ fn tree_sitter_complexity(
     nesting: usize,
     metrics: &mut TreeSitterComplexity,
 ) {
-    let mut child_nesting = nesting;
-    match node.kind() {
-        "if_expression" => {
-            metrics.cyclomatic_complexity += 1;
-            if node
-                .parent()
-                .is_none_or(|parent| parent.kind() != "else_clause")
-            {
-                metrics.cognitive_complexity += 1 + nesting;
-                child_nesting += 1;
-            }
-        }
-        "for_expression" | "while_expression" | "loop_expression" | "match_expression" => {
-            if node.kind() != "match_expression" {
-                metrics.cyclomatic_complexity += 1;
-            }
-            metrics.cognitive_complexity += 1 + nesting;
-            child_nesting += 1;
-        }
-        "match_arm" => metrics.cyclomatic_complexity += 1,
-        "try_expression" => metrics.cyclomatic_complexity += 1,
-        "else_clause" => metrics.cognitive_complexity += 1,
-        "closure_expression" => child_nesting += 1,
-        "binary_expression" if tree_sitter_logical_operator(node).is_some() => {
-            metrics.cyclomatic_complexity += 1;
-            let parent_is_logical = node
-                .parent()
-                .is_some_and(|parent| tree_sitter_logical_operator(parent).is_some());
-            if !parent_is_logical {
-                metrics.cognitive_complexity += tree_sitter_logical_sequence(node);
-            }
-        }
-        "break_expression" | "continue_expression" => {
-            let mut cursor = node.walk();
-            if node
-                .named_children(&mut cursor)
-                .any(|child| child.kind() == "label")
-            {
-                metrics.cognitive_complexity += 1;
-            }
-        }
-        _ => {}
-    }
-
+    let child_nesting = update_tree_sitter_complexity(node, nesting, metrics);
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         tree_sitter_complexity(child, child_nesting, metrics);
     }
+}
+
+fn update_tree_sitter_complexity(
+    node: tree_sitter::Node<'_>,
+    nesting: usize,
+    metrics: &mut TreeSitterComplexity,
+) -> usize {
+    match node.kind() {
+        "if_expression" => update_tree_sitter_if(node, nesting, metrics),
+        "for_expression" | "while_expression" | "loop_expression" => {
+            update_tree_sitter_structure(nesting, true, metrics)
+        }
+        "match_expression" => update_tree_sitter_structure(nesting, false, metrics),
+        "match_arm" | "try_expression" => {
+            metrics.cyclomatic_complexity += 1;
+            nesting
+        }
+        "else_clause" => {
+            metrics.cognitive_complexity += 1;
+            nesting
+        }
+        "closure_expression" => nesting + 1,
+        "binary_expression" => {
+            update_tree_sitter_binary(node, metrics);
+            nesting
+        }
+        "break_expression" | "continue_expression" => {
+            metrics.cognitive_complexity += usize::from(tree_sitter_has_label(node));
+            nesting
+        }
+        _ => nesting,
+    }
+}
+
+fn update_tree_sitter_if(
+    node: tree_sitter::Node<'_>,
+    nesting: usize,
+    metrics: &mut TreeSitterComplexity,
+) -> usize {
+    metrics.cyclomatic_complexity += 1;
+    if node
+        .parent()
+        .is_some_and(|parent| parent.kind() == "else_clause")
+    {
+        return nesting;
+    }
+    metrics.cognitive_complexity += 1 + nesting;
+    nesting + 1
+}
+
+fn update_tree_sitter_structure(
+    nesting: usize,
+    cyclomatic_increment: bool,
+    metrics: &mut TreeSitterComplexity,
+) -> usize {
+    metrics.cyclomatic_complexity += usize::from(cyclomatic_increment);
+    metrics.cognitive_complexity += 1 + nesting;
+    nesting + 1
+}
+
+fn update_tree_sitter_binary(node: tree_sitter::Node<'_>, metrics: &mut TreeSitterComplexity) {
+    if tree_sitter_logical_operator(node).is_none() {
+        return;
+    }
+    metrics.cyclomatic_complexity += 1;
+    let parent_is_logical = node
+        .parent()
+        .is_some_and(|parent| tree_sitter_logical_operator(parent).is_some());
+    if !parent_is_logical {
+        metrics.cognitive_complexity += tree_sitter_logical_sequence(node);
+    }
+}
+
+fn tree_sitter_has_label(node: tree_sitter::Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .any(|child| child.kind() == "label")
 }
 
 fn tree_sitter_logical_operator(node: tree_sitter::Node<'_>) -> Option<&'static str> {

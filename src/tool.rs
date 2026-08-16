@@ -46,6 +46,21 @@ impl MeasureTool {
         tools
     }
 
+    pub(crate) fn requires_source_facts(&self) -> bool {
+        !matches!(self, Self::All | Self::Practices)
+    }
+
+    pub(crate) fn requires_correctness_facts(&self) -> bool {
+        matches!(
+            self,
+            Self::Clones | Self::Correctness | Self::CorrectnessRun
+        )
+    }
+
+    pub(crate) fn requires_semantic_identity(&self) -> bool {
+        matches!(self, Self::Locality | Self::Leverage | Self::Map)
+    }
+
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::All => "all",
@@ -95,5 +110,15 @@ mod tests {
                 .iter()
                 .any(|tool| matches!(tool, MeasureTool::EscapeHatches))
         );
+    }
+
+    #[test]
+    fn tool_requirements_select_only_needed_fact_backends() {
+        assert!(MeasureTool::Hotspots.requires_source_facts());
+        assert!(MeasureTool::Clones.requires_correctness_facts());
+        assert!(MeasureTool::Map.requires_semantic_identity());
+        assert!(!MeasureTool::Practices.requires_source_facts());
+        assert!(!MeasureTool::Hotspots.requires_correctness_facts());
+        assert!(!MeasureTool::Coverage.requires_semantic_identity());
     }
 }
