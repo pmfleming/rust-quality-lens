@@ -54,6 +54,9 @@ All notable changes to this project will be documented here. The format follows 
 - Automatic source discovery includes custom Cargo target module trees outside `src/` while preserving target-relative module identities.
 - Verification timeouts terminate Cargo's descendant process tree so inherited output pipes cannot keep RQLens blocked past the deadline.
 - Correctness evidence rejects stale aggregate coverage and marks the resulting measurement partial.
+- Unknown configuration fields are rejected instead of silently reverting misspelled options to defaults.
+- Reviewed outcome ingestion rejects malformed labels instead of silently dropping records.
+- Telemetry windows beyond a bounded future clock-skew tolerance are rejected.
 - `measure all` coverage of the escape-hatch producer is guarded by a regression test.
 - Bare `crate`, `self`, and `super` import prefixes no longer create false semantic dependency edges to the crate root or inflate cycle risk.
 - Calibration project specifications now trim surrounding path whitespace before canonicalization.

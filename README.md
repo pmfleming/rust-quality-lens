@@ -100,7 +100,8 @@ miri = false
 explicit source roots, and `rust.helper_manifest` are then resolved from
 `project_root`. If `--config` is omitted, RQLens searches the current directory
 and its parents for `rqlens.toml`. Use `config-schema` for the supported option
-set and defaults.
+set and defaults. Unknown configuration fields are rejected so misspelled gates
+cannot silently fall back to defaults.
 
 Or scaffold a configuration in the current directory:
 
@@ -211,7 +212,7 @@ cargo run --bin rqlens -- telemetry --input production-signals.json --max-age-ho
 cargo run --bin rqlens -- check --fail-on operational-failure --config rqlens.toml
 ```
 
-The input contains a `window.end` RFC 3339 timestamp and a `signals` array. Each signal requires `id`, `kind`, explicit `healthy`/`breached`/`unknown` status, numeric `value`, and `source`; optional module identities connect observations to architecture evidence. Stale windows and unknown statuses reduce confidence rather than silently passing. Replace the example timestamp with the end of the actual observation window.
+The input contains a `window.end` RFC 3339 timestamp and a `signals` array. Each signal requires `id`, `kind`, explicit `healthy`/`breached`/`unknown` status, numeric `value`, and `source`; optional module identities connect observations to architecture evidence. Stale windows and unknown statuses reduce confidence rather than silently passing. Window ends more than five minutes in the future are rejected; the tolerance only accommodates clock skew. Replace the example timestamp with the end of the actual observation window.
 
 ```json
 {
@@ -237,7 +238,7 @@ cargo run --bin rqlens -- outcomes --config rqlens.toml
 cargo run --bin rqlens -- outcomes --labels reviewed-outcomes.json --config rqlens.toml
 ```
 
-The optional labels file is a JSON array with `commit`, `kind`, and optional `modules`, `paths`, and `source`. Inferred commit-message records remain explicitly marked `review_required`; reviewed labels are kept separate in `repository_outcomes.json`.
+The optional labels file is a JSON array with non-empty `commit` and `kind` strings and optional string arrays for `modules` and `paths`. Invalid records reject the complete input rather than being silently dropped. Inferred commit-message records remain explicitly marked `review_required`; reviewed labels are kept separate in `repository_outcomes.json`.
 
 Capture Criterion benchmark estimates and compare them with a prior artifact:
 

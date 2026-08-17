@@ -10,6 +10,7 @@ use std::process::Command;
 pub(crate) const CONFIG_FILE_NAME: &str = "rqlens.toml";
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawConfig {
     project_name: Option<String>,
     project_root: Option<PathBuf>,
@@ -22,6 +23,7 @@ struct RawConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawRustConfig {
     helper_manifest: Option<PathBuf>,
     identity_resolution: Option<SemanticIdentityMode>,
@@ -31,6 +33,7 @@ struct RawRustConfig {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawVerificationConfig {
     timeout_seconds: Option<u64>,
     workspace: Option<bool>,
@@ -164,12 +167,14 @@ impl VerificationConfig {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ArchitectureConfig {
     #[serde(default)]
     pub(crate) rules: Vec<ArchitectureRule>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ArchitectureRule {
     pub(crate) id: String,
     #[serde(default)]
@@ -213,6 +218,7 @@ impl ArchitectureConfig {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PolicyConfig {
     #[serde(default)]
     pub(crate) rules: BTreeMap<String, PolicyRule>,
@@ -231,6 +237,7 @@ pub(crate) enum PolicyRuleLevel {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PolicyRule {
     #[serde(default)]
     pub(crate) level: PolicyRuleLevel,
@@ -243,6 +250,7 @@ pub(crate) struct PolicyRule {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PolicyWaiver {
     pub(crate) rule_id: String,
     #[serde(default)]
@@ -834,8 +842,8 @@ pub(crate) fn config_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        LensConfig, PolicyConfig, PolicyRule, PolicyRuleLevel, PolicyWaiver, VerificationConfig,
-        metadata_source_roots,
+        LensConfig, PolicyConfig, PolicyRule, PolicyRuleLevel, PolicyWaiver, RawConfig,
+        VerificationConfig, metadata_source_roots,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -882,6 +890,21 @@ mod tests {
         assert!(rule.includes(Some("src/generated_code.rs"), Some("application")));
         assert!(!rule.includes(Some("src/lib.rs"), Some("generated-bindings")));
         assert!(rule.includes(Some("src/lib.rs"), Some("application")));
+    }
+
+    #[test]
+    fn unknown_configuration_fields_are_rejected() {
+        assert!(toml::from_str::<RawConfig>("audti = true\n").is_err());
+        assert!(
+            toml::from_str::<RawConfig>("[verification]\nworkspace = true\naudti = true\n")
+                .is_err()
+        );
+        assert!(
+            toml::from_str::<RawConfig>(
+                "[policy.rules.unwrap]\nmax = 0\nexclude_path = [\"generated/**\"]\n"
+            )
+            .is_err()
+        );
     }
 
     #[test]

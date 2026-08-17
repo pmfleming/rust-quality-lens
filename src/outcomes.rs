@@ -176,27 +176,83 @@ fn read_labels(path: &Path) -> Result<Vec<Value>> {
     let Some(labels) = value.as_array() else {
         bail!("outcome labels must be a JSON array");
     };
-    Ok(labels
+    labels
         .iter()
-        .filter_map(|label| {
-            Some(json!({
-                "commit": label["commit"].as_str()?,
-                "timestamp": label.get("timestamp").cloned().unwrap_or(Value::Null),
-                "kind": label["kind"].as_str()?,
-                "subject": label.get("subject").cloned().unwrap_or(Value::Null),
-                "paths": label.get("paths").cloned().unwrap_or_else(|| json!([])),
-                "modules": label.get("modules").cloned().unwrap_or_else(|| json!([])),
-                "evidence_class": "reviewed-label",
-                "review_required": false,
-                "source": label.get("source").cloned().unwrap_or_else(|| json!(normalize_slashes(path))),
-            }))
+        .enumerate()
+        .map(|(index, label)| normalize_label(label, index, path))
+        .collect()
+}
+
+fn normalize_label(label: &Value, index: usize, path: &Path) -> Result<Value> {
+    if !label.is_object() {
+        bail!("outcome label at index {index} must be a JSON object");
+    }
+    let commit = required_label_string(label, "commit", index)?;
+    let kind = required_label_string(label, "kind", index)?;
+    let timestamp = optional_label_string(label, "timestamp", index)?;
+    let subject = optional_label_string(label, "subject", index)?;
+    let paths = label_string_array(label, "paths", index)?;
+    let modules = label_string_array(label, "modules", index)?;
+    let source = match optional_label_string(label, "source", index)? {
+        Value::Null => json!(normalize_slashes(path)),
+        source => source,
+    };
+    Ok(json!({
+        "commit": commit,
+        "timestamp": timestamp,
+        "kind": kind,
+        "subject": subject,
+        "paths": paths,
+        "modules": modules,
+        "evidence_class": "reviewed-label",
+        "review_required": false,
+        "source": source,
+    }))
+}
+
+fn required_label_string<'a>(label: &'a Value, field: &str, index: usize) -> Result<&'a str> {
+    label[field]
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("outcome label at index {index} requires non-empty {field}"))
+}
+
+fn optional_label_string(label: &Value, field: &str, index: usize) -> Result<Value> {
+    match label.get(field) {
+        None | Some(Value::Null) => Ok(Value::Null),
+        Some(Value::String(value)) => Ok(Value::String(value.clone())),
+        Some(_) => bail!("outcome label at index {index} field {field} must be a string"),
+    }
+}
+
+fn label_string_array(label: &Value, field: &str, index: usize) -> Result<Vec<String>> {
+    let Some(value) = label.get(field) else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = value.as_array() else {
+        bail!("outcome label at index {index} field {field} must be an array of strings");
+    };
+    items
+        .iter()
+        .enumerate()
+        .map(|(item_index, item)| {
+            item.as_str()
+                .filter(|value| !value.trim().is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "outcome label at index {index} field {field}[{item_index}] must be a non-empty string"
+                    )
+                })
         })
-        .collect())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_subject, parse_outcomes};
+    use super::{classify_subject, normalize_label, parse_outcomes};
+    use serde_json::json;
+    use std::path::Path;
 
     #[test]
     fn repository_outcomes_separate_reverts_defects_and_security() {
@@ -209,5 +265,37 @@ mod tests {
         let records =
             parse_outcomes("commit:abc\t2026-01-01T00:00:00Z\tfix parser\n\nsrc/parser.rs\n");
         assert_eq!(records[0]["modules"][0], "parser");
+    }
+
+    #[test]
+    fn reviewed_labels_are_validated_without_silent_drops() {
+        let valid = normalize_label(
+            &json!({
+                "commit": "abc",
+                "kind": "defect",
+                "modules": ["app::lib::parser"]
+            }),
+            0,
+            Path::new("labels.json"),
+        );
+        assert!(valid.is_ok());
+
+        let missing_commit = normalize_label(
+            &json!({"kind": "defect", "modules": ["parser"]}),
+            2,
+            Path::new("labels.json"),
+        );
+        assert!(missing_commit.is_err_and(|error| {
+            error
+                .to_string()
+                .contains("index 2 requires non-empty commit")
+        }));
+
+        let malformed_modules = normalize_label(
+            &json!({"commit": "abc", "kind": "defect", "modules": "parser"}),
+            3,
+            Path::new("labels.json"),
+        );
+        assert!(malformed_modules.is_err());
     }
 }

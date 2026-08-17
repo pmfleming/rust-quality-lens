@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use crate::config::LensConfig;
 use crate::util::{project_input_fingerprint, stable_hash, write_json};
 
+const MAX_FUTURE_SKEW_SECONDS: i64 = 300;
+
 pub(crate) fn ingest(config: &LensConfig, input: &Path, max_age_hours: u64) -> Result<PathBuf> {
     let text = fs::read_to_string(input)
         .with_context(|| format!("reading telemetry evidence {}", input.display()))?;
@@ -20,7 +22,8 @@ pub(crate) fn ingest(config: &LensConfig, input: &Path, max_age_hours: u64) -> R
     let end = DateTime::parse_from_rfc3339(window_end)
         .with_context(|| format!("invalid telemetry window.end {window_end}"))?
         .with_timezone(&Utc);
-    let age_hours = Utc::now().signed_duration_since(end).num_hours().max(0) as u64;
+    let now = Utc::now();
+    let age_hours = telemetry_age_hours(end, now)?;
     let stale = age_hours > max_age_hours;
     let records = signals
         .iter()
@@ -74,6 +77,16 @@ pub(crate) fn ingest(config: &LensConfig, input: &Path, max_age_hours: u64) -> R
     Ok(output)
 }
 
+fn telemetry_age_hours(end: DateTime<Utc>, now: DateTime<Utc>) -> Result<u64> {
+    if end > now + chrono::Duration::seconds(MAX_FUTURE_SKEW_SECONDS) {
+        bail!(
+            "telemetry window.end {end} is in the future beyond the allowed {} second clock skew",
+            MAX_FUTURE_SKEW_SECONDS
+        );
+    }
+    Ok(now.signed_duration_since(end).num_hours().max(0) as u64)
+}
+
 fn normalize_signal(signal: &Value) -> Result<Value> {
     let id = required_string(signal, "id")?;
     let kind = required_string(signal, "kind")?;
@@ -110,8 +123,25 @@ fn required_string<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_signal;
+    use super::{normalize_signal, telemetry_age_hours};
+    use chrono::{TimeZone, Utc};
     use serde_json::json;
+
+    #[test]
+    fn future_telemetry_windows_are_rejected_beyond_clock_skew() {
+        let Some(now) = Utc.with_ymd_and_hms(2026, 8, 20, 12, 0, 0).single() else {
+            panic!("fixed UTC timestamp should be valid");
+        };
+        assert_eq!(
+            telemetry_age_hours(now + chrono::Duration::minutes(4), now).ok(),
+            Some(0)
+        );
+        assert!(telemetry_age_hours(now + chrono::Duration::minutes(6), now).is_err());
+        assert_eq!(
+            telemetry_age_hours(now - chrono::Duration::hours(25), now).ok(),
+            Some(25)
+        );
+    }
 
     #[test]
     fn telemetry_status_must_be_explicit() {
