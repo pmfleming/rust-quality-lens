@@ -9,11 +9,12 @@ use crate::measurement::{
     RULESET_ID, RULESET_VERSION, classify_path, module_for_path, project_relative_path,
     source_confidence, test_kind_for_path, title_from_name,
 };
+use crate::util::project_input_fingerprint;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> Result<Value> {
     let paths = &context.correctness_paths;
     let facts = &context.correctness_facts;
-    let confidence = source_confidence(paths, facts);
+    let mut confidence = source_confidence(paths, facts);
     let statuses = if run {
         run_tests(config)?
     } else {
@@ -26,7 +27,11 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> R
         .map(|fact| fact.module_key.clone())
         .collect::<BTreeSet<_>>();
     let statuses_ref = &statuses;
-    let coverage_evidence = coverage_evidence(config);
+    let coverage = coverage_evidence(config);
+    if coverage.stale {
+        mark_stale_coverage(&mut confidence);
+    }
+    let coverage_evidence = coverage.records;
     let covered_modules = coverage_evidence
         .iter()
         .filter_map(|row| row["module_key"].as_str())
@@ -110,19 +115,36 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> R
     }))
 }
 
-fn coverage_evidence(config: &LensConfig) -> Vec<Value> {
+#[derive(Default)]
+struct CoverageEvidence {
+    records: Vec<Value>,
+    stale: bool,
+}
+
+fn coverage_evidence(config: &LensConfig) -> CoverageEvidence {
     let path = config.output_dir.join("coverage.json");
     let Ok(text) = fs::read_to_string(path) else {
-        return Vec::new();
+        return CoverageEvidence::default();
     };
     let Ok(document) = serde_json::from_str::<Value>(&text) else {
-        return Vec::new();
+        return CoverageEvidence::default();
     };
+    let current = project_input_fingerprint(&config.project_root, &config.source_roots);
+    coverage_from_document(&document, current["digest"].as_str())
+}
+
+fn coverage_from_document(document: &Value, current_digest: Option<&str>) -> CoverageEvidence {
     if document["measurement_confidence"]["complete"] != true {
-        return Vec::new();
+        return CoverageEvidence::default();
     }
-    let data = document.get("data").unwrap_or(&document);
-    data["files"]
+    if document["input_fingerprint"]["digest"].as_str() != current_digest {
+        return CoverageEvidence {
+            records: Vec::new(),
+            stale: true,
+        };
+    }
+    let data = document.get("data").unwrap_or(document);
+    let records = data["files"]
         .as_array()
         .into_iter()
         .flatten()
@@ -136,7 +158,28 @@ fn coverage_evidence(config: &LensConfig) -> Vec<Value> {
                 "source": "cargo_llvm_cov_aggregate",
             })
         })
-        .collect()
+        .collect();
+    CoverageEvidence {
+        records,
+        stale: false,
+    }
+}
+
+fn mark_stale_coverage(confidence: &mut Value) {
+    let Some(object) = confidence.as_object_mut() else {
+        return;
+    };
+    object.insert("complete".to_string(), Value::Bool(false));
+    object.insert("partial".to_string(), Value::Bool(true));
+    if let Some(stale) = object
+        .entry("stale_input")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+    {
+        stale.push(Value::String(
+            "coverage.json input fingerprint is stale".to_string(),
+        ));
+    }
 }
 
 fn test_row(
@@ -328,8 +371,9 @@ fn status_for_test<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::status_for_test;
+    use super::{coverage_from_document, status_for_test};
     use crate::facts::TestStatus;
+    use serde_json::json;
     use std::collections::HashMap;
 
     fn status(status: &str) -> TestStatus {
@@ -373,5 +417,27 @@ mod tests {
         statuses.insert("two::tests::case".to_string(), status("failed"));
 
         assert!(status_for_test(&statuses, &[], "tests::case").is_none());
+    }
+
+    #[test]
+    fn stale_coverage_is_not_attributed_to_current_sources() {
+        let document = json!({
+            "input_fingerprint": {"digest": "old"},
+            "measurement_confidence": {"complete": true},
+            "data": {"files": [{
+                "module_key": "domain",
+                "module_id": "app::lib::domain",
+                "path": "src/domain.rs",
+                "lines": {"covered": 4, "percent": 100.0}
+            }]}
+        });
+
+        let stale = coverage_from_document(&document, Some("current"));
+        assert!(stale.stale);
+        assert!(stale.records.is_empty());
+
+        let fresh = coverage_from_document(&document, Some("old"));
+        assert!(!fresh.stale);
+        assert_eq!(fresh.records.len(), 1);
     }
 }

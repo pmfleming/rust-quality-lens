@@ -46,6 +46,13 @@ pub fn module_key_for_path(path: &str) -> String {
         for root in env::split_paths(&roots) {
             let root = normalize_path(&root.to_string_lossy());
             let root = root.trim_end_matches('/');
+            if normalized == root {
+                rel = Path::new(&normalized)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(&normalized);
+                break;
+            }
             if let Some(rest) = normalized.strip_prefix(&format!("{root}/")) {
                 rel = rest;
                 break;

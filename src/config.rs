@@ -586,8 +586,13 @@ fn metadata_source_roots(project_root: &Path, metadata: &Value) -> BTreeSet<Path
                 let Some(source) = target["src_path"].as_str().map(PathBuf::from) else {
                     continue;
                 };
-                if !source.starts_with(package_root.join("src")) {
-                    roots.insert(source);
+                if !source.starts_with(package_root.join("src"))
+                    && let Some(parent) = source.parent()
+                {
+                    // A target root such as tools/cli.rs can declare modules below
+                    // tools/cli/. Scan from its containing directory so those files
+                    // are measured and their module keys remain target-relative.
+                    roots.insert(parent.to_path_buf());
                 }
             }
             roots
@@ -930,7 +935,10 @@ mod tests {
             "packages": [
                 {
                     "manifest_path": application.join("Cargo.toml"),
-                    "targets": [{"src_path": application.join("src/lib.rs")}]
+                    "targets": [
+                        {"src_path": application.join("src/lib.rs")},
+                        {"src_path": application.join("tools/custom.rs")}
+                    ]
                 },
                 {
                     "manifest_path": helper.join("Cargo.toml"),
@@ -944,8 +952,9 @@ mod tests {
         });
         let roots = metadata_source_roots(application, &metadata);
         assert!(roots.contains(&application.join("src")));
+        assert!(roots.contains(&application.join("tools")));
         assert!(roots.contains(&helper.join("src")));
-        assert_eq!(roots.len(), 2);
+        assert_eq!(roots.len(), 3);
         Ok(())
     }
 }

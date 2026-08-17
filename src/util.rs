@@ -237,6 +237,14 @@ fn rust_files_at(raw_path: &String) -> Vec<PathBuf> {
     }
     WalkDir::new(path)
         .into_iter()
+        .filter_entry(|entry| {
+            entry.depth() == 0
+                || !entry.file_type().is_dir()
+                || !matches!(
+                    entry.file_name().to_str(),
+                    Some(".git" | ".direnv" | "target")
+                )
+        })
         .filter_map(Result::ok)
         .map(|entry| entry.into_path())
         .filter(|path| is_rust_file(path))

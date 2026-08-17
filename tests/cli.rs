@@ -269,13 +269,12 @@ fn write_entrypoint_fixture(name: &str) -> PathBuf {
         fs::remove_dir_all(&root).expect("old entrypoint fixture should be removable");
     }
     fs::create_dir_all(root.join("src")).expect("entrypoint src should be created");
-    fs::create_dir_all(root.join("tools")).expect("entrypoint tools should be created");
+    fs::create_dir_all(root.join("tools/custom")).expect("entrypoint tools should be created");
     fs::write(
         root.join("rqlens.toml"),
         format!(
             r#"project_name = "{name}"
 project_root = "."
-source_roots = ["src", "tools"]
 output_dir = "target/analysis"
 "#
         ),
@@ -291,6 +290,8 @@ edition = "2024"
 [[bin]]
 name = "custom-tool"
 path = "tools/custom.rs"
+
+[workspace]
 "#,
     )
     .expect("entrypoint manifest should be written");
@@ -338,6 +339,8 @@ fn report(value: i32) {
     fs::write(
         root.join("tools").join("custom.rs"),
         r#"
+mod child;
+
 use crate::domain::value;
 use crate::service::run;
 
@@ -361,6 +364,11 @@ fn report(value: i32) {
 "#,
     )
     .expect("custom bin should be written");
+    fs::write(
+        root.join("tools/custom/child.rs"),
+        "pub fn custom_child() -> i32 { 1 }\n",
+    )
+    .expect("custom bin child module should be written");
     root
 }
 
@@ -874,6 +882,9 @@ fn entrypoints_are_visible_and_discounted_in_outputs() {
     assert_eq!(custom["target_kind"], "bin");
     assert_eq!(custom["entrypoint_kind"], "bin");
     assert_eq!(custom["is_entrypoint"], true);
+    let custom_child = node_data(&map, "custom::child");
+    assert_eq!(custom_child["target_name"], "custom-tool");
+    assert_eq!(custom_child["module_key"], "custom::child");
 
     let clones = read_json(analysis.join("clones.json"));
     let entrypoint_clone = clones

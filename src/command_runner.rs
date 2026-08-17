@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -69,6 +69,7 @@ pub(crate) fn run(request: CommandRequest<'_>) -> CommandOutcome {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    configure_process_group(&mut process);
     let mut child = match process.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -95,7 +96,7 @@ pub(crate) fn run(request: CommandRequest<'_>) -> CommandOutcome {
             Ok(Some(status)) => break (Some(status), false),
             Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
             Ok(None) => {
-                let _ = child.kill();
+                terminate_process_tree(&mut child);
                 break (child.wait().ok(), true);
             }
             Err(_) => break (child.wait().ok(), false),
@@ -126,6 +127,43 @@ pub(crate) fn run(request: CommandRequest<'_>) -> CommandOutcome {
         stdout,
         stderr,
     }
+}
+
+#[cfg(unix)]
+fn configure_process_group(process: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    process.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn configure_process_group(_process: &mut Command) {}
+
+fn terminate_process_tree(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        // The child is the leader of the process group configured above. Killing
+        // the group closes pipes inherited by Cargo's rustc and test descendants.
+        let group = format!("-{}", child.id());
+        let _ = Command::new("kill")
+            .args(["-KILL", "--", &group])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let _ = Command::new("taskkill")
+            .args(["/PID", pid.as_str(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    // Keep a direct-child fallback for platforms without a tree-kill utility and
+    // for the race where the process exits before the utility runs.
+    let _ = child.kill();
 }
 
 fn read_in_background<R>(mut reader: R) -> thread::JoinHandle<Vec<u8>>
@@ -178,5 +216,32 @@ mod tests {
         ));
         assert_eq!(outcome.status, CommandStatus::Unavailable);
         assert!(outcome.reason.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_terminates_descendants_holding_output_pipes() {
+        assert_descendant_timeout("sh", vec!["-c".to_string(), "sleep 30 & wait".to_string()]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn timeout_terminates_descendants_holding_output_pipes() {
+        assert_descendant_timeout(
+            "cmd",
+            vec!["/C".to_string(), "ping -n 30 127.0.0.1".to_string()],
+        );
+    }
+
+    #[cfg(any(unix, windows))]
+    fn assert_descendant_timeout(program: &str, args: Vec<String>) {
+        let mut request = CommandRequest::new(program, &args, std::path::Path::new("."));
+        request.timeout = std::time::Duration::from_millis(100);
+        let started = std::time::Instant::now();
+
+        let outcome = run(request);
+
+        assert_eq!(outcome.status, CommandStatus::TimedOut);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 }
