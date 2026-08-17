@@ -473,6 +473,15 @@ impl<'ast> Visit<'ast> for TestBodyQuality {
 
     fn visit_expr_call(&mut self, expression: &'ast ExprCall) {
         self.sut_call_count += 1;
+        if let syn::Expr::Path(path) = expression.func.as_ref()
+            && path
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident.to_string().starts_with("assert_"))
+        {
+            self.assertion_count += 1;
+        }
         visit::visit_expr_call(self, expression);
     }
 
@@ -1819,14 +1828,15 @@ fn checks_value() {
     let value = crate::calculate();
     assert_eq!(value, 42);
     assert!(crate::is_valid());
+    test_support::assert_kind(value);
 }
 "#,
         );
         let Some(test) = facts.tests.first() else {
             panic!("test fact should exist");
         };
-        assert_eq!(test.assertion_count, 2);
-        assert_eq!(test.sut_call_count, 2);
+        assert_eq!(test.assertion_count, 3);
+        assert_eq!(test.sut_call_count, 3);
         assert!(test.ignored);
     }
 
