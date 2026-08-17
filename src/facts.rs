@@ -101,12 +101,21 @@ pub(crate) struct FileGraphFacts {
     #[serde(default)]
     pub(crate) resolved_dependencies: Vec<ResolvedDependencyFact>,
     pub(crate) child_modules: Vec<String>,
+    #[serde(default)]
+    pub(crate) module_files: Vec<ModuleFileFact>,
     pub(crate) unsupported_patterns: Vec<String>,
     pub(crate) public_api_count: usize,
     #[serde(default)]
     pub(crate) documented_public_api_count: usize,
     #[serde(default)]
     pub(crate) has_crate_docs: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct ModuleFileFact {
+    pub(crate) module_key: String,
+    #[serde(default)]
+    pub(crate) test_code: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -30,7 +30,36 @@ pub(super) fn rust_facts_for_paths(
         );
         fact.identity_backend = metadata.identity_backend;
     }
+    mark_test_module_findings(&mut facts);
     Ok(facts)
+}
+
+fn mark_test_module_findings(facts: &mut [FileFacts]) {
+    let test_modules = facts
+        .iter()
+        .flat_map(|fact| {
+            fact.graph
+                .module_files
+                .iter()
+                .filter(|module| module.test_code)
+                .map(|module| (fact.package_name.clone(), module.module_key.clone()))
+        })
+        .collect::<Vec<_>>();
+    for fact in facts {
+        let is_test_module = test_modules.iter().any(|(package, module)| {
+            fact.package_name == *package
+                && (fact.module_key == *module
+                    || fact
+                        .module_key
+                        .strip_prefix(module)
+                        .is_some_and(|suffix| suffix.starts_with("::")))
+        });
+        if is_test_module {
+            for finding in &mut fact.items.quality_findings {
+                finding.test_code = true;
+            }
+        }
+    }
 }
 
 pub(crate) fn ast_clone_facts_for_paths(
@@ -397,4 +426,34 @@ fn relative_project_path(config: &LensConfig, path: &str) -> String {
 
 fn path_key(path: impl AsRef<Path>) -> String {
     normalize_slashes(canonical_or_original(&absolutize(path))).to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mark_test_module_findings;
+    use crate::facts::{FileFacts, ModuleFileFact, QualityFindingFact};
+
+    #[test]
+    fn external_cfg_test_modules_mark_nested_findings_as_test_code() {
+        let mut parent = FileFacts::test_fact("src/lib.rs", "lib");
+        parent.package_name = "demo".to_string();
+        parent.graph.module_files.push(ModuleFileFact {
+            module_key: "test_support".to_string(),
+            test_code: true,
+        });
+        let mut child = FileFacts::test_fact("src/test_support/nested.rs", "test_support::nested");
+        child.package_name = "demo".to_string();
+        child.items.quality_findings.push(QualityFindingFact {
+            rule_id: "rust.reliability.expect".to_string(),
+            kind: "panic-path".to_string(),
+            line: 1,
+            message: "expect may panic".to_string(),
+            test_code: false,
+        });
+
+        let mut facts = vec![parent, child];
+        mark_test_module_findings(&mut facts);
+
+        assert!(facts[1].items.quality_findings[0].test_code);
+    }
 }

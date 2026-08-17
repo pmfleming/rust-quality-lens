@@ -117,6 +117,7 @@ struct ModuleFileFact {
     module_key: String,
     path: String,
     line: usize,
+    test_code: bool,
 }
 
 #[derive(Serialize)]
@@ -1017,6 +1018,11 @@ impl FactVisitor {
                 module_key,
                 path,
                 line: span_start_line(item.mod_token.span),
+                test_code: has_test_attrs(&item.attrs)
+                    || self
+                        .module_stack
+                        .iter()
+                        .any(|module| matches!(module.as_str(), "test" | "tests")),
             });
         }
         if item.ident == "tests" {
@@ -1838,6 +1844,19 @@ fn checks_value() {
         assert_eq!(test.assertion_count, 3);
         assert_eq!(test.sut_call_count, 3);
         assert!(test.ignored);
+    }
+
+    #[test]
+    fn cfg_test_module_files_are_marked_as_test_code() {
+        let facts = facts(
+            r#"
+#[cfg(test)]
+#[path = "test_support.rs"]
+mod test_support;
+"#,
+        );
+        assert_eq!(facts.module_files.len(), 1);
+        assert!(facts.module_files[0].test_code);
     }
 
     #[test]
