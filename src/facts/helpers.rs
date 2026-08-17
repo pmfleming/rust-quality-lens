@@ -439,6 +439,7 @@ mod tests {
         parent.package_name = "demo".to_string();
         parent.graph.module_files.push(ModuleFileFact {
             module_key: "test_support".to_string(),
+            path: "src/test_support.rs".to_string(),
             test_code: true,
         });
         let mut child = FileFacts::test_fact("src/test_support/nested.rs", "test_support::nested");

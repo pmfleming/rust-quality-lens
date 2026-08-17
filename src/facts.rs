@@ -114,6 +114,7 @@ pub(crate) struct FileGraphFacts {
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct ModuleFileFact {
     pub(crate) module_key: String,
+    pub(crate) path: String,
     #[serde(default)]
     pub(crate) test_code: bool,
 }
@@ -262,7 +263,7 @@ impl RunContext {
         let mut source_facts = load_source_facts(config, needs_source_facts)?;
         let identity_resolution = resolve_identities(config, tools, &mut source_facts)?;
         let correctness_paths = if needs_correctness_facts {
-            correctness_paths(config)
+            correctness_paths(config, &source_facts)
         } else {
             Vec::new()
         };

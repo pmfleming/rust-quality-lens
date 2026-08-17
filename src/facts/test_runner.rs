@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use crate::command_runner::{CommandRequest, CommandStatus, run};
 use crate::config::LensConfig;
+use crate::facts::FileFacts;
 use crate::util::{dedupe, resolve_project_path};
 
 #[derive(Clone)]
@@ -17,8 +18,15 @@ pub(crate) struct TestStatus {
     pub(crate) stderr_tail: Option<String>,
 }
 
-pub(crate) fn correctness_paths(config: &LensConfig) -> Vec<String> {
+pub(crate) fn correctness_paths(config: &LensConfig, source_facts: &[FileFacts]) -> Vec<String> {
     let mut paths = config.source_roots.clone();
+    paths.extend(source_facts.iter().flat_map(|fact| {
+        fact.graph
+            .module_files
+            .iter()
+            .filter(|module| module.test_code)
+            .map(|module| module.path.clone())
+    }));
     for extra in ["tests", "benches", "examples"] {
         paths.extend(top_level_rust_files(&config.project_root.join(extra)));
     }
@@ -209,6 +217,7 @@ fn test_status(status: &str) -> String {
 mod tests {
     use super::{correctness_paths, run_status};
     use crate::config::{LensConfig, SemanticIdentityMode};
+    use crate::facts::{FileFacts, ModuleFileFact};
     use crate::util::normalize_slashes;
     use std::path::PathBuf;
 
@@ -253,7 +262,19 @@ path = "tests/integration.rs"
             architecture: Default::default(),
             policy: Default::default(),
         };
-        let paths = correctness_paths(&config);
+        let linked_test = root.path().join("test_support/unit.rs");
+        let mut source_fact = FileFacts::test_fact("src/lib.rs", "lib");
+        source_fact.graph.module_files.push(ModuleFileFact {
+            module_key: "tests".to_string(),
+            path: linked_test.to_string_lossy().to_string(),
+            test_code: true,
+        });
+        let paths = correctness_paths(&config, &[source_fact]);
+        assert!(
+            paths
+                .iter()
+                .any(|path| path == &linked_test.to_string_lossy())
+        );
         assert!(
             paths
                 .iter()
