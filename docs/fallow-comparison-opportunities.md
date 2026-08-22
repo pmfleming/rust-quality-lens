@@ -39,9 +39,9 @@ agent integrations.
 
 3. **Move scoring out of the CLI — complete.**
 
-   `src/main.rs` parses commands and dispatches work. Shared confidence,
-   provenance, path, and scoring logic lives under `src/measurement/`, while
-   architecture formulas live in `src/risk_model.rs`.
+   `src/main.rs` delegates to focused handlers under `src/commands/`. Shared
+   confidence, provenance, path, and scoring logic lives under
+   `src/measurement/`; architecture formulas live in `src/risk_model.rs`.
 
 4. **Add typed output contracts — partially complete.**
 

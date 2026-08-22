@@ -1,8 +1,7 @@
 # Architecture Risk Model v1
 
-This document describes the versioned scoring model used by `map.architecture`
-and the shared calibration tables used by scored producer tools.
-The model id is `rqlens.architecture_risk`, version `1`.
+This document describes the original scoring model used by
+`map.architecture`. Its ID is `rqlens.architecture_risk`, version `1`.
 
 > **Historical model.** New artifacts use [version 4](risk-model-v4.md). This
 > document preserves version 1 semantics for old-artifact interpretation; do
@@ -25,10 +24,6 @@ Raw fact inputs include:
 - leverage facts from `leverage_metrics.json`
 - churn, commits, contributors, defect-keyword commits, and co-change facts from git history
 
-When a required input artifact is missing or stale, the affected derived scores
-are `null` rather than `0`, and the current map contract records the missing or
-stale artifact in `measurement_confidence` and `summary.artifact_status`.
-
 ## Derived Scores
 
 Derived risk scores are model outputs. They are not raw facts:
@@ -40,15 +35,21 @@ Derived risk scores are model outputs. They are not raw facts:
 - `quality_risk`
 - `total_score`
 
-`total_score` is `null` if any required category score is unknown.
+Version 1 calculated:
+
+```text
+quality_risk = min(maintainability_risk + locality_risk + leverage_pressure, 600)
+total_score = maintainability_risk + quality_risk + change_risk
+              + correctness_risk + architectural_risk
+```
+
+This counted maintainability twice. Version 2 corrected the aggregate formula.
 
 ## Weights
 
-For current code, the canonical machine-readable category formulas live in
-`src/risk_model.rs`, while weights, calibrations, and classification metadata
-are emitted from `src/measurement/scoring.rs`. Architecture category weights
-are emitted into map metadata as `meta.risk_model_weights`; producer calibration tables are emitted as
-`meta.risk_model_tool_scores`.
+The following values reconstruct version 1 artifacts. Current formulas live in
+`src/risk_model.rs`, and current runs emit their weights and classification
+metadata in `map.json`.
 
 ### Maintainability
 
@@ -58,8 +59,6 @@ are emitted into map metadata as `meta.risk_model_weights`; producer calibration
 - outbound dependencies: weight `4.0`
 - inbound dependencies: weight `1.0`
 - combined dependency contribution cap: `35.0`
-- entrypoint modules receive an outbound orchestration allowance before
-  dependency pressure is scored
 
 ### Change
 
@@ -85,8 +84,6 @@ are emitted into map metadata as `meta.risk_model_weights`; producer calibration
 - cycle membership penalty: `110.0`
 - large module threshold: `250` SLOC
 - large module penalty: `60.0`
-- entrypoint modules receive a small layer-boundary allowance so tool wiring
-  remains visible without being penalized like ordinary modules
 
 ## Classification
 
@@ -95,40 +92,10 @@ are emitted into map metadata as `meta.risk_model_weights`; producer calibration
 - category color warning threshold: `350.0`
 - category color bad threshold: `700.0`
 
-## Tool Calibration
+## Current behavior
 
-Scored producer tools attach `risk_model_id`, `risk_model_version`, and
-`risk_calibration` to their records. These fields identify which table from
-`RISK_MODEL["tool_scores"]` produced the derived score while leaving raw facts
-in the tool-specific count and measurement fields.
-
-Currently shared producer calibrations cover:
-
-- `hotspots`: complexity component caps, weights, multiplier, and signal thresholds
-- `escape_hatches`: escape-hatch weights and Clippy/lint suppression de-duplication
-- `type_health`: structural pressure caps, free allowances, and signal thresholds
-- `locality`: non-locality risk weights for coupling, hidden state, tests, and churn
-- `leverage`: leverage score base, bonuses, penalties, pressure scaling, and risk inversion
-- `clones_token`: token-window size, minimum line span, and instance weight
-- `clones_ast`: minimum AST node threshold and cross-file factor
-- `clones_module_responsibility`: coarse module API/type/dependency duplication
-- `clones_test_ast`: repeated non-trivial test body structures
-- target metadata: `target_kind`, `entrypoint_kind`, and `is_entrypoint`
-  derived from common Rust paths and explicit Cargo target paths
-
-## Implementation Boundaries
-
-The current Rust implementation is split by responsibility:
-
-- `src/config.rs`: config loading and absolute path resolution
-- `src/catalog.rs`: task catalog contract consumed by dashboards and runners
-- `src/facts.rs` and `src/facts/`: run-context caching, module graphs, Cargo target discovery, and test execution
-- `src/producers.rs` and `src/producers/`: producer dispatch and individual measurements
-- `src/artifacts.rs` and `src/artifacts/`: map artifact loading, indexing, topology, history, cycles, and layer violations
-- `src/risk_model.rs`: shared `architecture_risk_scores(...)` function and score structs
-- `src/measurement/scoring.rs`: emitted model weights, calibrations, and current classification bands
-- `src/util.rs`: small filesystem, path, hashing, and JSON helpers
-
-The map producer calls `architecture_risk_scores(...)` for every module. If an
-input category is unavailable, the affected category and `total_score` remain
-`null`, and `unknown_metrics` records why.
+This file preserves version 1 scoring semantics only. Current artifacts use
+[version 4](risk-model-v4.md), include explicit calibration metadata, preserve
+missing inputs as unknown values, and apply bounded entrypoint allowances. See
+[Measurement Design and Upgrades](measurement-upgrades.md) for the current
+implementation contract.

@@ -1,274 +1,195 @@
-# Measurement Upgrades
+# Measurement Design and Upgrades
 
-This note summarizes the lens upgrades that make `rust-quality-lens` more
-portable, explicit, and trustworthy across Rust projects.
+This document summarizes the current artifact, extraction, confidence, and
+scoring design. The [changelog](../CHANGELOG.md) records individual user-visible
+changes.
 
-## Artifact Contract v3
+## Artifact contract v3
 
-All standard producer measurement files use the version 3 envelope. Version 3
-requires explicit Rust toolchain provenance and intentionally breaks the prior
-envelope contract.
-Record-oriented outputs use `records`, structured outputs use `data`, and each
-measurement has top-level confidence and summary fields. Readers remain
-compatible with legacy unenveloped artifacts. A checked-in conformance snapshot
-guards the envelope surface. Auxiliary performance, repository-outcome,
-operational, validation, and calibration reports use their own version 1
-contracts rather than pretending to implement the producer envelope.
+Standard producer files use envelope version 3, which intentionally breaks the
+version 2 contract. Each envelope includes:
 
-Project measurement and evidence documents record generation time, generator
-version, a source/manifest input fingerprint, and the active Rust/Cargo
-provenance. `verify` compares the declared MSRV with the pinned and active
-compiler and keeps structured compiler and Clippy diagnostics with source
-locations. Policy checks compare current inputs with stored fingerprints so
-stale artifacts cannot silently satisfy a fresh CI run.
+- generator and Rust toolchain provenance;
+- generation time and a source/manifest fingerprint;
+- artifact-level confidence and summary data;
+- risk-model identity and calibration metadata;
+- `records` for row-oriented output or `data` for structured output.
 
-Correctness records now include `tested_modules`, derived from source-module
-ancestry and syntax dependencies. Test-command and compilation failures are
-preserved separately from individual test results and feed correctness risk.
+The toolchain object records active Rust, Cargo, host, LLVM, declared MSRV, and
+pinned channel evidence. `verify` compares the declared, pinned, and active
+versions and preserves compiler and Clippy diagnostics with source locations.
+Policy checks reject stale fingerprints when incomplete evidence is configured
+to fail.
 
-Git history parsing now retains commit identity across the blank separator in
-normal `git log --numstat` output. Cross-module impl blocks are joined to types
-using resolved full type paths rather than physical-module plus short-name
-matching.
-
-Coverage is available through `measure coverage` using `cargo-llvm-cov`.
-`rqlens check` supports partial-input, test-failure, practice, reliability,
-operational, absolute-threshold, and baseline-regression policies for CI.
-Configured stable rule limits are evaluated after active waivers and explicit
-path/package exclusions.
+Readers remain compatible with legacy unenveloped artifacts. Performance,
+outcome, telemetry, validation, calibration, policy, SARIF, and review reports
+use separate contracts rather than the standard producer envelope. A checked-in
+snapshot guards envelope conformance.
 
 ## Rust 1.95 and TOML 1.1
 
 The workspace MSRV is Rust 1.95. Cargo manifests and RQLens configuration use a
-TOML 1.1 parser so every manifest accepted by Cargo 1.95 can be inspected
-without falling back to missing metadata. Fixed-size clone and logical-operator
-windows use `array_windows`, while cross-process file locks protect helper,
-semantic-cache, and measurement output writes.
+TOML 1.1 parser so metadata accepted by Cargo 1.95 can be inspected directly.
+Cross-process locks protect helper, semantic-cache, and measurement writes.
 
-The extractor parses explicitly inferred const arguments, 128-bit reprs,
-C-variadic declarations, and `if let` match guards. `cfg_select!` is recognized
-as requiring macro expansion and therefore produces an explicit confidence
-signal instead of silently dropping conditional items.
+Extraction covers inferred const arguments, 128-bit representations,
+C-variadic declarations, and `if let` match guards. `cfg_select!` requires macro
+expansion, so RQLens reports it as unsupported evidence rather than silently
+omitting conditional items.
 
-## Extraction
+## Rust extraction
 
-Rust source extraction now flows through a `syn`-backed helper instead of
-tool-local regex parsing for the major Rust-aware measurements. This improves
-coverage for dependency graph extraction, type health, correctness discovery,
-test status attachment, and escape-hatch detection.
+A bundled `syn` helper provides shared facts for Rust-aware measurements.
+`measure all` creates one `RunContext`, avoiding repeated parsing and test-fact
+collection across producers.
 
-`measure all` builds a per-run `RunContext` so source syntax facts are computed
-once and passed by reference to producers that need them. Correctness facts are
-also cached for correctness and map work. This keeps the major producers from
-re-running and re-parsing the same Rust tree independently.
+The extractor handles:
 
-The extractor now handles common Rust patterns that were previously missed or
-fragile:
+- grouped, relative, crate-qualified, and external imports and calls;
+- re-exports and same-named types in different modules;
+- tuple and unit structs, variants, and payload fields;
+- `#[path = "..."]` modules and structured Cargo target paths;
+- common macro-shaped tests and explicit unsupported-pattern reporting.
 
-- grouped imports, including multiple items inside one `use` tree
-- `self::`, `super::`, direct `crate::x::y()` calls, and module-qualified calls
-- `pub use` re-exports and external crate-qualified paths
-- same-named types in different modules
-- tuple structs, unit structs, enum variants, and enum payload fields
-- attribute-driven module files such as `#[path = "..."] mod name;`
-- macro-shaped tests and unsupported macro-generated module wiring as explicit
-  confidence signals
+Attribute names do not become dependencies. Only values that wire modules, such
+as `#[path]`, affect the graph. Bare `crate`, `self`, and `super` prefixes also
+do not create pseudo-dependencies without a qualified segment.
 
-Unsupported patterns are reported rather than silently treated as absent.
-Readable files that fail full `syn` parsing are reparsed with
-`tree-sitter-rust`. This recovery path retains text-level line, nonblank,
-comment, crate-documentation, path, and Cargo target evidence and recovers
-function spans plus raw complexity where possible. Recovered facts carry the
-`tree-sitter-rust` backend and error-node count. They remain explicitly partial:
-hotspot scores are `null` and map risk inputs that require complete syntax stay
-unknown rather than becoming zero. A Tree-sitter failure degrades to the
-text-only evidence path.
+### Parse recovery
 
-Function facts also include versioned, standard-form raw complexity metrics.
-Complexity model version 2 starts at one and counts Rust decisions, match arms,
-Rust 1.95 match guards, `?`, and short-circuit boolean operators. Cognitive
-complexity counts nested control flow, guards, else branches, logical-operator
-sequences, labeled jumps, and closure nesting. Module hotspot rows aggregate
-these raw values without feeding them into the calibrated hotspot score.
+When a readable file fails full `syn` parsing, `tree-sitter-rust` recovers text
+metrics, Cargo target evidence, function spans, and raw complexity where
+possible. Recovered facts record the backend and error-node count.
 
-## Measurement Confidence
+Recovery remains partial: calibrated hotspot scores are `null`, and map inputs
+that require complete syntax remain unknown. If Tree-sitter cannot produce a
+tree, RQLens retains text-only evidence.
 
-JSON outputs now include measurement confidence fields so consumers can
-distinguish clean measurements from incomplete or stale ones:
+### Complexity model v2
 
-- `complete`
-- `partial`
-- `confidence_scope`
-- `required_inputs`
-- `observed_inputs`
-- `missing_input`
-- `stale_input`
-- `unsupported_pattern`
+Function facts include versioned cyclomatic and cognitive complexity.
+Cyclomatic complexity starts at one and counts Rust decisions, match arms and
+guards, `?`, and short-circuit operators. Cognitive complexity counts nested
+control flow, guards, `else` branches, logical sequences, labeled jumps, and
+closures.
 
-Confidence distinguishes source-file coverage from syntax-fact coverage.
-Syntax-backed producers such as `hotspots`, `escape-hatches`, `type-health`,
-`correctness`, `locality`, `leverage`, and `map` report
-`confidence_scope: "syntax_facts"` and require both `rust_source_files` and
-`rust_syntax_facts`. Text-oriented producers such as token `clones` report
-`confidence_scope: "source_scan"` and require only `rust_source_files`.
-Unreadable source files are reported in confidence instead of being treated as
-empty text.
+Module hotspot rows aggregate these raw metrics. They do not change the
+calibrated hotspot score.
 
-The map no longer substitutes `0` for required missing or stale artifacts.
-Affected derived fields are marked unknown, usually as `null`, and listed in
-the node's `unknown_metrics`. The map-level summary also reports unknown module
-counts and artifact status.
+## Measurement confidence
 
-## Risk Calibration
+Confidence lets consumers distinguish a clean empty result from incomplete or
+stale extraction. It records:
 
-Raw facts and derived risk are separated. The versioned model lives in
-`src/risk_model.rs`, is documented in
-[Architecture Risk Model v4](risk-model-v4.md), and is emitted into `map.json`
-metadata.
+- `complete` and `partial`;
+- `confidence_scope`;
+- `required_inputs` and `observed_inputs`;
+- `missing_input`, `stale_input`, and `unsupported_pattern`.
 
-Version 3 adds function-level hotspot rows, per-score component explanations,
-Cargo-qualified graph identities, baseline improvement/regression deltas,
-aggregate coverage evidence on correctness attribution, and an empirical
-multi-project calibration runner.
+Syntax-backed producers require source files and syntax facts. Text-oriented
+token clones require readable source files but not complete syntax. Unreadable
+files are reported rather than treated as empty.
 
-Version 4 adds positioned dependency references and compiler-assisted
-definition resolution through rust-analyzer. Map edges now expose semantic
-symbol identities and per-edge backend provenance, with cached and bounded
-fallback behavior for offline, inactive, and macro-generated code.
+The architecture map never substitutes zero for a missing or stale required
+artifact. Affected values are `null`, nodes list `unknown_metrics`, and the map
+summary reports artifact status and unknown-module counts.
 
-Architecture map scoring now calls the shared `architecture_risk_scores(...)`
-function instead of carrying local weight math. Producer tools that emit scores
-also identify the calibration table that produced those scores with:
+## Architecture identity and pressure
 
-- `risk_model_id`
-- `risk_model_version`
-- `risk_calibration`
+Source extraction records positioned dependency candidates. One bounded
+rust-analyzer LSP session resolves candidates to Cargo-qualified module and
+symbol identities. Each edge records semantic or syntax-fallback provenance.
 
-Shared producer calibrations currently cover:
+Resolution modes are:
 
-- hotspots
-- escape hatches
-- type health
-- locality
-- leverage
+- `auto`: use semantic results with explicit fallback;
+- `required`: reject unresolved candidates;
+- `disabled`: use Cargo and syntax identity only.
 
-## Correctness Discovery
+The semantic cache is keyed by analyzer version, settings, and source
+fingerprints. Offline projects can use a generated `rust-project.json` with
+local targets, cfgs, features, and dependencies. Inactive, platform-specific,
+and macro-generated references remain visible as syntax fallbacks.
 
-Correctness discovery is now project-neutral rather than Scratchpad-shaped. It
-uses configured source roots plus top-level Cargo test targets under `tests`,
-`benches`, and `examples`, and it honors structured Cargo manifest targets from
-`[[bin]]`, `[[test]]`, `[[bench]]`, and `[[example]]`. Nested fixture crates are
-not cataloged as tests for the current package unless they are explicitly listed
-or configured as source roots.
+Target facts identify libraries, binaries, tests, benches, examples, and module
+files. Runnable entrypoints remain visible in map, locality, leverage, clone,
+and review output but receive a bounded orchestration allowance. This prevents
+tool wiring from being scored like ordinary domain code.
 
-Test status attachment now prefers stable test identities and qualified names,
-which prevents duplicate test names from receiving the wrong pass/fail status.
-Macro-style tests are discovered where possible, and unsupported macro-generated
-test patterns are surfaced through measurement confidence.
+Test-support detection follows syntax-resolved dependencies rather than file
+names or substring matches.
 
-## Dependency And Locality Signals
+## Correctness and coverage
 
-Dependency extraction now captures more Rust dependency forms, including
-relative module paths, re-exports, direct crate calls, external crates, grouped
-imports, and attribute-wired modules.
+Correctness discovery uses configured roots and Cargo metadata for local
+packages, integration tests, benches, examples, and explicit manifest targets.
+Nested fixture crates are excluded unless configured or part of the current
+workspace.
 
-Syntax facts now carry Cargo target context:
+Test results attach through stable qualified identities, preventing duplicate
+test names from receiving the wrong status. Compilation and command failures
+remain separate from individual test results. Unsupported generated tests are
+reported through confidence.
 
-- `target_kind`: `lib`, `bin`, `test`, `bench`, `example`, or `module`
-- `entrypoint_kind`: runnable entrypoint kind for `bin`, `test`, `bench`, and
-  `example` targets
-- `is_entrypoint`: whether the file is a tool/runtime entrypoint
+Coverage comes from `cargo-llvm-cov`. Correctness attribution accepts only fresh
+coverage and records which modules have aggregate execution evidence; it does
+not claim which test executed a line.
 
-The lens infers common target paths such as `src/main.rs`, `src/bin/*.rs`,
-`tests/*.rs`, `benches/*.rs`, and `examples/*.rs`, and refines them with
-explicit `Cargo.toml` target paths. Map, locality, leverage, clone, and review
-outputs preserve this metadata. Entrypoints receive an orchestration allowance
-for outbound dependency spread and a small layer-boundary allowance so they stay
-visible without being scored like ordinary domain modules.
+## Clone and escape-hatch analysis
 
-Attribute evidence is kept separate from dependency extraction. Attribute names
-such as `cfg` or `test` do not become dependency edges; only attribute values
-that actually wire modules, such as `#[path = "..."]`, influence module wiring.
-Bare `crate`, `self`, and `super` prefixes emitted while traversing a `use` tree
-are not semantic candidates; a relative root must qualify another segment before
-it can create an edge. This prevents pseudo-dependencies on the crate root and
-false cycle penalties.
+Clone output separates four signals:
 
-Test-support detection now uses syntax-resolved test dependencies rather than
-file names, stems, or substring matches. This removes easy false positives where
-a test file merely mentions a module name without depending on that module.
+- `token`: normalized source windows;
+- `ast`: non-trivial repeated function or method structure;
+- `module-responsibility`: similar API, type, impl, and dependency footprints;
+- `test-ast`: repeated non-trivial test bodies from Cargo test targets.
 
-## Escape Hatches
+AST hashing normalizes names and literals while preserving operators, calls,
+and type structure. Minimum-size thresholds suppress trivial wrappers.
+Module-responsibility matches are coarse design signals, not proof that modules
+should be merged.
 
-Escape-hatch detection is `syn`-backed and keeps raw counts separate from
-scoring counts. Clippy suppressions no longer double-count as generic lint
-suppressions in score calculation, while the raw evidence remains visible.
-
-## Clone Analysis
-
-Clone analysis reports multiple clone and duplication layers:
-
-- `engine: "token"` rows from normalized token windows over source text
-- `engine: "ast"` rows from the helper-backed function and method structural
-  hasher
-- `engine: "module-responsibility"` rows for modules with matching coarse API,
-  type, impl, and dependency footprints
-- `engine: "test-ast"` rows for repeated non-trivial test body structures
-
-Token rows use source-scan confidence. AST rows use syntax-fact confidence and
-are emitted only when multiple non-trivial functions or methods share the same
-stable structural hash. The AST hasher records nested functions and impl
-methods, normalizes local names and literal values, keeps discriminating
-operator/call/type structure, skips trivial functions below the minimum node
-threshold, and uses the same stable hash discipline as the token engine.
-Module-responsibility rows are intentionally coarse design-duplication signals,
-not proof that code should be merged. Test AST rows use Cargo test target
-discovery so duplicated integration-test bodies can be surfaced even when
-`source_roots` only contains `src`.
-Module-responsibility signatures include target and entrypoint kind, which lets
-duplicated tool scaffolding group with other entrypoint scaffolding instead of
-with ordinary source modules.
+Escape-hatch extraction is syntax-backed and keeps raw counts separate from
+scores. Clippy suppressions are not scored again as generic lint suppressions.
+New raw-memory and pointer-provenance APIs remain visible as unscored evidence
+until calibration supports a weight change.
 
 ## Behavioral and contextual evidence
 
-Verification can optionally execute cargo-mutants, repeated tests, configured
-cargo-fuzz targets, compiler sanitizers, and Miri. Every gate records the exact
-command and distinguishes disabled, unavailable, failed, and timed-out tools.
-These checks add reachability evidence; they do not prove that unsafe code is
-sound or that unmutated code is defect-free.
+Optional verification can run cargo-mutants, repeated tests, fuzz targets,
+sanitizers, and Miri. Each gate records its command and distinguishes disabled,
+unavailable, failed, and timed-out states. These gates add reachability evidence;
+they do not prove soundness or defect freedom.
 
-Separate commands preserve evidence that does not belong in a static quality
-score:
+Separate commands preserve evidence that does not belong in static quality
+scores:
 
-- `performance` captures Criterion estimates and baseline percentage deltas;
+- `performance` captures Criterion estimates and benchmark deltas;
 - `outcomes` separates reviewed labels from commit-message inference;
-- `telemetry` normalizes observed production signals and checks freshness;
-- `validate` tests ranking association against outcome labels across projects.
+- `telemetry` records normalized production signals and freshness;
+- `validate` measures ranking association against outcome labels.
 
 Changed-code review records diff hunks and executable changed-line coverage when
-a fresh coverage artifact is available. It otherwise reports the missing or
-stale coverage evidence instead of assuming uncovered or covered lines.
+fresh coverage exists. Missing or stale coverage remains explicit.
 
-## Generic Lens Rules
+## Risk calibration
 
-Correctness and architecture map layer classification now use generic lens
-rules in the Rust layer classifier. Scratchpad-specific taxonomy has been removed from
-the reusable correctness and map logic.
+Raw facts and derived risk stay separate. The current model lives in
+`src/risk_model.rs`, is documented in [Risk Model v4](risk-model-v4.md), and is
+identified in `map.json`.
 
-## Golden Fixtures
+Scored tools identify their model and calibration with `risk_model_id`,
+`risk_model_version`, and `risk_calibration`. Shared calibrations cover
+hotspots, clone engines, escape hatches, type health, locality, and leverage.
 
-The golden Rust fixture now covers the edge cases that drove these upgrades:
+Version 4 uses compiler-assisted dependency identity and retains positioned,
+per-edge fallback provenance. The proposed version 5 remains deferred until
+held-out validation supports incorporating newer correctness, architecture,
+test-quality, clone, and entropy evidence.
 
-- grouped imports
-- duplicate test names
-- same-named types in different modules
-- tuple and unit structs
-- `pub use`
-- direct `crate::` calls
-- macro-style tests
-- Clippy suppression de-duplication
-- relative module dependencies
-- external crate paths
-- attribute module wiring
+## Portability and fixtures
 
-These fixtures make the upgraded behavior executable and harder to regress.
+Correctness and map classification use generic Rust rules rather than
+project-specific taxonomy. Golden fixtures cover parsing, identity, confidence,
+test discovery, fallback behavior, and Rust 1.95 syntax. The fixture and
+envelope snapshots make these contracts executable and harder to regress.

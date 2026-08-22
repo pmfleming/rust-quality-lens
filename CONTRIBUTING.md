@@ -2,11 +2,26 @@
 
 Thank you for improving rust-quality-lens.
 
-## Before opening a pull request
+## Change expectations
 
-Discuss substantial rule, artifact-contract, or risk-model changes in an issue first. Keep pull requests focused and include regression tests for changed extraction behavior.
+Discuss substantial rule, artifact-contract, or risk-model changes in an issue
+first. Keep pull requests focused and add regression tests for extraction or
+scoring changes.
 
-Run the repository gates from the workspace root:
+Generated evidence must keep verified gates, static findings, heuristic signals,
+and contextual evidence distinct. Missing inputs must not be reported as
+passing.
+
+When changing a public interface:
+
+- update schemas and conformance snapshots for JSON contract changes;
+- version, document, and calibrate scoring-formula changes;
+- update the README, documentation index, and changelog for commands,
+  configuration, artifacts, or interpretation changes.
+
+## Required checks
+
+Run these commands from the workspace root:
 
 ```bash
 cargo fmt --all -- --check
@@ -26,22 +41,17 @@ cargo run --locked --bin rqlens -- check \
 bash scripts/check-package.sh
 ```
 
-Coverage measurement requires `cargo-llvm-cov` and `llvm-tools-preview`. The CI
-workflow is the authoritative required gate list.
+Coverage requires `cargo-llvm-cov` and `llvm-tools-preview`. The CI workflow is
+the authoritative required-gate list.
 
-When Scratchpad behavior is affected, also run:
+If a change affects Scratchpad integration, also run:
 
 ```bash
 cargo run --bin rqlens -- measure all --config examples/scratchpad.toml
 cargo run --bin rqlens -- verify --config examples/scratchpad.toml
 ```
 
-Generated findings must distinguish verified gates, static findings, and
-heuristic signals. Missing inputs must not be reported as passing. Changes to
-JSON contracts require schema and conformance-snapshot updates. Changes to score
-formulas require a risk-model version, documentation, and calibration evidence.
-Update the [documentation index](docs/README.md), README examples, and changelog
-when a public command, configuration key, artifact, or interpretation changes.
+## Conduct and security
 
-Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities
-according to the [Security Policy](SECURITY.md), not in public issues.
+Follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities through
+the private process in the [Security Policy](SECURITY.md), not in public issues.

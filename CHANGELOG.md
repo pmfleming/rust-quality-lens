@@ -48,12 +48,10 @@ All notable changes to this project will be documented here. The format follows 
 - Artifacts record generation time and RQLens version; the CLI exposes `--version`.
 - Configured project roots are canonicalized for stable paths and identities.
 - Reused Criterion estimates from `performance --no-run` are marked partial because their execution time is unknown.
-- The self-metric gate tracks hotspots and duplication instead of treating total repository LOC as a quality regression.
+- The self-metric gate now enforces maximum effort, cyclomatic and cognitive complexity, source size, and duplication, plus minimum map locality and leverage.
 - Verified gates, static findings, and heuristic architecture signals are represented separately.
-- CLI argument definitions and measurement-tool metadata now live in focused modules, keeping the binary entrypoint thin.
 - Coverage collection and baseline-regression analysis are split into smaller, testable stages.
-- The self-metric maximum function-hotspot baseline is tightened from `100` to `95`.
-- Syntax complexity visitors share common traversal logic, and run-context input requirements are centralized in measurement-tool metadata. The token-clone ceiling is rebased from `205` to `244` for the fallback and new evidence producers, a duplicated-line percentage ceiling is added, and the AST-clone ceiling remains zero.
+- Syntax complexity visitors share traversal logic, and run-context input requirements are centralized in measurement-tool metadata.
 
 ### Fixed
 

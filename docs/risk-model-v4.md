@@ -9,6 +9,11 @@ comparable. The canonical formulas and emitted metadata live in
 model ID, version, weights, tool calibrations, and classification bands used for
 each run.
 
+Required missing or stale inputs remain `null` and are listed in confidence and
+`unknown_metrics`; they never become zero risk. Runnable entrypoints receive a
+bounded wiring allowance: the first eight outbound dependencies and first two
+layer crossings do not add pressure. Entrypoints remain present in the graph.
+
 ## Semantic dependency identity
 
 Syntax extraction records each candidate dependency path with its source line
