@@ -82,7 +82,7 @@ fn add_file_windows(
 ) {
     let lines = text.lines().collect::<Vec<_>>();
     let tokens = normalized_tokens(&lines, token_re);
-    for window in tokens.windows(CLONE_WINDOW_TOKENS) {
+    for window in tokens.array_windows::<CLONE_WINDOW_TOKENS>() {
         let Some((key, start_line, end_line)) = clone_window(window) else {
             continue;
         };
@@ -442,13 +442,9 @@ fn module_responsibility_row(
         "risk_model_id": MODEL_ID,
         "risk_model_version": MODEL_VERSION,
         "risk_calibration": "clones_module_responsibility",
-        "instances": facts.into_iter().map(|fact| json!({
+        "instances": facts.into_iter().map(|fact| super::with_fact_identity(fact, json!({
             "file_path": normalize_slashes(&fact.path),
             "module_key": fact.module_key,
-            "module_id": fact.module_id,
-            "package_name": fact.package_name,
-            "target_name": fact.target_name,
-            "identity_backend": fact.identity_backend,
             "target_kind": fact.target_kind,
             "entrypoint_kind": fact.entrypoint_kind,
             "is_entrypoint": fact.is_entrypoint,
@@ -458,7 +454,7 @@ fn module_responsibility_row(
             "impl_shapes": impl_shape_signature(fact),
             "dependencies": dependency_signature(fact),
             "source_nonblank_line_count": fact.source.source_nonblank_line_count,
-        })).collect::<Vec<_>>(),
+        }))).collect::<Vec<_>>(),
         "measurement_confidence": confidence,
     }))
 }

@@ -2,11 +2,39 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashSet};
 use std::env;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
+
+pub(crate) struct FileLock {
+    file: File,
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+pub(crate) fn lock_file(path: &Path) -> Result<FileLock> {
+    let mut lock_path = path.to_path_buf();
+    lock_path.add_extension("lock");
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+        .with_context(|| format!("opening lock file {}", lock_path.display()))?;
+    file.lock()
+        .with_context(|| format!("locking {}", lock_path.display()))?;
+    Ok(FileLock { file })
+}
 
 pub(crate) fn write_json(path: &Path, payload: &Value) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -47,6 +75,7 @@ pub(crate) fn bundled_helper_manifest() -> Result<PathBuf> {
         env!("CARGO_PKG_VERSION"),
         stable_hash(&source_identity)
     ));
+    let _cache_lock = lock_file(&root)?;
     fs::create_dir_all(root.join("src/bin"))?;
     write_if_changed(
         &root.join("Cargo.toml"),
@@ -54,6 +83,7 @@ pub(crate) fn bundled_helper_manifest() -> Result<PathBuf> {
 name = "rust-quality-lens-helpers"
 version = "0.0.0"
 edition = "2024"
+rust-version = "1.95"
 publish = false
 
 [dependencies]
@@ -259,7 +289,22 @@ fn is_rust_file(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::project_input_fingerprint;
+    use super::{lock_file, project_input_fingerprint};
+
+    #[test]
+    fn file_locks_exclude_concurrent_writers() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let base = root.path().join("artifact-cache");
+        let _guard = lock_file(&base)?;
+        let mut lock_path = base;
+        lock_path.add_extension("lock");
+        let contender = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(lock_path)?;
+        assert!(contender.try_lock().is_err());
+        Ok(())
+    }
 
     #[test]
     fn project_fingerprint_changes_with_quality_inputs_only() -> anyhow::Result<()> {

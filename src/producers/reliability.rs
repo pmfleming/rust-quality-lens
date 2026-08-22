@@ -18,7 +18,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
             fact.items.quality_findings.iter().map(move |finding| {
                 let test_code = path_is_test || finding.test_code;
                 let safety = finding.rule_id.starts_with("rust.safety.");
-                json!({
+                super::with_fact_identity(fact, json!({
                     "rule_id": finding.rule_id,
                     "category": "static-finding",
                     "kind": finding.kind,
@@ -26,14 +26,11 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
                     "path": path,
                     "line": finding.line,
                     "module_key": fact.module_key,
-                    "module_id": fact.module_id,
-                    "package_name": fact.package_name,
-                    "target_name": fact.target_name,
                     "scope": if test_code { "test" } else { "production" },
                     "message": finding.message,
                     "source": rule_source(&finding.rule_id),
                     "measurement_confidence": confidence,
-                })
+                }))
             })
         })
         .collect::<Vec<_>>();

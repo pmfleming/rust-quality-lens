@@ -15,7 +15,9 @@ mod graph;
 mod helpers;
 mod test_runner;
 
-pub(crate) use graph::{ModuleGraph, ModuleInfo, module_graph, resolve_dependency};
+#[cfg(test)]
+pub(crate) use graph::module_graph;
+pub(crate) use graph::{ModuleGraph, ModuleInfo, resolve_dependency};
 pub(crate) use helpers::ast_clone_facts_for_paths;
 pub(crate) use test_runner::{TestStatus, correctness_paths, run_tests};
 
@@ -250,6 +252,7 @@ pub(crate) struct AstCloneFact {
 }
 
 pub(crate) struct RunContext {
+    pub(crate) toolchain: crate::toolchain::ToolchainSnapshot,
     pub(crate) source_facts: Vec<FileFacts>,
     pub(crate) correctness_facts: Vec<FileFacts>,
     pub(crate) correctness_paths: Vec<String>,
@@ -257,7 +260,12 @@ pub(crate) struct RunContext {
 }
 
 impl RunContext {
+    pub(crate) fn module_graph(&self) -> ModuleGraph {
+        graph::module_graph(&self.source_facts)
+    }
+
     pub(crate) fn new(config: &LensConfig, tools: &[MeasureTool]) -> Result<Self> {
+        let toolchain = crate::toolchain::snapshot(&config.project_root);
         let needs_source_facts = tools.iter().any(MeasureTool::requires_source_facts);
         let needs_correctness_facts = tools.iter().any(MeasureTool::requires_correctness_facts);
         let mut source_facts = load_source_facts(config, needs_source_facts)?;
@@ -275,6 +283,7 @@ impl RunContext {
             needs_correctness_facts,
         )?;
         Ok(Self {
+            toolchain,
             source_facts,
             correctness_facts,
             correctness_paths,

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -8,13 +6,6 @@ use crate::facts::RunContext;
 use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
 use crate::tool::MeasureTool;
 use crate::util::project_input_fingerprint;
-
-#[derive(Debug, Serialize)]
-pub(crate) struct ArtifactEnvelope<T: Serialize> {
-    pub(crate) version: u64,
-    pub(crate) generated_from: &'static str,
-    pub(crate) payload: T,
-}
 
 pub(crate) fn artifact_document(
     tool: &MeasureTool,
@@ -41,10 +32,11 @@ pub(crate) fn artifact_document(
         );
     }
     let mut document = json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_from": "rqlens",
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "generator_version": env!("CARGO_PKG_VERSION"),
+        "toolchain": crate::toolchain::as_json(&context.toolchain),
         "input_fingerprint": project_input_fingerprint(&config.project_root, &config.source_roots),
         "tool": tool.name(),
         "risk_model_id": MODEL_ID,
@@ -117,18 +109,6 @@ fn clone_summary(records: &[Value], context: &RunContext) -> Value {
         "source_nonblank_line_count": source_lines,
         "duplication_percent": duplication_percent,
     })
-}
-
-#[derive(Debug, Serialize)]
-pub(crate) struct MeasurementConfidence {
-    pub(crate) complete: bool,
-    pub(crate) partial: bool,
-    pub(crate) confidence_scope: String,
-    pub(crate) required_inputs: Vec<String>,
-    pub(crate) observed_inputs: Value,
-    pub(crate) missing_input: Vec<String>,
-    pub(crate) stale_input: Vec<String>,
-    pub(crate) unsupported_pattern: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -221,7 +201,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "cognitive_complexity_average": {"type": ["number", "null"], "minimum": 0},
                 "cognitive_complexity_max": {"type": ["integer", "null"], "minimum": 0},
                 "complexity_metric_model_id": {"type": "string", "const": "rqlens.rust_standard_complexity"},
-                "complexity_metric_model_version": {"type": "integer", "const": 1},
+                "complexity_metric_model_version": {"type": "integer", "const": 2},
                 "parse_status": {"type": "string"},
                 "syntax_backend": {"type": "string", "enum": ["tree-sitter-rust", "text"]},
                 "syntax_error_count": {"type": "integer", "minimum": 0},
@@ -481,7 +461,7 @@ fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
     let mut properties = serde_json::Map::new();
     properties.insert(
         "schema_version".to_string(),
-        json!({"type": "integer", "const": 2}),
+        json!({"type": "integer", "const": 3}),
     );
     properties.insert("generated_from".to_string(), json!({"type": "string"}));
     properties.insert(
@@ -489,6 +469,23 @@ fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
         json!({"type": "string", "format": "date-time"}),
     );
     properties.insert("generator_version".to_string(), json!({"type": "string"}));
+    properties.insert(
+        "toolchain".to_string(),
+        json!({
+            "type": "object",
+            "required": ["rustc_version", "rustc_release", "cargo_version", "host", "llvm_version", "declared_rust_version", "pinned_channel"],
+            "properties": {
+                "rustc_version": {"type": ["string", "null"]},
+                "rustc_release": {"type": ["string", "null"]},
+                "cargo_version": {"type": ["string", "null"]},
+                "host": {"type": ["string", "null"]},
+                "llvm_version": {"type": ["string", "null"]},
+                "declared_rust_version": {"type": ["string", "null"]},
+                "pinned_channel": {"type": ["string", "null"]}
+            },
+            "additionalProperties": false
+        }),
+    );
     properties.insert(
         "input_fingerprint".to_string(),
         json!({
@@ -523,7 +520,7 @@ fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": format!("{} artifact envelope", tool.output_file()),
         "type": "object",
-        "required": ["schema_version", "generated_from", "tool", "measurement_confidence", "summary", payload_key],
+        "required": ["schema_version", "generated_from", "toolchain", "tool", "measurement_confidence", "summary", payload_key],
         "properties": properties,
         "additionalProperties": false,
     })

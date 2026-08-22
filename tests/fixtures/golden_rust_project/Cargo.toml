@@ -2,5 +2,9 @@
 name = "golden-rust-project"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.95"
+metadata.rqlens = {
+    syntax_fixture = "toml-1.1",
+}
 
 [workspace]

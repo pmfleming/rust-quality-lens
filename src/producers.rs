@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::config::LensConfig;
 use crate::facts::RunContext;
@@ -21,6 +21,16 @@ mod semantic_api;
 mod test_quality;
 mod topology;
 mod type_health;
+
+fn with_fact_identity(fact: &crate::facts::FileFacts, mut record: Value) -> Value {
+    if let Some(object) = record.as_object_mut() {
+        object.insert("module_id".to_string(), json!(fact.module_id));
+        object.insert("package_name".to_string(), json!(fact.package_name));
+        object.insert("target_name".to_string(), json!(fact.target_name));
+        object.insert("identity_backend".to_string(), json!(fact.identity_backend));
+    }
+    record
+}
 
 pub(crate) fn produce_measurement(
     tool: &MeasureTool,
@@ -45,7 +55,7 @@ pub(crate) fn produce_measurement(
         MeasureTool::Map => map::produce(config, context),
         MeasureTool::Coverage => coverage::produce(config, context),
         MeasureTool::FunctionRisk => function_risk::produce(config, context),
-        MeasureTool::Practices => practices::produce(config),
+        MeasureTool::Practices => practices::produce(config, context),
         MeasureTool::All => unreachable!(),
     }
 }

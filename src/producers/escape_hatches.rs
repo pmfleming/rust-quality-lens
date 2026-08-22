@@ -61,63 +61,63 @@ fn escape_row(
             })
         })
         .collect::<Vec<_>>();
-    Some(json!({
-        "module_name": fact.module_key,
-        "module_key": fact.module_key,
-        "module_id": fact.module_id,
-        "package_name": fact.package_name,
-        "target_name": fact.target_name,
-        "identity_backend": fact.identity_backend,
-        "path": fact.path,
-        "escape_hatch_score": escape_score(&scoring_counts, weights),
-        "total_count": total_count,
-        "unsafe_count": grouped.unsafe_count,
-        "ffi_count": grouped.ffi_count,
-        "global_mutability_count": count(&counts, "static_mut"),
-        "raw_memory_count": grouped.raw_memory_count,
-        "deref_coercion_count": grouped.deref_count,
-        "glob_import_count": count(&counts, "glob_import"),
-        "container_ref_return_count": count(&counts, "container_ref_return"),
-        "layout_linkage_count": grouped.layout_linkage_count,
-        "clippy_suppression_count": count(&counts, "clippy_suppression"),
-        "lint_suppression_count": count(&counts, "lint_suppression"),
-        "allow_attribute_count": allow_count,
-        "clippy_allow_count": count(&counts, "clippy_suppression"),
-        "counts": counts,
-        "scoring_counts": scoring_counts,
-        "locations": locations,
-        "allow_locations": locations.iter().filter(|item| matches!(item["kind"].as_str(), Some("lint_suppression" | "clippy_suppression"))).collect::<Vec<_>>(),
-        "signals": escape_signals(&counts, labels, allow_count),
-        "score_components": score_components,
-        "measured_at": provenance.measured_at,
-        "command": provenance.command,
-        "host": provenance.host,
-        "measurement_confidence": confidence,
-        "source": "static_rust_escape_hatches",
-        "mock": false,
-        "risk_model_id": metadata.risk_model_id,
-        "risk_model_version": metadata.risk_model_version,
-        "risk_calibration": metadata.risk_calibration,
-    }))
+    Some(super::with_fact_identity(
+        fact,
+        json!({
+            "module_name": fact.module_key,
+            "module_key": fact.module_key,
+            "path": fact.path,
+            "escape_hatch_score": escape_score(&scoring_counts, weights),
+            "total_count": total_count,
+            "unsafe_count": grouped.unsafe_count,
+            "ffi_count": grouped.ffi_count,
+            "global_mutability_count": count(&counts, "static_mut"),
+            "raw_memory_count": grouped.raw_memory_count,
+            "deref_coercion_count": grouped.deref_count,
+            "glob_import_count": count(&counts, "glob_import"),
+            "container_ref_return_count": count(&counts, "container_ref_return"),
+            "layout_linkage_count": grouped.layout_linkage_count,
+            "clippy_suppression_count": count(&counts, "clippy_suppression"),
+            "lint_suppression_count": count(&counts, "lint_suppression"),
+            "allow_attribute_count": allow_count,
+            "clippy_allow_count": count(&counts, "clippy_suppression"),
+            "counts": counts,
+            "scoring_counts": scoring_counts,
+            "locations": locations,
+            "allow_locations": locations.iter().filter(|item| matches!(item["kind"].as_str(), Some("lint_suppression" | "clippy_suppression"))).collect::<Vec<_>>(),
+            "signals": escape_signals(&counts, labels, allow_count),
+            "score_components": score_components,
+            "measured_at": provenance.measured_at,
+            "command": provenance.command,
+            "host": provenance.host,
+            "measurement_confidence": confidence,
+            "source": "static_rust_escape_hatches",
+            "mock": false,
+            "risk_model_id": metadata.risk_model_id,
+            "risk_model_version": metadata.risk_model_version,
+            "risk_calibration": metadata.risk_calibration,
+        }),
+    ))
 }
 
 fn normalized_escape_counts(
     fact: &FileFacts,
     weights: &BTreeMap<&'static str, f64>,
 ) -> BTreeMap<String, usize> {
-    weights
-        .keys()
-        .map(|key| {
-            (
-                key.to_string(),
-                *fact.escapes.escape_counts.get(*key).unwrap_or(&0),
-            )
-        })
-        .collect()
+    let mut counts = fact.escapes.escape_counts.clone();
+    for key in weights.keys() {
+        counts.entry((*key).to_string()).or_default();
+    }
+    counts
 }
 
 fn scoring_escape_counts(counts: &BTreeMap<String, usize>) -> BTreeMap<String, usize> {
-    let mut scoring_counts = counts.clone();
+    let weights = escape_weights();
+    let mut scoring_counts = counts
+        .iter()
+        .filter(|(key, _)| weights.contains_key(key.as_str()))
+        .map(|(key, count)| (key.clone(), *count))
+        .collect::<BTreeMap<_, _>>();
     if count(&scoring_counts, "clippy_suppression") > 0 {
         scoring_counts.insert("lint_suppression".to_string(), 0);
     }
@@ -157,7 +157,8 @@ fn grouped_counts(counts: &BTreeMap<String, usize>) -> GroupedCounts {
             + count(counts, "raw_borrow")
             + count(counts, "asm_macro")
             + count(counts, "transmute")
-            + count(counts, "maybe_uninit"),
+            + count(counts, "maybe_uninit")
+            + count(counts, "unsafe_api"),
         deref_count: count(counts, "deref_impl") + count(counts, "deref_mut_impl"),
         layout_linkage_count: count(counts, "repr_escape") + count(counts, "linkage_escape"),
         allow_count: count(counts, "lint_suppression") + count(counts, "clippy_suppression"),
@@ -203,4 +204,17 @@ fn escape_signals(
 
 fn count(counts: &BTreeMap<String, usize>, key: &str) -> usize {
     counts.get(key).copied().unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{grouped_counts, scoring_escape_counts};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn new_raw_memory_apis_are_visible_without_changing_scores() {
+        let counts = BTreeMap::from([("unsafe_api".to_string(), 3)]);
+        assert!(!scoring_escape_counts(&counts).contains_key("unsafe_api"));
+        assert_eq!(grouped_counts(&counts).raw_memory_count, 3);
+    }
 }

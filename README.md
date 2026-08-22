@@ -12,7 +12,7 @@ design notes and model history.
 
 ## Requirements
 
-- Rust 1.88 or newer (the workspace MSRV)
+- Rust 1.95 or newer (the workspace MSRV)
 - Cargo, with rustfmt, Clippy, and rustdoc for `verify`
 - rust-analyzer for compiler-assisted architecture identity (optional in
   `auto` mode)
@@ -344,18 +344,21 @@ Generated measurement artifacts use a versioned envelope. Each document records
 `input_fingerprint` for traceability and stale-artifact detection.
 Array-oriented measurements are stored under `records`; structured measurements
 such as correctness, coverage, and the architecture map are stored under
-`data`. Every measurement envelope carries artifact-level
+`data`. Version 3 envelopes require a `toolchain` object containing active
+Rust, Cargo, host, LLVM, declared-MSRV, and pinned-channel provenance. Every
+measurement envelope carries artifact-level
 `measurement_confidence`, a summary, tool identity, and risk model identity, so
 an empty result remains distinguishable from incomplete extraction. Artifact
-schema version `2` is the current measurement contract; auxiliary performance,
+schema version `3` is the current measurement contract; auxiliary performance,
 outcome, and telemetry documents currently use schema version `1`.
 
 Function rows in `hotspots.json` include raw `cyclomatic_complexity` and
 `cognitive_complexity` under metric model
-`rqlens.rust_standard_complexity`, version 1. Cyclomatic complexity starts at
-one and counts Rust decisions, match arms, `?`, and short-circuit boolean
-operators. Cognitive complexity counts nested control-flow structures, else
-branches, logical-operator sequences, labeled jumps, and closure nesting.
+`rqlens.rust_standard_complexity`, version 2. Cyclomatic complexity starts at
+one and counts Rust decisions, match arms, match guards, `?`, and short-circuit
+boolean operators. Cognitive complexity counts nested control-flow structures,
+guards, else branches, logical-operator sequences, labeled jumps, and closure
+nesting.
 Module rows provide sum, average, and maximum aggregates. These raw metrics do
 not change the calibrated hotspot score.
 

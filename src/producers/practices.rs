@@ -9,7 +9,8 @@ use std::time::Duration;
 use crate::command_runner::{CommandOutcome, CommandRequest, CommandStatus, run};
 use crate::config::LensConfig;
 
-pub(super) fn produce(config: &LensConfig) -> Result<Value> {
+pub(super) fn produce(config: &LensConfig, context: &crate::facts::RunContext) -> Result<Value> {
+    let toolchain = &context.toolchain;
     let mut checks = official_checks(config);
     checks.extend([
         audit_check(config),
@@ -25,6 +26,22 @@ pub(super) fn produce(config: &LensConfig) -> Result<Value> {
     checks.extend(fuzz_checks(config));
     checks.extend(sanitizer_checks(config));
     checks.extend(project_evidence(config));
+    checks.extend(crate::toolchain::quality_checks(toolchain));
+    let diagnostic_count = checks
+        .iter()
+        .flat_map(|check| check["diagnostics"].as_array().into_iter().flatten())
+        .filter_map(|diagnostic| {
+            serde_json::to_string(&json!({
+                "rule_id": diagnostic["rule_id"],
+                "message": diagnostic["message"],
+                "path": diagnostic["path"],
+                "line": diagnostic["line"],
+                "column": diagnostic["column"],
+            }))
+            .ok()
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
     let failed_errors = count(&checks, "failed", "error");
     let failed_warnings = count(&checks, "failed", "warning");
     let unavailable = checks
@@ -40,10 +57,12 @@ pub(super) fn produce(config: &LensConfig) -> Result<Value> {
         .filter(|check| check["status"] == "skipped")
         .count();
     Ok(json!({
-        "version": 1,
+        "version": 2,
         "profile": "baseline",
+        "toolchain": crate::toolchain::as_json(toolchain),
         "summary": {
             "check_count": checks.len(),
+            "diagnostic_count": diagnostic_count,
             "passed": passed,
             "failed_errors": failed_errors,
             "failed_warnings": failed_warnings,
@@ -66,8 +85,15 @@ pub(super) fn produce(config: &LensConfig) -> Result<Value> {
 }
 
 fn official_checks(config: &LensConfig) -> Vec<Value> {
+    let mut check_args = scoped_args(config, "check", true, false);
+    check_args.push("--message-format=json".to_string());
     let mut clippy_args = scoped_args(config, "clippy", true, false);
-    clippy_args.extend(["--".to_string(), "-D".to_string(), "warnings".to_string()]);
+    clippy_args.extend([
+        "--message-format=json".to_string(),
+        "--".to_string(),
+        "-D".to_string(),
+        "warnings".to_string(),
+    ]);
     vec![
         cargo_check(
             config,
@@ -83,7 +109,7 @@ fn official_checks(config: &LensConfig) -> Vec<Value> {
             config,
             "rust.official.cargo-check",
             "All configured targets compile",
-            scoped_args(config, "check", true, false),
+            check_args,
             "https://doc.rust-lang.org/cargo/commands/cargo-check.html",
             BTreeMap::new(),
         ),
@@ -283,19 +309,7 @@ fn mutation_check(config: &LensConfig) -> Value {
             arguments.extend(["--exclude".to_string(), package.clone()]);
         }
     }
-    if config.verification.all_features {
-        arguments.push("--all-features".to_string());
-    } else {
-        if config.verification.no_default_features {
-            arguments.push("--no-default-features".to_string());
-        }
-        if !config.verification.features.is_empty() {
-            arguments.extend([
-                "--features".to_string(),
-                config.verification.features.join(","),
-            ]);
-        }
-    }
+    arguments.extend(config.verification.cargo_feature_arguments());
     cargo_check(
         config,
         "rust.tests.mutation",
@@ -327,23 +341,7 @@ fn flaky_test_check(config: &LensConfig) -> Value {
         .iter()
         .filter(|outcome| outcome.status == CommandStatus::Passed)
         .count();
-    let unavailable = outcomes.iter().any(|outcome| {
-        outcome.status == CommandStatus::Unavailable
-            || (outcome.status == CommandStatus::Failed
-                && cargo_tool_is_unavailable(&outcome.stderr))
-    });
-    let timed_out = outcomes
-        .iter()
-        .any(|outcome| outcome.status == CommandStatus::TimedOut);
-    let status = if unavailable {
-        "unavailable"
-    } else if timed_out {
-        "timed-out"
-    } else if passed == runs {
-        "passed"
-    } else {
-        "failed"
-    };
+    let status = repeated_test_status(&outcomes, passed, runs);
     json!({
         "rule_id": "rust.tests.flaky-repeat",
         "title": "Repeated test runs are stable",
@@ -361,6 +359,25 @@ fn flaky_test_check(config: &LensConfig) -> Value {
             "runs": outcomes,
         },
     })
+}
+
+fn repeated_test_status(outcomes: &[CommandOutcome], passed: usize, runs: usize) -> &'static str {
+    if outcomes.iter().any(|outcome| {
+        outcome.status == CommandStatus::Unavailable
+            || (outcome.status == CommandStatus::Failed
+                && cargo_tool_is_unavailable(&outcome.stderr))
+    }) {
+        "unavailable"
+    } else if outcomes
+        .iter()
+        .any(|outcome| outcome.status == CommandStatus::TimedOut)
+    {
+        "timed-out"
+    } else if passed == runs {
+        "passed"
+    } else {
+        "failed"
+    }
 }
 
 fn fuzz_checks(config: &LensConfig) -> Vec<Value> {
@@ -459,7 +476,8 @@ fn cargo_check(
         outcome.reason =
             Some("the requested Cargo command or toolchain component is unavailable".to_string());
     }
-    command_check(rule_id, title, source, outcome)
+    let diagnostics = compiler_diagnostics(&outcome.stdout);
+    command_check(rule_id, title, source, outcome, diagnostics)
 }
 
 fn cargo_tool_is_unavailable(stderr: &str) -> bool {
@@ -477,7 +495,13 @@ fn cargo_tool_is_unavailable(stderr: &str) -> bool {
     .any(|message| stderr.contains(message))
 }
 
-fn command_check(rule_id: &str, title: &str, source: &str, outcome: CommandOutcome) -> Value {
+fn command_check(
+    rule_id: &str,
+    title: &str,
+    source: &str,
+    outcome: CommandOutcome,
+    diagnostics: Vec<Value>,
+) -> Value {
     let status = match outcome.status {
         CommandStatus::Passed => "passed",
         CommandStatus::Failed => "failed",
@@ -493,8 +517,59 @@ fn command_check(rule_id: &str, title: &str, source: &str, outcome: CommandOutco
         "source": source,
         "tool": "cargo",
         "tool_version": cargo_version(),
+        "diagnostics": diagnostics,
         "evidence": outcome,
     })
+}
+
+fn compiler_diagnostics(stdout: &str) -> Vec<Value> {
+    stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|message| message["reason"] == "compiler-message")
+        .filter_map(|message| {
+            let diagnostic = &message["message"];
+            let level = diagnostic["level"].as_str()?;
+            if !matches!(level, "warning" | "error") {
+                return None;
+            }
+            let code = diagnostic["code"]["code"].as_str();
+            let span = diagnostic["spans"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|span| span["is_primary"] == true)
+                .or_else(|| {
+                    diagnostic["spans"]
+                        .as_array()
+                        .and_then(|spans| spans.first())
+                });
+            let rule_id = compiler_rule_id(code);
+            Some(json!({
+                "rule_id": rule_id,
+                "code": code,
+                "severity": if level == "error" { "error" } else { "warning" },
+                "message": diagnostic["message"],
+                "rendered": diagnostic["rendered"],
+                "path": span.and_then(|span| span["file_name"].as_str()),
+                "line": span.and_then(|span| span["line_start"].as_u64()),
+                "column": span.and_then(|span| span["column_start"].as_u64()),
+            }))
+        })
+        .collect()
+}
+
+fn compiler_rule_id(code: Option<&str>) -> String {
+    match code {
+        Some(code) if let Some(clippy) = code.strip_prefix("clippy::") => {
+            format!("rust.clippy.{}", clippy.replace('_', "-"))
+        }
+        Some(code) => format!(
+            "rust.compiler.{}",
+            code.replace('_', "-").to_ascii_lowercase()
+        ),
+        None => "rust.compiler.diagnostic".to_string(),
+    }
 }
 
 fn cargo_version() -> &'static str {
@@ -526,17 +601,13 @@ fn scoped_args(
 fn project_evidence(config: &LensConfig) -> Vec<Value> {
     let manifest = fs::read_to_string(config.project_root.join("Cargo.toml"))
         .ok()
-        .and_then(|contents| contents.parse::<toml::Value>().ok());
-    let package = manifest
-        .as_ref()
-        .and_then(|manifest| manifest.get("package"))
-        .or_else(|| {
-            manifest
-                .as_ref()
-                .and_then(|manifest| manifest.get("workspace"))
-                .and_then(|workspace| workspace.get("package"))
-        });
-    let has = |key: &str| package.and_then(|package| package.get(key)).is_some();
+        .and_then(|contents| toml::from_str::<toml::Value>(&contents).ok());
+    let has = |key: &str| {
+        manifest
+            .as_ref()
+            .and_then(|manifest| effective_package_value(manifest, key))
+            .is_some()
+    };
     let files = |names: &[&str]| {
         names
             .iter()
@@ -593,25 +664,31 @@ fn project_evidence(config: &LensConfig) -> Vec<Value> {
             "https://keepachangelog.com/",
         ),
     ];
-    evidence.insert(1, msrv_dependency_check(config, manifest.as_ref(), package));
+    evidence.insert(1, msrv_dependency_check(config, manifest.as_ref()));
     evidence
 }
 
-fn msrv_dependency_check(
-    config: &LensConfig,
-    manifest: Option<&toml::Value>,
-    package: Option<&toml::Value>,
-) -> Value {
-    let declared = package
-        .and_then(|package| package.get("rust-version"))
-        .and_then(toml::Value::as_str)
-        .or_else(|| {
-            manifest
-                .and_then(|manifest| manifest.get("workspace"))
-                .and_then(|workspace| workspace.get("package"))
-                .and_then(|package| package.get("rust-version"))
-                .and_then(toml::Value::as_str)
-        });
+fn effective_package_value<'a>(manifest: &'a toml::Value, key: &str) -> Option<&'a toml::Value> {
+    let package_value = manifest.get("package").and_then(|package| package.get(key));
+    let inherited = package_value
+        .and_then(toml::Value::as_table)
+        .and_then(|table| table.get("workspace"))
+        .and_then(toml::Value::as_bool)
+        == Some(true);
+    if package_value.is_some() && !inherited {
+        return package_value;
+    }
+    manifest
+        .get("workspace")
+        .and_then(|workspace| workspace.get("package"))
+        .and_then(|package| package.get(key))
+        .or(package_value)
+}
+
+fn msrv_dependency_check(config: &LensConfig, manifest: Option<&toml::Value>) -> Value {
+    let declared = manifest
+        .and_then(|manifest| effective_package_value(manifest, "rust-version"))
+        .and_then(toml::Value::as_str);
     let Some(declared) = declared else {
         return skipped_check(
             "rust.project.msrv-compatible",
@@ -669,12 +746,7 @@ fn msrv_dependency_check(
 }
 
 fn parse_rust_version(value: &str) -> Option<(u64, u64, u64)> {
-    let mut parts = value.split('.').map(|part| part.parse::<u64>().ok());
-    Some((
-        parts.next()??,
-        parts.next().flatten().unwrap_or(0),
-        parts.next().flatten().unwrap_or(0),
-    ))
+    crate::toolchain::parse_version(value)
 }
 
 fn format_rust_version(version: (u64, u64, u64)) -> String {
@@ -714,7 +786,10 @@ fn count(checks: &[Value], status: &str, severity: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{cargo_tool_is_unavailable, format_rust_version, parse_rust_version};
+    use super::{
+        cargo_tool_is_unavailable, compiler_diagnostics, effective_package_value,
+        format_rust_version, parse_rust_version,
+    };
 
     #[test]
     fn rust_versions_compare_as_numeric_components() {
@@ -722,6 +797,63 @@ mod tests {
         assert_eq!(parse_rust_version("1.95"), Some((1, 95, 0)));
         assert_eq!(format_rust_version((1, 95, 0)), "1.95.0");
         assert_eq!(parse_rust_version("stable"), None);
+    }
+
+    #[test]
+    fn current_workspace_package_evidence_is_resolved() -> anyhow::Result<()> {
+        let contents = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+        )?;
+        let manifest = toml::from_str::<toml::Value>(&contents)?;
+        assert_eq!(
+            effective_package_value(&manifest, "rust-version").and_then(toml::Value::as_str),
+            Some("1.95")
+        );
+        assert_eq!(
+            effective_package_value(&manifest, "license").and_then(toml::Value::as_str),
+            Some("MIT")
+        );
+        assert!(effective_package_value(&manifest, "repository").is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_inherited_package_values_are_resolved() -> anyhow::Result<()> {
+        let manifest = toml::from_str::<toml::Value>(
+            r#"
+[workspace.package]
+rust-version = "1.95"
+license = "MIT"
+
+[package]
+name = "demo"
+rust-version.workspace = true
+license.workspace = true
+repository = "https://example.invalid/demo"
+"#,
+        )?;
+        assert_eq!(
+            effective_package_value(&manifest, "rust-version").and_then(toml::Value::as_str),
+            Some("1.95")
+        );
+        assert_eq!(
+            effective_package_value(&manifest, "repository").and_then(toml::Value::as_str),
+            Some("https://example.invalid/demo")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn compiler_json_diagnostics_keep_rule_and_location() {
+        let output = r#"{"reason":"compiler-message","message":{"code":{"code":"dangling_pointers_from_locals"},"level":"warning","message":"a dangling pointer is produced","rendered":"warning","spans":[{"file_name":"src/lib.rs","line_start":7,"column_start":9,"is_primary":true}]}}"#;
+        let diagnostics = compiler_diagnostics(output);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0]["rule_id"],
+            "rust.compiler.dangling-pointers-from-locals"
+        );
+        assert_eq!(diagnostics[0]["path"], "src/lib.rs");
+        assert_eq!(diagnostics[0]["line"], 7);
     }
 
     #[test]

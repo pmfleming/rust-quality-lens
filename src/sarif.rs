@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::{Map, Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
@@ -143,39 +143,116 @@ fn add_practice_results(
     let Some(document) = read_optional(config.output_dir.join("rust_practices.json"))? else {
         return Ok(());
     };
+    let mut seen_diagnostics = BTreeSet::new();
     for check in payload(&document)["checks"]
         .as_array()
         .into_iter()
         .flatten()
     {
-        if !matches!(
-            check["status"].as_str(),
-            Some("failed" | "unavailable" | "timed-out")
-        ) {
-            continue;
+        for diagnostic in check["diagnostics"].as_array().into_iter().flatten() {
+            add_compiler_diagnostic(
+                config,
+                check,
+                diagnostic,
+                &mut seen_diagnostics,
+                rules,
+                results,
+            );
         }
-        let Some(rule_id) = check["rule_id"].as_str() else {
-            continue;
-        };
-        if config.policy.active_waiver(rule_id, None).is_some() {
-            continue;
-        }
-        let title = check["title"].as_str().unwrap_or(rule_id);
-        rules.entry(rule_id.to_string()).or_insert_with(|| {
-            json!({
-                "id": rule_id,
-                "name": rule_id.replace(['.', '-'], "_"),
-                "shortDescription": {"text": title},
-                "helpUri": check["source"],
-            })
-        });
-        results.push(json!({
-            "ruleId": rule_id,
-            "level": sarif_level(&check["severity"]),
-            "message": {"text": format!("{}: {}", title, check["status"].as_str().unwrap_or("failed"))},
-        }));
+        add_failed_practice(config, check, rules, results);
     }
     Ok(())
+}
+
+fn add_compiler_diagnostic(
+    config: &LensConfig,
+    check: &Value,
+    diagnostic: &Value,
+    seen: &mut BTreeSet<(String, String, u64, u64, String)>,
+    rules: &mut BTreeMap<String, Value>,
+    results: &mut Vec<Value>,
+) {
+    let Some(rule_id) = diagnostic["rule_id"].as_str() else {
+        return;
+    };
+    let path = diagnostic["path"].as_str();
+    let key = (
+        rule_id.to_string(),
+        path.unwrap_or_default().to_string(),
+        diagnostic["line"].as_u64().unwrap_or_default(),
+        diagnostic["column"].as_u64().unwrap_or_default(),
+        diagnostic["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+    );
+    if !seen.insert(key) || config.policy.active_waiver(rule_id, path).is_some() {
+        return;
+    }
+    rules.entry(rule_id.to_string()).or_insert_with(|| {
+        json!({
+            "id": rule_id,
+            "name": rule_id.replace(['.', '-'], "_"),
+            "shortDescription": {"text": diagnostic["message"]},
+            "helpUri": check["source"],
+        })
+    });
+    let mut result = json!({
+        "ruleId": rule_id,
+        "level": sarif_level(&diagnostic["severity"]),
+        "message": {"text": diagnostic["message"]},
+    });
+    if let (Some(path), Some(line)) = (path, diagnostic["line"].as_u64())
+        && let Some(object) = result.as_object_mut()
+    {
+        object.insert(
+            "locations".to_string(),
+            json!([{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": path},
+                    "region": {
+                        "startLine": line,
+                        "startColumn": diagnostic["column"].as_u64().unwrap_or(1),
+                    }
+                }
+            }]),
+        );
+    }
+    results.push(result);
+}
+
+fn add_failed_practice(
+    config: &LensConfig,
+    check: &Value,
+    rules: &mut BTreeMap<String, Value>,
+    results: &mut Vec<Value>,
+) {
+    if !matches!(
+        check["status"].as_str(),
+        Some("failed" | "unavailable" | "timed-out")
+    ) {
+        return;
+    }
+    let Some(rule_id) = check["rule_id"].as_str() else {
+        return;
+    };
+    if config.policy.active_waiver(rule_id, None).is_some() {
+        return;
+    }
+    let title = check["title"].as_str().unwrap_or(rule_id);
+    rules.entry(rule_id.to_string()).or_insert_with(|| {
+        json!({
+            "id": rule_id,
+            "name": rule_id.replace(['.', '-'], "_"),
+            "shortDescription": {"text": title},
+            "helpUri": check["source"],
+        })
+    });
+    results.push(json!({
+        "ruleId": rule_id,
+        "level": sarif_level(&check["severity"]),
+        "message": {"text": format!("{}: {}", title, check["status"].as_str().unwrap_or("failed"))},
+    }));
 }
 
 fn read_optional(path: PathBuf) -> Result<Option<Value>> {
@@ -234,7 +311,15 @@ mod tests {
                 "title": "Clippy",
                 "severity": "error",
                 "status": "failed",
-                "source": "https://doc.rust-lang.org/clippy/"
+                "source": "https://doc.rust-lang.org/clippy/",
+                "diagnostics": [{
+                    "rule_id": "rust.compiler.dangling-pointers-from-locals",
+                    "severity": "warning",
+                    "message": "a dangling pointer is produced",
+                    "path": "src/raw.rs",
+                    "line": 8,
+                    "column": 4
+                }]
             }]}}))?,
         )?;
         let config = LensConfig {
@@ -256,7 +341,19 @@ mod tests {
         assert_eq!(document["version"], "2.1.0");
         assert_eq!(
             document["runs"][0]["results"].as_array().map(Vec::len),
-            Some(2)
+            Some(3)
+        );
+        let Some(diagnostic) = document["runs"][0]["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|result| result["ruleId"] == "rust.compiler.dangling-pointers-from-locals")
+        else {
+            anyhow::bail!("compiler diagnostic result was not emitted");
+        };
+        assert_eq!(
+            diagnostic["locations"][0]["physicalLocation"]["region"]["startLine"],
+            8
         );
         Ok(())
     }

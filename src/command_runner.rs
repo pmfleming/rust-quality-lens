@@ -49,7 +49,7 @@ impl<'a> CommandRequest<'a> {
             args,
             current_dir,
             environment: BTreeMap::new(),
-            timeout: Duration::from_secs(600),
+            timeout: Duration::from_mins(10),
             tail_lines: 40,
         }
     }

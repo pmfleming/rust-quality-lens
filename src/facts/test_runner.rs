@@ -97,7 +97,7 @@ fn manifest_target_paths(config: &LensConfig) -> Vec<String> {
     let Ok(text) = std::fs::read_to_string(cargo) else {
         return Vec::new();
     };
-    let Ok(value) = text.parse::<toml::Value>() else {
+    let Ok(value) = toml::from_str::<toml::Value>(&text) else {
         return Vec::new();
     };
     ["bin", "test", "bench", "example"]

@@ -133,10 +133,12 @@ pub(crate) fn escape_weights() -> BTreeMap<&'static str, f64> {
 }
 
 pub(crate) fn escape_labels() -> BTreeMap<&'static str, &'static str> {
-    ESCAPE_CALIBRATIONS
+    let mut labels = ESCAPE_CALIBRATIONS
         .iter()
         .map(|(key, label, _)| (*key, *label))
-        .collect()
+        .collect::<BTreeMap<_, _>>();
+    labels.insert("unsafe_api", "raw-memory API (unscored)");
+    labels
 }
 
 pub(crate) fn risk_model_weights() -> Value {

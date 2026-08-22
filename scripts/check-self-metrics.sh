@@ -14,6 +14,9 @@ require() {
 }
 
 max_hotspot=$(metric max_function_hotspot_score)
+max_cyclomatic=$(metric max_function_cyclomatic_complexity)
+max_cognitive=$(metric max_function_cognitive_complexity)
+max_source_lines=$(metric max_source_nonblank_lines)
 max_ast_clones=$(metric max_ast_clone_records)
 max_clones=$(metric max_token_clone_records)
 max_duplication=$(metric max_duplication_percent)
@@ -23,6 +26,15 @@ min_leverage=$(metric min_map_leverage_score)
 require "$analysis/hotspots.json" \
   "([.records[] | select(.kind == \"function\") | .score] | max // 0) <= $max_hotspot" \
   "function hotspot exceeds $max_hotspot"
+require "$analysis/hotspots.json" \
+  "([.records[] | select(.kind == \"function\") | .cyclomatic_complexity] | max // 0) <= $max_cyclomatic" \
+  "function cyclomatic complexity exceeds $max_cyclomatic"
+require "$analysis/hotspots.json" \
+  "([.records[] | select(.kind == \"function\") | .cognitive_complexity] | max // 0) <= $max_cognitive" \
+  "function cognitive complexity exceeds $max_cognitive"
+require "$analysis/hotspots.json" \
+  "([.records[] | select(.kind == \"module\") | .sloc] | add // 0) <= $max_source_lines" \
+  "source nonblank line count exceeds $max_source_lines"
 require "$analysis/rust_escape_hatches.json" \
   '.summary.record_count == 0' 'escape hatch detected'
 require "$analysis/clones.json" \

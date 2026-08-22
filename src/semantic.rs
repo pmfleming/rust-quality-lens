@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use crate::config::{LensConfig, SemanticIdentityMode};
 use crate::facts::{DependencyReferenceFact, FileFacts, ResolvedDependencyFact};
-use crate::util::{normalize_slashes, write_json};
+use crate::util::{lock_file, normalize_slashes, write_json};
 
 const CACHE_VERSION: u64 = 8;
 
@@ -89,6 +89,7 @@ pub(crate) fn resolve(
             reference_count,
         ));
     }
+    let _cache_lock = lock_file(&cache_path(config))?;
     let analyzer_version = analyzer_version(config);
     let fingerprint = fingerprint(config, facts, analyzer_version.as_deref());
     if let Some(summary) = restore_cache(config, facts, &fingerprint) {

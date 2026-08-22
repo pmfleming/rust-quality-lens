@@ -341,28 +341,27 @@ impl FactVisitor {
     }
 
     fn scan_attrs(&mut self, attrs: &[Attribute]) {
-        for attr in attrs {
-            let path = path_to_string(attr.path());
-            if path == "repr" {
-                self.bump_escape("repr_escape", attr.span());
-            }
-            if matches!(
-                path.as_str(),
-                "no_mangle" | "export_name" | "link_name" | "link_section" | "used"
-            ) {
-                self.bump_escape("linkage_escape", attr.span());
-            }
-            if path == "allow" || path == "expect" {
-                if attr.meta.to_token_stream().to_string().contains("clippy") {
-                    self.bump_escape("clippy_suppression", attr.span());
-                } else {
-                    self.bump_escape("lint_suppression", attr.span());
-                }
-            }
-            if path == "cfg" && attr.meta.to_token_stream().to_string().contains("test") {
-                self.has_inline_tests = true;
-            }
+        attrs.iter().for_each(|attr| self.scan_attr(attr));
+    }
+
+    fn scan_attr(&mut self, attr: &Attribute) {
+        let path = path_to_string(attr.path());
+        let tokens = attr.meta.to_token_stream().to_string();
+        if path == "repr" {
+            self.bump_escape("repr_escape", attr.span());
         }
+        if is_linkage_attribute(&path, &tokens) {
+            self.bump_escape("linkage_escape", attr.span());
+        }
+        if matches!(path.as_str(), "allow" | "expect") {
+            let kind = if tokens.contains("clippy") {
+                "clippy_suppression"
+            } else {
+                "lint_suppression"
+            };
+            self.bump_escape(kind, attr.span());
+        }
+        self.has_inline_tests |= path == "cfg" && tokens.contains("test");
     }
 
     fn maybe_record_test(&mut self, func: &ItemFn) {
@@ -388,6 +387,18 @@ impl FactVisitor {
                 return;
             }
         }
+    }
+
+    fn record_raw_memory_api(&mut self, name: &str, span: Span) {
+        self.bump_escape("unsafe_api", span);
+        self.record_finding(
+            "rust.memory.raw-api",
+            "raw-memory-api",
+            span,
+            &format!(
+                "{name} uses an unchecked, uninitialized, dangling, or provenance-sensitive API"
+            ),
+        );
     }
 
     fn current_module_key(&self) -> String {
@@ -613,6 +624,14 @@ macro_rules! standard_jump_visitor {
 }
 
 impl<'ast> Visit<'ast> for StandardComplexity {
+    fn visit_arm(&mut self, arm: &'ast syn::Arm) {
+        if arm.guard.is_some() {
+            self.cyclomatic_complexity += 1;
+            self.cognitive_complexity += 1;
+        }
+        visit::visit_arm(self, arm);
+    }
+
     fn visit_expr_if(&mut self, expression: &'ast ExprIf) {
         self.cyclomatic_complexity += 1;
         let is_else_if = std::mem::take(&mut self.next_if_is_else_if);
@@ -683,52 +702,14 @@ impl<'ast> Visit<'ast> for FactVisitor {
                 self.record_public_api(&item.vis, &item.attrs);
             }
             Item::Enum(item) => self.record_enum(item),
-            Item::Fn(item) => {
-                self.record_fn(item);
-                let test_scope = has_test_attrs(&item.attrs);
-                self.test_scope_depth += usize::from(test_scope);
-                visit::visit_item(self, i);
-                self.test_scope_depth = self
-                    .test_scope_depth
-                    .saturating_sub(usize::from(test_scope));
-                return;
-            }
+            Item::Fn(item) => return self.visit_function_item(i, item),
             Item::ForeignMod(item) => self.record_foreign_mod(item),
             Item::Impl(item) => self.record_impl(item),
             Item::Macro(item) => self.record_item_macro(item),
-            Item::Mod(item) => {
-                self.record_mod(item);
-                if item.content.is_some() {
-                    let test_scope = item.ident == "tests" || has_test_attrs(&item.attrs);
-                    self.test_scope_depth += usize::from(test_scope);
-                    self.module_stack.push(item.ident.to_string());
-                    visit::visit_item(self, i);
-                    self.module_stack.pop();
-                    self.test_scope_depth = self
-                        .test_scope_depth
-                        .saturating_sub(usize::from(test_scope));
-                } else {
-                    visit::visit_item(self, i);
-                }
-                return;
-            }
+            Item::Mod(item) => return self.visit_module_item(i, item),
             Item::Static(item) => self.record_static(item),
             Item::Struct(item) => self.record_struct(item),
-            Item::Trait(item) => {
-                self.scan_attrs(&item.attrs);
-                self.record_public_api(&item.vis, &item.attrs);
-                if item.unsafety.is_some() {
-                    self.bump_escape("unsafe_trait", item.trait_token.span);
-                    if !has_safety_docs(&item.attrs) {
-                        self.record_finding(
-                            "rust.safety.missing-safety-docs",
-                            "unsafe-trait",
-                            item.trait_token.span,
-                            "unsafe trait does not document its Safety contract",
-                        );
-                    }
-                }
-            }
+            Item::Trait(item) => self.record_trait(item),
             Item::Type(item) => {
                 self.scan_attrs(&item.attrs);
                 self.record_public_api(&item.vis, &item.attrs);
@@ -750,6 +731,15 @@ impl<'ast> Visit<'ast> for FactVisitor {
                 || path_ends_with(&path.path, "transmute_copy")
             {
                 self.bump_escape("transmute", path.path.span());
+            }
+            if let Some(name) = path
+                .path
+                .segments
+                .last()
+                .map(|segment| segment.ident.to_string())
+                && is_raw_memory_api(&name)
+            {
+                self.record_raw_memory_api(&name, path.path.span());
             }
             self.add_expression_dependency(&path.path);
         }
@@ -781,6 +771,9 @@ impl<'ast> Visit<'ast> for FactVisitor {
 
     fn visit_expr_method_call(&mut self, expression: &'ast syn::ExprMethodCall) {
         let method = expression.method.to_string();
+        if is_raw_memory_api(&method) {
+            self.record_raw_memory_api(&method, expression.method.span());
+        }
         if matches!(method.as_str(), "unwrap" | "expect") {
             self.record_finding(
                 &format!("rust.reliability.{method}"),
@@ -842,6 +835,49 @@ impl<'ast> Visit<'ast> for FactVisitor {
 }
 
 impl FactVisitor {
+    fn visit_function_item(&mut self, item: &Item, function: &ItemFn) {
+        self.record_fn(function);
+        let test_scope = has_test_attrs(&function.attrs);
+        self.test_scope_depth += usize::from(test_scope);
+        visit::visit_item(self, item);
+        self.test_scope_depth = self
+            .test_scope_depth
+            .saturating_sub(usize::from(test_scope));
+    }
+
+    fn visit_module_item(&mut self, item: &Item, module: &syn::ItemMod) {
+        self.record_mod(module);
+        if module.content.is_none() {
+            visit::visit_item(self, item);
+            return;
+        }
+        let test_scope = module.ident == "tests" || has_test_attrs(&module.attrs);
+        self.test_scope_depth += usize::from(test_scope);
+        self.module_stack.push(module.ident.to_string());
+        visit::visit_item(self, item);
+        self.module_stack.pop();
+        self.test_scope_depth = self
+            .test_scope_depth
+            .saturating_sub(usize::from(test_scope));
+    }
+
+    fn record_trait(&mut self, item: &syn::ItemTrait) {
+        self.scan_attrs(&item.attrs);
+        self.record_public_api(&item.vis, &item.attrs);
+        if item.unsafety.is_none() {
+            return;
+        }
+        self.bump_escape("unsafe_trait", item.trait_token.span);
+        if !has_safety_docs(&item.attrs) {
+            self.record_finding(
+                "rust.safety.missing-safety-docs",
+                "unsafe-trait",
+                item.trait_token.span,
+                "unsafe trait does not document its Safety contract",
+            );
+        }
+    }
+
     fn record_enum(&mut self, item: &ItemEnum) {
         self.scan_attrs(&item.attrs);
         self.record_public_api(&item.vis, &item.attrs);
@@ -911,51 +947,65 @@ impl FactVisitor {
 
     fn record_impl(&mut self, item: &ItemImpl) {
         self.scan_attrs(&item.attrs);
-        if item.unsafety.is_some() {
-            self.bump_escape("unsafe_impl", item.impl_token.span);
-            if !self.has_safety_rationale(item.impl_token.span) {
-                self.record_finding(
-                    "rust.safety.undocumented-unsafe",
-                    "unsafe-impl",
-                    item.impl_token.span,
-                    "unsafe impl has no nearby SAFETY rationale",
-                );
-            }
-        }
-        if let Some((_, trait_path, _)) = &item.trait_ {
-            if path_ends_with(trait_path, "Deref") {
-                self.bump_escape("deref_impl", trait_path.span());
-            }
-            if path_ends_with(trait_path, "DerefMut") {
-                self.bump_escape("deref_mut_impl", trait_path.span());
-            }
-        }
-        let method_count = item
-            .items
-            .iter()
-            .filter(|child| matches!(child, ImplItem::Fn(_)))
-            .count();
+        self.record_unsafe_impl(item);
+        self.record_deref_impl(item);
+        let methods = item.items.iter().filter_map(|child| match child {
+            ImplItem::Fn(method) => Some(method),
+            _ => None,
+        });
         let owner = impl_type_path(&item.self_ty).unwrap_or_else(|| "unknown".to_string());
-        for child in &item.items {
-            if let ImplItem::Fn(method) = child {
-                self.record_method_metrics(&owner, method);
-            }
+        let mut method_count = 0;
+        for method in methods {
+            method_count += 1;
+            self.record_method_metrics(&owner, method);
         }
-        if let Some(qualified_type_name) = impl_type_path(&item.self_ty) {
-            let type_name = qualified_type_name
-                .rsplit("::")
-                .next()
-                .unwrap_or(&qualified_type_name)
-                .to_string();
-            self.impls.push(ImplFact {
-                type_name,
-                qualified_type_name,
-                module_key: self.current_module_key(),
-                path: self.path.clone(),
-                line: span_start_line(item.impl_token.span),
-                method_count,
-            });
+        self.record_impl_fact(item, method_count);
+    }
+
+    fn record_unsafe_impl(&mut self, item: &ItemImpl) {
+        if item.unsafety.is_none() {
+            return;
         }
+        self.bump_escape("unsafe_impl", item.impl_token.span);
+        if !self.has_safety_rationale(item.impl_token.span) {
+            self.record_finding(
+                "rust.safety.undocumented-unsafe",
+                "unsafe-impl",
+                item.impl_token.span,
+                "unsafe impl has no nearby SAFETY rationale",
+            );
+        }
+    }
+
+    fn record_deref_impl(&mut self, item: &ItemImpl) {
+        let Some((_, trait_path, _)) = &item.trait_ else {
+            return;
+        };
+        if path_ends_with(trait_path, "Deref") {
+            self.bump_escape("deref_impl", trait_path.span());
+        }
+        if path_ends_with(trait_path, "DerefMut") {
+            self.bump_escape("deref_mut_impl", trait_path.span());
+        }
+    }
+
+    fn record_impl_fact(&mut self, item: &ItemImpl, method_count: usize) {
+        let Some(qualified_type_name) = impl_type_path(&item.self_ty) else {
+            return;
+        };
+        let type_name = qualified_type_name
+            .rsplit("::")
+            .next()
+            .unwrap_or(&qualified_type_name)
+            .to_string();
+        self.impls.push(ImplFact {
+            type_name,
+            qualified_type_name,
+            module_key: self.current_module_key(),
+            path: self.path.clone(),
+            line: span_start_line(item.impl_token.span),
+            method_count,
+        });
     }
 
     fn record_method_metrics(&mut self, owner: &str, method: &ImplItemFn) {
@@ -997,6 +1047,13 @@ impl FactVisitor {
                 self.path,
                 span_start_line(item.mac.path.span()),
                 path
+            ));
+        }
+        if path.rsplit("::").next() == Some("cfg_select") {
+            self.unsupported_patterns.push(format!(
+                "{}:{}: cfg_select! conditional items require macro expansion",
+                self.path,
+                span_start_line(item.mac.path.span())
             ));
         }
     }
@@ -1295,6 +1352,17 @@ fn update_tree_sitter_complexity(
             metrics.cyclomatic_complexity += 1;
             nesting
         }
+        "match_pattern" if node.child_by_field_name("condition").is_some() => {
+            metrics.cyclomatic_complexity += 1;
+            metrics.cognitive_complexity += 1;
+            nesting
+        }
+        "let_chain" => {
+            let decision_count = node.named_child_count().saturating_sub(1);
+            metrics.cyclomatic_complexity += decision_count;
+            metrics.cognitive_complexity += usize::from(decision_count > 0);
+            nesting
+        }
         "else_clause" => {
             metrics.cognitive_complexity += 1;
             nesting
@@ -1391,7 +1459,7 @@ fn tree_sitter_logical_sequence(node: tree_sitter::Node<'_>) -> usize {
     collect(node, &mut operators);
     usize::from(!operators.is_empty())
         + operators
-            .windows(2)
+            .array_windows::<2>()
             .filter(|pair| pair[0] != pair[1])
             .count()
 }
@@ -1696,6 +1764,37 @@ fn is_test_generating_macro(path: &str) -> bool {
     )
 }
 
+fn is_linkage_attribute(path: &str, tokens: &str) -> bool {
+    matches!(
+        path,
+        "no_mangle" | "export_name" | "link_name" | "link_section" | "used"
+    ) || (path == "unsafe"
+        && ["no_mangle", "export_name", "link_name", "link_section"]
+            .iter()
+            .any(|name| tokens.contains(name)))
+}
+
+fn is_raw_memory_api(name: &str) -> bool {
+    matches!(
+        name,
+        "assume_init"
+            | "assume_init_drop"
+            | "assume_init_mut"
+            | "assume_init_read"
+            | "assume_init_ref"
+            | "as_mut_unchecked"
+            | "as_ref_unchecked"
+            | "dangling_ptr"
+            | "expose_provenance"
+            | "unchecked_neg"
+            | "unchecked_shl"
+            | "unchecked_shr"
+            | "with_exposed_provenance"
+            | "with_exposed_provenance_mut"
+            | "without_provenance"
+    )
+}
+
 fn path_to_string(path: &syn::Path) -> String {
     path.segments
         .iter()
@@ -1937,6 +2036,73 @@ fn broken( {
         };
         assert_eq!(function.cyclomatic_complexity, 3);
         assert_eq!(function.cognitive_complexity, 3);
+    }
+
+    #[test]
+    fn rust_195_match_guards_are_counted_by_both_backends() {
+        let source = r#"
+fn guarded(input: Option<i32>, limit: Result<i32, ()>) -> i32 {
+    match input {
+        Some(value) if let Ok(max) = limit && value < max => value,
+        _ => 0,
+    }
+}
+"#;
+        let syn_facts = facts(source);
+        let tree_sitter_facts =
+            super::tree_sitter_fallback("src/lib.rs", source, "forced fallback");
+        let syn_function = &syn_facts.functions[0];
+        let tree_sitter_function = &tree_sitter_facts.functions[0];
+        assert_eq!(syn_function.cyclomatic_complexity, 5);
+        assert_eq!(syn_function.cognitive_complexity, 3);
+        assert_eq!(
+            tree_sitter_function.cyclomatic_complexity,
+            syn_function.cyclomatic_complexity
+        );
+        assert_eq!(
+            tree_sitter_function.cognitive_complexity,
+            syn_function.cognitive_complexity
+        );
+    }
+
+    #[test]
+    fn new_raw_memory_apis_are_explicit_unscored_evidence() {
+        let facts = facts(
+            r#"
+fn inspect(pointer: *const i32, value: std::mem::MaybeUninit<i32>) {
+    let _ = unsafe { pointer.as_ref_unchecked() };
+    let _ = unsafe { value.assume_init_ref() };
+    let _ = std::ptr::without_provenance::<i32>(1);
+}
+"#,
+        );
+        assert_eq!(facts.escape_counts.get("unsafe_api"), Some(&3));
+        assert_eq!(
+            facts
+                .quality_findings
+                .iter()
+                .filter(|finding| finding.rule_id == "rust.memory.raw-api")
+                .count(),
+            3
+        );
+    }
+
+    #[test]
+    fn cfg_select_is_reported_until_macro_expansion_is_available() {
+        let facts = facts(
+            r#"
+cfg_select! {
+    unix => { mod unix; }
+    _ => { mod fallback; }
+}
+"#,
+        );
+        assert!(
+            facts
+                .unsupported_patterns
+                .iter()
+                .any(|pattern| pattern.contains("cfg_select!"))
+        );
     }
 
     #[test]

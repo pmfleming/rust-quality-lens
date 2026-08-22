@@ -6,6 +6,9 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Added
 
+- Rust 1.95 toolchain provenance and compatibility evidence, structured compiler diagnostics, and SARIF locations for compiler and Clippy findings.
+- Rust 1.95 match-guard complexity, explicit `cfg_select!` confidence reporting, and unscored evidence for newer raw-memory and pointer-provenance APIs.
+- Cross-process locks for measurement output, helper materialization, and semantic identity caches.
 - Source and manifest fingerprints on project measurement and evidence artifacts, with stale-input enforcement in policy checks.
 - Optional cargo-mutants and repeated-test behavioral gates for mutation strength and flakiness evidence.
 - Configured cargo-fuzz target execution and compiler-sanitizer test gates alongside Miri.
@@ -36,6 +39,9 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Changed
 
+- Raised the workspace MSRV from Rust 1.88 to Rust 1.95, upgraded manifest/configuration parsing to TOML 1.1, and replaced the standard artifact envelope v2 with toolchain-aware v3.
+- Bumped the standard raw complexity metric to version 2 to count match guards without changing calibrated hotspot or architecture-risk scoring.
+- Split command orchestration and architecture-map scoring behind focused boundaries, tightened the self-metric baseline, and reduced maximum function effort, cyclomatic/cognitive complexity, dependency pressure, duplication, and source size.
 - Verified gates, correctness runs, and coverage now share workspace, target, feature, exclusion, and optional lockfile scope.
 - Coverage rejects malformed exports and nested invocations instead of emitting misleading complete metrics.
 - Correctness target discovery now uses Cargo metadata across local workspace packages.
@@ -51,6 +57,8 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Fixed
 
+- Trivial six- and seven-node test wrappers no longer qualify as structural AST clones.
+- Removed unused artifact contract types and centralized repeated command-success and producer identity scaffolding.
 - Automatic source discovery includes custom Cargo target module trees outside `src/` while preserving target-relative module identities.
 - Verification timeouts terminate Cargo's descendant process tree so inherited output pipes cannot keep RQLens blocked past the deadline.
 - Correctness evidence rejects stale aggregate coverage and marks the resulting measurement partial.

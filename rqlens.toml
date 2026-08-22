@@ -1,5 +1,6 @@
 project_name = "rust-quality-lens"
 project_root = "."
+source_roots = ["src", "rust_helpers/src", "tests/cli.rs"]
 output_dir = "target/analysis"
 
 [rust]

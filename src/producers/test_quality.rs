@@ -44,18 +44,19 @@ fn merged_facts(context: &RunContext) -> Vec<FileFacts> {
 }
 
 fn test_row(fact: &FileFacts, test: &TestFact) -> Value {
-    json!({
-        "name": test.name,
-        "qualified_name": test.qualified_name,
-        "path": test.path,
-        "line": test.line,
-        "module_key": test.module_key,
-        "module_id": fact.module_id,
-        "package_name": fact.package_name,
-        "assertion_count": test.assertion_count,
-        "sut_call_count": test.sut_call_count,
-        "ignored": test.ignored,
-    })
+    super::with_fact_identity(
+        fact,
+        json!({
+            "name": test.name,
+            "qualified_name": test.qualified_name,
+            "path": test.path,
+            "line": test.line,
+            "module_key": test.module_key,
+            "assertion_count": test.assertion_count,
+            "sut_call_count": test.sut_call_count,
+            "ignored": test.ignored,
+        }),
+    )
 }
 
 fn test_findings(test: &Value) -> Vec<Value> {

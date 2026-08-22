@@ -1,14 +1,13 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::architecture;
 use crate::config::LensConfig;
-use crate::facts::{RunContext, module_graph};
+use crate::facts::RunContext;
 use crate::measurement::source_confidence;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
-    let graph = module_graph(&context.source_facts);
-    let evaluation = architecture::evaluate(&config.architecture, &graph);
+    let graph = context.module_graph();
+    let evaluation = config.architecture.evaluate(&graph);
     let mut confidence = source_confidence(&config.source_roots, &context.source_facts);
     if !config.architecture.rules.is_empty()
         && evaluation.unresolved_references > 0

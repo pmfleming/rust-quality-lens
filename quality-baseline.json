@@ -1,8 +1,11 @@
 {
-  "max_function_hotspot_score": 95.0,
+  "max_function_hotspot_score": 70.0,
+  "max_function_cyclomatic_complexity": 20,
+  "max_function_cognitive_complexity": 11,
+  "max_source_nonblank_lines": 17289,
   "max_ast_clone_records": 0,
-  "max_token_clone_records": 244,
-  "max_duplication_percent": 18.95,
-  "min_map_locality_score": 85.0,
-  "min_map_leverage_score": 38.0
+  "max_token_clone_records": 216,
+  "max_duplication_percent": 16.14,
+  "min_map_locality_score": 97.0,
+  "min_map_leverage_score": 50.0
 }

@@ -9,7 +9,7 @@ use syn::{
     visit::{self, Visit},
 };
 
-const MIN_AST_NODES: usize = 6;
+const MIN_AST_NODES: usize = 10;
 
 #[derive(Serialize)]
 struct FnInfo {
@@ -92,40 +92,10 @@ impl AstNormalizer {
 
 impl<'ast> Visit<'ast> for AstNormalizer {
     fn visit_expr(&mut self, expr: &'ast Expr) {
-        match expr {
-            Expr::Binary(binary) => {
-                self.tag(format!("expr:binary:{}", binary.op.to_token_stream()))
-            }
-            Expr::Call(_) => self.tag("expr:call"),
-            Expr::Cast(_) => self.tag("expr:cast"),
-            Expr::Field(field) => {
-                self.tag(format!("expr:field:{}", field.member.to_token_stream()))
-            }
-            Expr::If(_) => self.tag("expr:if"),
-            Expr::Index(_) => self.tag("expr:index"),
-            Expr::Let(_) => self.tag("expr:let"),
-            Expr::Lit(_) => self.tag("expr:lit"),
-            Expr::Loop(_) => self.tag("expr:loop"),
-            Expr::Macro(mac) => self.tag(format!("expr:macro:{}", Self::path_tail(&mac.mac.path))),
-            Expr::Match(_) => self.tag("expr:match"),
-            Expr::MethodCall(method) => {
-                self.tag(format!("expr:method:{}", method.method));
-            }
-            Expr::Path(_) => self.tag("expr:path"),
-            Expr::Reference(_) => self.tag("expr:reference"),
-            Expr::Return(_) => self.tag("expr:return"),
-            Expr::Struct(expr_struct) => {
-                self.tag(format!(
-                    "expr:struct:{}",
-                    Self::path_tail(&expr_struct.path)
-                ));
-            }
-            Expr::Try(_) => self.tag("expr:try"),
-            Expr::Tuple(_) => self.tag("expr:tuple"),
-            Expr::Unary(unary) => self.tag(format!("expr:unary:{}", unary_op_tag(&unary.op))),
-            Expr::While(_) => self.tag("expr:while"),
-            _ => self.tag(format!("expr:{}", expr.to_token_stream())),
-        }
+        let tag = flow_expr_tag(expr)
+            .or_else(|| value_expr_tag(expr))
+            .unwrap_or_else(|| detailed_expr_tag(expr));
+        self.tag(tag);
         visit::visit_expr(self, expr);
     }
 
@@ -162,6 +132,49 @@ impl<'ast> Visit<'ast> for AstNormalizer {
             Lit::Verbatim(_) => "lit:verbatim",
             _ => "lit:other",
         });
+    }
+}
+
+fn flow_expr_tag(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::If(_) => Some("expr:if".to_string()),
+        Expr::Loop(_) => Some("expr:loop".to_string()),
+        Expr::Match(_) => Some("expr:match".to_string()),
+        Expr::Return(_) => Some("expr:return".to_string()),
+        Expr::Try(_) => Some("expr:try".to_string()),
+        Expr::While(_) => Some("expr:while".to_string()),
+        _ => None,
+    }
+}
+
+fn value_expr_tag(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Call(_) => Some("expr:call".to_string()),
+        Expr::Cast(_) => Some("expr:cast".to_string()),
+        Expr::Index(_) => Some("expr:index".to_string()),
+        Expr::Let(_) => Some("expr:let".to_string()),
+        Expr::Lit(_) => Some("expr:lit".to_string()),
+        Expr::Path(_) => Some("expr:path".to_string()),
+        Expr::Reference(_) => Some("expr:reference".to_string()),
+        Expr::Tuple(_) => Some("expr:tuple".to_string()),
+        _ => None,
+    }
+}
+
+fn detailed_expr_tag(expr: &Expr) -> String {
+    match expr {
+        Expr::Binary(binary) => format!("expr:binary:{}", binary.op.to_token_stream()),
+        Expr::Field(field) => format!("expr:field:{}", field.member.to_token_stream()),
+        Expr::Macro(mac) => format!("expr:macro:{}", AstNormalizer::path_tail(&mac.mac.path)),
+        Expr::MethodCall(method) => format!("expr:method:{}", method.method),
+        Expr::Struct(expr_struct) => {
+            format!(
+                "expr:struct:{}",
+                AstNormalizer::path_tail(&expr_struct.path)
+            )
+        }
+        Expr::Unary(unary) => format!("expr:unary:{}", unary_op_tag(&unary.op)),
+        _ => format!("expr:{}", expr.to_token_stream()),
     }
 }
 

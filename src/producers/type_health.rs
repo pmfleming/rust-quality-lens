@@ -71,20 +71,28 @@ fn impl_identity(imp: &ImplFact, definitions: &BTreeSet<String>) -> Option<Strin
     } else {
         imp.qualified_type_name.as_str()
     };
-    let candidate = if let Some(rest) = raw.strip_prefix("crate::") {
+    let candidate = impl_candidate(raw, &imp.module_key);
+    definitions
+        .contains(&candidate)
+        .then_some(candidate)
+        .or_else(|| unique_suffix_match(raw, definitions))
+}
+
+fn impl_candidate(raw: &str, module: &str) -> String {
+    if let Some(rest) = raw.strip_prefix("crate::") {
         rest.to_string()
     } else if let Some(rest) = raw.strip_prefix("self::") {
-        format!("{}::{rest}", imp.module_key)
+        format!("{module}::{rest}")
     } else if raw.starts_with("super::") {
-        resolve_super_type(raw, &imp.module_key)
+        resolve_super_type(raw, module)
     } else if raw.contains("::") {
         raw.to_string()
     } else {
-        format!("{}::{raw}", imp.module_key)
-    };
-    if definitions.contains(&candidate) {
-        return Some(candidate);
+        format!("{module}::{raw}")
     }
+}
+
+fn unique_suffix_match(raw: &str, definitions: &BTreeSet<String>) -> Option<String> {
     let suffix = format!("::{raw}");
     let mut matches = definitions.iter().filter(|name| name.ends_with(&suffix));
     let first = matches.next()?.clone();
@@ -120,38 +128,37 @@ fn type_row(
         summary.block_count,
         impl_files_vec.len(),
     );
-    json!({
-        "type_name": ty.type_name,
-        "qualified_name": ty.qualified_name,
-        "module_key": ty.module_key,
-        "module_id": fact.module_id,
-        "package_name": fact.package_name,
-        "target_name": fact.target_name,
-        "identity_backend": fact.identity_backend,
-        "path": ty.path,
-        "line": ty.line,
-        "kind": ty.kind,
-        "shape": ty.shape,
-        "field_count": ty.field_count,
-        "variant_count": ty.variant_count,
-        "variant_field_count": ty.variant_field_count,
-        "declaration_span": ty.declaration_span,
-        "method_count": summary.method_count,
-        "impl_block_count": summary.block_count,
-        "impl_file_count": impl_files_vec.len(),
-        "impl_files": impl_files_vec,
-        "structural_risk": risk,
-        "structural_score": round2(100.0 - risk),
-        "signals": signals,
-        "score_components": score_components,
-        "measured_at": provenance.measured_at,
-        "command": provenance.command,
-        "host": provenance.host,
-        "measurement_confidence": confidence,
-        "risk_model_id": metadata.risk_model_id,
-        "risk_model_version": metadata.risk_model_version,
-        "risk_calibration": metadata.risk_calibration,
-        "source": "static_type_health",
-        "mock": false,
-    })
+    super::with_fact_identity(
+        fact,
+        json!({
+            "type_name": ty.type_name,
+            "qualified_name": ty.qualified_name,
+            "module_key": ty.module_key,
+            "path": ty.path,
+            "line": ty.line,
+            "kind": ty.kind,
+            "shape": ty.shape,
+            "field_count": ty.field_count,
+            "variant_count": ty.variant_count,
+            "variant_field_count": ty.variant_field_count,
+            "declaration_span": ty.declaration_span,
+            "method_count": summary.method_count,
+            "impl_block_count": summary.block_count,
+            "impl_file_count": impl_files_vec.len(),
+            "impl_files": impl_files_vec,
+            "structural_risk": risk,
+            "structural_score": round2(100.0 - risk),
+            "signals": signals,
+            "score_components": score_components,
+            "measured_at": provenance.measured_at,
+            "command": provenance.command,
+            "host": provenance.host,
+            "measurement_confidence": confidence,
+            "risk_model_id": metadata.risk_model_id,
+            "risk_model_version": metadata.risk_model_version,
+            "risk_calibration": metadata.risk_calibration,
+            "source": "static_type_health",
+            "mock": false,
+        }),
+    )
 }

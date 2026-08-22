@@ -144,23 +144,28 @@ impl VerificationConfig {
         if include_targets && self.all_targets {
             arguments.push("--all-targets".to_string());
         }
-        if self.all_features {
-            arguments.push("--all-features".to_string());
-        } else {
-            if self.no_default_features {
-                arguments.push("--no-default-features".to_string());
-            }
-            if !self.features.is_empty() {
-                arguments.extend(["--features".to_string(), self.features.join(",")]);
-            }
-        }
+        arguments.extend(self.cargo_feature_arguments());
         if self.locked {
             arguments.push("--locked".to_string());
         }
         if self.workspace {
-            for package in &self.exclude {
+            self.exclude.iter().for_each(|package| {
                 arguments.extend(["--exclude".to_string(), package.clone()]);
-            }
+            });
+        }
+        arguments
+    }
+
+    pub(crate) fn cargo_feature_arguments(&self) -> Vec<String> {
+        if self.all_features {
+            return vec!["--all-features".to_string()];
+        }
+        let mut arguments = Vec::new();
+        if self.no_default_features {
+            arguments.push("--no-default-features".to_string());
+        }
+        if !self.features.is_empty() {
+            arguments.extend(["--features".to_string(), self.features.join(",")]);
         }
         arguments
     }
@@ -188,6 +193,13 @@ pub(crate) struct ArchitectureRule {
 }
 
 impl ArchitectureConfig {
+    pub(crate) fn evaluate(
+        &self,
+        graph: &crate::facts::ModuleGraph,
+    ) -> crate::architecture::ArchitectureEvaluation {
+        crate::architecture::evaluate(self, graph)
+    }
+
     fn validate(&self) -> Result<()> {
         let mut ids = BTreeSet::new();
         for rule in &self.rules {
@@ -905,6 +917,25 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn toml_11_multiline_inline_tables_are_supported() -> anyhow::Result<()> {
+        let config = toml::from_str::<RawConfig>(
+            r#"
+project_name = "toml-1.1"
+verification = {
+    workspace = true,
+    all_targets = false,
+}
+"#,
+        )?;
+        let Some(verification) = config.verification else {
+            anyhow::bail!("verification table was not deserialized");
+        };
+        assert_eq!(verification.workspace, Some(true));
+        assert_eq!(verification.all_targets, Some(false));
+        Ok(())
     }
 
     #[test]

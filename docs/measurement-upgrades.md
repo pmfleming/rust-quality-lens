@@ -3,9 +3,11 @@
 This note summarizes the lens upgrades that make `rust-quality-lens` more
 portable, explicit, and trustworthy across Rust projects.
 
-## Artifact Contract v2
+## Artifact Contract v3
 
-All standard producer measurement files use the version 2 envelope.
+All standard producer measurement files use the version 3 envelope. Version 3
+requires explicit Rust toolchain provenance and intentionally breaks the prior
+envelope contract.
 Record-oriented outputs use `records`, structured outputs use `data`, and each
 measurement has top-level confidence and summary fields. Readers remain
 compatible with legacy unenveloped artifacts. A checked-in conformance snapshot
@@ -14,9 +16,11 @@ operational, validation, and calibration reports use their own version 1
 contracts rather than pretending to implement the producer envelope.
 
 Project measurement and evidence documents record generation time, generator
-version, and a source/manifest input fingerprint. Policy checks compare current
-inputs with stored fingerprints so stale artifacts cannot silently satisfy a
-fresh CI run.
+version, a source/manifest input fingerprint, and the active Rust/Cargo
+provenance. `verify` compares the declared MSRV with the pinned and active
+compiler and keeps structured compiler and Clippy diagnostics with source
+locations. Policy checks compare current inputs with stored fingerprints so
+stale artifacts cannot silently satisfy a fresh CI run.
 
 Correctness records now include `tested_modules`, derived from source-module
 ancestry and syntax dependencies. Test-command and compilation failures are
@@ -32,6 +36,19 @@ Coverage is available through `measure coverage` using `cargo-llvm-cov`.
 operational, absolute-threshold, and baseline-regression policies for CI.
 Configured stable rule limits are evaluated after active waivers and explicit
 path/package exclusions.
+
+## Rust 1.95 and TOML 1.1
+
+The workspace MSRV is Rust 1.95. Cargo manifests and RQLens configuration use a
+TOML 1.1 parser so every manifest accepted by Cargo 1.95 can be inspected
+without falling back to missing metadata. Fixed-size clone and logical-operator
+windows use `array_windows`, while cross-process file locks protect helper,
+semantic-cache, and measurement output writes.
+
+The extractor parses explicitly inferred const arguments, 128-bit reprs,
+C-variadic declarations, and `if let` match guards. `cfg_select!` is recognized
+as requiring macro expansion and therefore produces an explicit confidence
+signal instead of silently dropping conditional items.
 
 ## Extraction
 
@@ -68,11 +85,11 @@ unknown rather than becoming zero. A Tree-sitter failure degrades to the
 text-only evidence path.
 
 Function facts also include versioned, standard-form raw complexity metrics.
-Cyclomatic complexity starts at one and counts Rust decisions, match arms,
-`?`, and short-circuit boolean operators. Cognitive complexity counts nested
-control flow, else branches, logical-operator sequences, labeled jumps, and
-closure nesting. Module hotspot rows aggregate these raw values without feeding
-them into the calibrated hotspot score.
+Complexity model version 2 starts at one and counts Rust decisions, match arms,
+Rust 1.95 match guards, `?`, and short-circuit boolean operators. Cognitive
+complexity counts nested control flow, guards, else branches, logical-operator
+sequences, labeled jumps, and closure nesting. Module hotspot rows aggregate
+these raw values without feeding them into the calibrated hotspot score.
 
 ## Measurement Confidence
 

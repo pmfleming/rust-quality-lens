@@ -19,7 +19,9 @@
           pkgs = import nixpkgs { inherit system; };
         in
         {
-          default = pkgs.mkShell {
+          default = assert pkgs.lib.assertMsg (pkgs.rustc.version == "1.95.0")
+            "flake.lock must provide Rust 1.95.0";
+          pkgs.mkShell {
             packages = with pkgs; [
               cargo
               rustc

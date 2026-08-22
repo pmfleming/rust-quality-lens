@@ -14,11 +14,17 @@ fn rqlens() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> std::process::Output {
-    Command::new(rqlens())
+    let output = Command::new(rqlens())
         .args(args)
         .current_dir(repo_root())
         .output()
-        .expect("rqlens command should run")
+        .expect("rqlens command should run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output
 }
 
 fn read_json(path: impl AsRef<Path>) -> Value {
@@ -389,11 +395,6 @@ fn catalog_lists_board_compatible_tasks() {
         "--config",
         "tests/fixtures/mini_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["project_name"], "mini-rust-project");
     let ids: Vec<&str> = payload["tasks"]
@@ -411,11 +412,6 @@ fn catalog_lists_board_compatible_tasks() {
 #[test]
 fn config_schema_prints_machine_readable_schema() {
     let output = run(&["config-schema"]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["title"], "rust-quality-lens config");
     assert_eq!(payload["properties"]["source_roots"]["type"], "array");
@@ -453,11 +449,6 @@ fn config_schema_prints_machine_readable_schema() {
 #[test]
 fn artifact_schema_prints_known_output_contracts() {
     let output = run(&["artifact-schema"]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
     let properties = payload["properties"].as_object().unwrap();
     for file in [
@@ -478,13 +469,16 @@ fn artifact_schema_prints_known_output_contracts() {
     }
 
     let map_output = run(&["artifact-schema", "map"]);
-    assert!(
-        map_output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&map_output.stderr)
-    );
     let map_schema: Value = serde_json::from_slice(&map_output.stdout).unwrap();
     assert_eq!(map_schema["title"], "map.json artifact envelope");
+    assert!(
+        map_schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|key| key == "toolchain")
+    );
+    assert_eq!(map_schema["properties"]["schema_version"]["const"], 3);
     assert!(
         map_schema["properties"]["data"]["required"]
             .as_array()
@@ -497,12 +491,7 @@ fn artifact_schema_prints_known_output_contracts() {
 #[test]
 fn verify_writes_structured_practice_evidence() {
     let config = "tests/fixtures/mini_rust_project/rqlens.toml";
-    let output = run(&["verify", "--config", config]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run(&["verify", "--config", config]);
     let report = read_json(
         repo_root().join("tests/fixtures/mini_rust_project/target/analysis/rust_practices.json"),
     );
@@ -536,12 +525,7 @@ fn init_writes_default_config() {
     }
     fs::create_dir_all(&root).expect("init fixture dir should be created");
     let config_path = root.join("rqlens.toml");
-    let output = run(&["init", "--path", &config_path.to_string_lossy(), "--force"]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run(&["init", "--path", &config_path.to_string_lossy(), "--force"]);
     let text = fs::read_to_string(config_path).expect("config should be written");
     assert!(text.contains("Cargo workspace and local path packages are discovered automatically"));
     assert!(text.contains("[rust]"));
@@ -562,18 +546,13 @@ fn review_uses_diff_file_scope() {
         "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n",
     )
     .expect("diff should be written");
-    let output = run(&[
+    run(&[
         "review",
         "--diff-file",
         &diff_file.to_string_lossy(),
         "--config",
         "tests/fixtures/mini_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let payload =
         read_json(repo_root().join("tests/fixtures/mini_rust_project/target/analysis/review.json"));
     assert_eq!(payload["version"], 2);
@@ -588,17 +567,12 @@ fn review_uses_diff_file_scope() {
 
 #[test]
 fn generated_artifacts_keep_expected_top_level_shapes() {
-    let output = run(&[
+    run(&[
         "measure",
         "all",
         "--config",
         "tests/fixtures/mini_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let analysis = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
     let hotspots = read_json(analysis.join("hotspots.json"));
     assert!(hotspots.as_array().unwrap().iter().all(|row| {
@@ -642,17 +616,12 @@ fn generated_artifacts_keep_expected_top_level_shapes() {
 
 #[test]
 fn generated_artifacts_match_envelope_conformance_snapshot() {
-    let output = run(&[
+    run(&[
         "measure",
         "all",
         "--config",
         "tests/fixtures/mini_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let expected: Value = serde_json::from_str(include_str!("snapshots/artifact_envelopes.json"))
         .expect("snapshot should parse");
     let analysis = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
@@ -675,19 +644,14 @@ fn generated_artifacts_match_envelope_conformance_snapshot() {
                 .collect::<Vec<_>>(),
             "contract drift in {file}"
         );
-        assert_eq!(document["schema_version"], 2);
+        assert_eq!(document["schema_version"], 3);
     }
 }
 
 #[test]
 fn normalized_measurements_match_golden_snapshot() {
     let config = "tests/fixtures/mini_rust_project/rqlens.toml";
-    let output = run(&["measure", "all", "--config", config]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run(&["measure", "all", "--config", config]);
     let analysis = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
     let hotspots = read_json(analysis.join("hotspots.json"));
     let map = read_json(analysis.join("map.json"));
@@ -715,17 +679,12 @@ fn normalized_measurements_match_golden_snapshot() {
 
 #[test]
 fn type_health_keeps_same_named_types_separate() {
-    let output = run(&[
+    run(&[
         "measure",
         "type-health",
         "--config",
         "tests/fixtures/golden_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let payload = read_json(
         repo_root().join("tests/fixtures/golden_rust_project/target/analysis/type_health.json"),
     );
@@ -758,17 +717,12 @@ fn type_health_keeps_same_named_types_separate() {
 
 #[test]
 fn map_captures_direct_module_path_dependency() {
-    let output = run(&[
+    run(&[
         "measure",
         "map",
         "--config",
         "tests/fixtures/mini_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let payload =
         read_json(repo_root().join("tests/fixtures/mini_rust_project/target/analysis/map.json"));
     assert_eq!(payload["meta"]["project_name"], "mini-rust-project");
@@ -788,12 +742,7 @@ fn map_captures_direct_module_path_dependency() {
 fn map_reports_missing_artifacts_as_unknown_metrics() {
     let fixture = write_architecture_fixture("arch-missing-artifacts", false);
     let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
-    let output = run(&["measure", "map", "--config", &config]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run(&["measure", "map", "--config", &config]);
     let payload = read_json(fixture.join("target/analysis/map.json"));
     assert_eq!(
         payload["meta"]["summary"]["artifact_status"]["hotspots.json"]["status"],
@@ -815,12 +764,7 @@ fn map_reports_missing_artifacts_as_unknown_metrics() {
 fn map_scores_git_cycles_and_layer_violations() {
     let fixture = write_architecture_fixture("arch-complete-artifacts", true);
     let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
-    let output = run(&["measure", "map", "--config", &config]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run(&["measure", "map", "--config", &config]);
     let payload = read_json(fixture.join("target/analysis/map.json"));
     assert_eq!(
         payload["meta"]["summary"]["artifact_status"]["hotspots.json"]["status"],
@@ -853,12 +797,7 @@ fn entrypoints_are_visible_and_discounted_in_outputs() {
         "clones",
         "map",
     ] {
-        let output = run(&["measure", tool, "--config", &config]);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        run(&["measure", tool, "--config", &config]);
     }
 
     let analysis = fixture.join("target/analysis");
@@ -918,18 +857,13 @@ fn entrypoints_are_visible_and_discounted_in_outputs() {
         "diff --git a/tools/custom.rs b/tools/custom.rs\n--- a/tools/custom.rs\n+++ b/tools/custom.rs\n@@ -1 +1 @@\n",
     )
     .expect("entrypoint diff should be written");
-    let output = run(&[
+    run(&[
         "review",
         "--diff-file",
         &diff_file.to_string_lossy(),
         "--config",
         &config,
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let review = read_json(analysis.join("review.json"));
     assert!(
         review["scope"]["entrypoints"]
@@ -946,17 +880,12 @@ fn entrypoints_are_visible_and_discounted_in_outputs() {
 
 #[test]
 fn correctness_writes_review_and_test_catalog() {
-    let output = run(&[
+    run(&[
         "measure",
         "correctness",
         "--config",
         "tests/fixtures/mini_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let root = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
     let review = read_json(root.join("correctness_review.json"));
     let catalog = read_json(root.join("test_catalog.json"));
@@ -966,17 +895,12 @@ fn correctness_writes_review_and_test_catalog() {
 
 #[test]
 fn correctness_attributes_inline_tests_to_production_modules() {
-    let output = run(&[
+    run(&[
         "measure",
         "correctness",
         "--config",
         "tests/fixtures/golden_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let review = read_json(
         repo_root()
             .join("tests/fixtures/golden_rust_project/target/analysis/correctness_review.json"),
@@ -1012,12 +936,7 @@ fn correctness_attributes_inline_tests_to_production_modules() {
 #[test]
 fn check_command_enforces_threshold_policy() {
     let config = "tests/fixtures/mini_rust_project/rqlens.toml";
-    let measure = run(&["measure", "all", "--config", config]);
-    assert!(
-        measure.status.success(),
-        "{}",
-        String::from_utf8_lossy(&measure.stderr)
-    );
+    run(&["measure", "all", "--config", config]);
     let check = run(&[
         "check",
         "--fail-on",
@@ -1031,11 +950,6 @@ fn check_command_enforces_threshold_policy() {
         "--config",
         config,
     ]);
-    assert!(
-        check.status.success(),
-        "{}",
-        String::from_utf8_lossy(&check.stderr)
-    );
     let report: Value = serde_json::from_slice(&check.stdout).unwrap();
     assert_eq!(report["passed"], true);
     assert!(report["evidence_deltas"].is_array());
@@ -1067,18 +981,13 @@ fn validation_command_scores_ranked_outcome_labels() {
     .expect("validation outcomes should be written");
     let output_dir = repo_root().join("target/test-fixtures/validation-report");
     let project = format!("demo={}", analysis.display());
-    let output = run(&[
+    run(&[
         "validate",
         "--project",
         &project,
         "--output-dir",
         &output_dir.to_string_lossy(),
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let report = read_document(output_dir.join("validation_report.json"));
     assert_eq!(report["summary"]["validated_project_count"], 1);
     assert_eq!(report["projects"][0]["metrics"]["recall_at_10"], 1.0);
@@ -1102,18 +1011,13 @@ fn telemetry_command_preserves_observed_operational_evidence() {
         .unwrap(),
     )
     .expect("telemetry fixture should be written");
-    let output = run(&[
+    run(&[
         "telemetry",
         "--input",
         &input.to_string_lossy(),
         "--config",
         "rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let document = read_document(repo_root().join("target/analysis/operational_evidence.json"));
     assert_eq!(document["summary"]["healthy"], 1);
     assert_eq!(
@@ -1124,12 +1028,7 @@ fn telemetry_command_preserves_observed_operational_evidence() {
 
 #[test]
 fn outcomes_command_separates_inferred_history() {
-    let output = run(&["outcomes", "--config", "rqlens.toml"]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run(&["outcomes", "--config", "rqlens.toml"]);
     let document = read_document(repo_root().join("target/analysis/repository_outcomes.json"));
     assert_eq!(document["tool"], "repository-outcomes");
     assert!(document["data"]["records"].is_array());
@@ -1137,17 +1036,12 @@ fn outcomes_command_separates_inferred_history() {
 
 #[test]
 fn performance_command_writes_explicit_missing_evidence() {
-    let output = run(&[
+    run(&[
         "performance",
         "--no-run",
         "--config",
         "tests/fixtures/mini_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let document = read_document(
         repo_root().join("tests/fixtures/mini_rust_project/target/analysis/performance.json"),
     );
@@ -1157,17 +1051,12 @@ fn performance_command_writes_explicit_missing_evidence() {
 
 #[test]
 fn hotspots_report_syntax_fact_confidence() {
-    let output = run(&[
+    run(&[
         "measure",
         "hotspots",
         "--config",
         "tests/fixtures/mini_rust_project/rqlens.toml",
     ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let payload = read_json(
         repo_root().join("tests/fixtures/mini_rust_project/target/analysis/hotspots.json"),
     );
@@ -1188,12 +1077,7 @@ fn hotspots_report_syntax_fact_confidence() {
 fn syntax_failures_preserve_partial_source_evidence() {
     let fixture = write_syntax_error_fixture("partial-syntax-evidence");
     let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
-    let output = run(&["measure", "hotspots", "--config", &config]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run(&["measure", "hotspots", "--config", &config]);
 
     let payload = read_json(fixture.join("target/analysis/hotspots.json"));
     let rows = payload.as_array().expect("hotspots should be records");
@@ -1240,12 +1124,7 @@ fn syntax_failures_preserve_partial_source_evidence() {
 fn clones_report_source_scan_confidence_without_syntax_fact_requirements() {
     let fixture = write_clone_fixture("clone-confidence");
     let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
-    let output = run(&["measure", "clones", "--config", &config]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    run(&["measure", "clones", "--config", &config]);
     let payload = read_json(fixture.join("target/analysis/clones.json"));
     let rows = payload.as_array().unwrap();
     assert!(!rows.is_empty());

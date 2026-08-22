@@ -4,12 +4,12 @@ use std::collections::BTreeMap;
 use std::process::Command;
 
 use crate::config::LensConfig;
-use crate::facts::{RunContext, module_graph};
+use crate::facts::RunContext;
 use crate::measurement::project_relative_path;
 use crate::util::round2;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
-    let graph = module_graph(&context.source_facts);
+    let graph = context.module_graph();
     let changes = git_changes(config);
     let total_changes = changes.values().sum::<u64>();
     let records = context
