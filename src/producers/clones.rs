@@ -24,11 +24,21 @@ const MIN_CLONE_LINE_SPAN: usize = 5;
 const MIN_RESPONSIBILITY_LINES: usize = 8;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
-    let mut rows = token_clone_rows(config)?;
+    let mut rows = token_clone_rows(config, &context.source_facts)?;
+    let all_ast_facts = ast_clone_facts_for_paths(config, &context.correctness_paths)?;
+    let source_files = iter_rust_files(&config.source_roots)
+        .into_iter()
+        .map(normalize_slashes)
+        .collect::<HashSet<_>>();
+    let source_ast_facts = all_ast_facts
+        .iter()
+        .filter(|fact| source_files.contains(&normalize_slashes(&fact.file)))
+        .cloned()
+        .collect::<Vec<_>>();
     let source_fact_confidence = source_confidence(&config.source_roots, &context.source_facts);
     rows.extend(ast_clone_rows(
         config,
-        &ast_clone_facts_for_paths(config, &config.source_roots)?,
+        &source_ast_facts,
         source_fact_confidence.clone(),
     ));
     rows.extend(module_responsibility_rows(
@@ -38,7 +48,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
     rows.extend(test_ast_clone_rows(
         config,
         &context.correctness_facts,
-        &ast_clone_facts_for_paths(config, &context.correctness_paths)?,
+        &all_ast_facts,
         source_confidence(&context.correctness_paths, &context.correctness_facts),
     ));
     rows.sort_by(|a, b| {
@@ -47,11 +57,12 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
     Ok(Value::Array(rows))
 }
 
-fn token_clone_rows(config: &LensConfig) -> Result<Vec<Value>> {
+fn token_clone_rows(config: &LensConfig, facts: &[FileFacts]) -> Result<Vec<Value>> {
     let token_re = Regex::new(
         r"[A-Za-z_][A-Za-z0-9_]*|\d+|::|->|=>|==|!=|<=|>=|&&|\|\||[{}\(\)\[\];,.:+\-*/%&|^!<>=?]",
     )?;
-    let (windows, read_errors) = collect_clone_windows(config, &token_re);
+    let function_ranges = function_ranges_by_path(facts);
+    let (windows, read_errors) = collect_clone_windows(config, &token_re, &function_ranges);
     let confidence = source_scan_confidence_with_errors(&config.source_roots, read_errors);
     Ok(coalesce_clone_groups(windows)
         .into_iter()
@@ -59,16 +70,43 @@ fn token_clone_rows(config: &LensConfig) -> Result<Vec<Value>> {
         .collect())
 }
 
+fn function_ranges_by_path(facts: &[FileFacts]) -> HashMap<String, Vec<(usize, usize)>> {
+    let mut ranges: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
+    for fact in facts {
+        ranges
+            .entry(normalize_slashes(&fact.path))
+            .or_default()
+            .extend(
+                fact.items
+                    .functions
+                    .iter()
+                    .map(|function| (function.start_line, function.end_line)),
+            );
+    }
+    ranges
+}
+
 fn collect_clone_windows(
     config: &LensConfig,
     token_re: &Regex,
+    function_ranges: &HashMap<String, Vec<(usize, usize)>>,
 ) -> (HashMap<String, Vec<CloneInstance>>, Vec<String>) {
     let mut windows = HashMap::new();
     let mut read_errors = Vec::new();
     for path in iter_rust_files(&config.source_roots) {
+        let normalized_path = normalize_slashes(&path);
         match fs::read_to_string(&path) {
-            Ok(text) => add_file_windows(&mut windows, &path, &text, token_re),
-            Err(error) => read_errors.push(format!("{}: {error}", normalize_slashes(path))),
+            Ok(text) => add_file_windows(
+                &mut windows,
+                &path,
+                &text,
+                token_re,
+                function_ranges
+                    .get(&normalized_path)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
+            ),
+            Err(error) => read_errors.push(format!("{normalized_path}: {error}")),
         }
     }
     (windows, read_errors)
@@ -79,6 +117,7 @@ fn add_file_windows(
     path: &std::path::Path,
     text: &str,
     token_re: &Regex,
+    function_ranges: &[(usize, usize)],
 ) {
     let lines = text.lines().collect::<Vec<_>>();
     let tokens = normalized_tokens(&lines, token_re);
@@ -86,6 +125,14 @@ fn add_file_windows(
         let Some((key, start_line, end_line)) = clone_window(window) else {
             continue;
         };
+        if !function_ranges
+            .iter()
+            .any(|(function_start, function_end)| {
+                *function_start <= start_line && end_line <= *function_end
+            })
+        {
+            continue;
+        }
         windows.entry(key).or_default().push(CloneInstance {
             file_path: normalize_slashes(path),
             start_line,
@@ -180,7 +227,11 @@ fn merge_clone_instances(existing: &mut [CloneInstance], incoming: Vec<CloneInst
 }
 
 fn token_clone_row(key: &str, instances: Vec<CloneInstance>, confidence: &Value) -> Option<Value> {
-    if instances.len() < 2 || instances.iter().all(declaration_only_instance) {
+    let instances = instances
+        .into_iter()
+        .filter(|instance| !declaration_only_instance(instance))
+        .collect::<Vec<_>>();
+    if instances.len() < 2 {
         return None;
     }
     let file_count = instances
@@ -570,7 +621,9 @@ fn non_overlapping_clone_instances(mut instances: Vec<CloneInstance>) -> Vec<Clo
 
 #[cfg(test)]
 mod tests {
-    use super::{CloneInstance, declaration_only_instance};
+    use super::{CloneInstance, add_file_windows, declaration_only_instance};
+    use regex::Regex;
+    use std::{collections::HashMap, path::Path};
 
     #[test]
     fn declaration_only_windows_are_not_reported_as_code_clones() {
@@ -588,5 +641,43 @@ mod tests {
         };
         assert!(declaration_only_instance(&declaration));
         assert!(!declaration_only_instance(&executable));
+    }
+
+    #[test]
+    fn token_windows_are_limited_to_function_spans() -> anyhow::Result<()> {
+        let source = r#"fn calculate(input: usize) -> usize {
+    let one = input + 1;
+    let two = one + 2;
+    let three = two + 3;
+    let four = three + 4;
+    let five = four + 5;
+    let six = five + 6;
+    let seven = six + 7;
+    let eight = seven + 8;
+    eight
+}"#;
+        let token_re = Regex::new(
+            r"[A-Za-z_][A-Za-z0-9_]*|\d+|::|->|=>|==|!=|<=|>=|&&|\|\||[{}\(\)\[\];,.:+\-*/%&|^!<>=?]",
+        )?;
+        let mut outside = HashMap::new();
+        add_file_windows(
+            &mut outside,
+            Path::new("src/lib.rs"),
+            source,
+            &token_re,
+            &[],
+        );
+        assert!(outside.is_empty());
+
+        let mut inside = HashMap::new();
+        add_file_windows(
+            &mut inside,
+            Path::new("src/lib.rs"),
+            source,
+            &token_re,
+            &[(1, 11)],
+        );
+        assert!(!inside.is_empty());
+        Ok(())
     }
 }

@@ -146,9 +146,18 @@ pub(crate) fn run_tests(config: &LensConfig) -> Result<HashMap<String, TestStatu
 }
 
 fn run_status(success: bool, stdout: &str, stderr: &str) -> String {
+    let output = format!("{stdout}\n{stderr}");
     if success {
         "passed"
-    } else if stdout.contains("could not compile") || stderr.contains("could not compile") {
+    } else if [
+        "could not compile",
+        "failed to run custom build command for",
+        "build failed, waiting for other jobs to finish",
+        "aborting due to previous error",
+    ]
+    .iter()
+    .any(|indicator| output.contains(indicator))
+    {
         "compile_failed"
     } else {
         "failed"
@@ -308,6 +317,18 @@ path = "tests/integration.rs"
         assert_eq!(run_status(true, "", ""), "passed");
         assert_eq!(
             run_status(false, "", "error: could not compile `demo`"),
+            "compile_failed"
+        );
+        assert_eq!(
+            run_status(false, "", "failed to run custom build command for `demo`"),
+            "compile_failed"
+        );
+        assert_eq!(
+            run_status(
+                false,
+                "",
+                "warning: build failed, waiting for other jobs to finish"
+            ),
             "compile_failed"
         );
         assert_eq!(run_status(false, "test failed", ""), "failed");

@@ -233,7 +233,7 @@ not alter the calibrated hotspot score.
 
 `clones.json` distinguishes four engines:
 
-- `token`: normalized token-window repeats;
+- `token`: normalized token-window repeats within extracted function spans;
 - `ast`: repeated function or method structure;
 - `module-responsibility`: similar module responsibilities;
 - `test-ast`: repeated non-trivial test bodies.

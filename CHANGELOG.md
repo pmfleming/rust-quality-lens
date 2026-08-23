@@ -52,9 +52,11 @@ All notable changes to this project will be documented here. The format follows 
 - Verified gates, static findings, and heuristic architecture signals are represented separately.
 - Coverage collection and baseline-regression analysis are split into smaller, testable stages.
 - Syntax complexity visitors share traversal logic, and run-context input requirements are centralized in measurement-tool metadata.
+- Token clone windows are scoped to extracted function spans, keeping repeated data declarations out of executable-code duplication evidence; source and test AST clone extraction now share one helper pass.
 
 ### Fixed
 
+- Cargo custom-build and dependency build failures are classified as correctness compilation failures rather than failed test executions.
 - Trivial six- and seven-node test wrappers no longer qualify as structural AST clones.
 - Removed unused artifact contract types and centralized repeated command-success and producer identity scaffolding.
 - Automatic source discovery includes custom Cargo target module trees outside `src/` while preserving target-relative module identities.
