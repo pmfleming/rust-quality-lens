@@ -791,19 +791,51 @@ fn definition_location(value: &Value) -> Option<DefinitionLocation> {
 fn file_uri(path: &Path) -> String {
     let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let normalized = normalize_slashes(path);
-    format!("file://{}", percent_encode(&normalized))
+    #[cfg(windows)]
+    let normalized = if let Some(path) = normalized.strip_prefix("//?/UNC/") {
+        format!("//{path}")
+    } else {
+        normalized
+            .strip_prefix("//?/")
+            .unwrap_or(&normalized)
+            .to_string()
+    };
+    let encoded = percent_encode(&normalized);
+    if normalized.starts_with("//") {
+        format!("file:{encoded}")
+    } else if normalized.starts_with('/') {
+        format!("file://{encoded}")
+    } else {
+        format!("file:///{encoded}")
+    }
 }
 
 fn uri_path(uri: &str) -> Option<PathBuf> {
     let encoded = uri.strip_prefix("file://")?;
-    Some(PathBuf::from(percent_decode(encoded)?))
+    let decoded = percent_decode(encoded)?;
+    #[cfg(windows)]
+    let decoded = if decoded
+        .as_bytes()
+        .get(1)
+        .is_some_and(u8::is_ascii_alphabetic)
+        && decoded.as_bytes().get(2) == Some(&b':')
+    {
+        decoded[1..].to_string()
+    } else if !decoded.starts_with('/') {
+        format!("//{decoded}")
+    } else {
+        decoded
+    };
+    Some(PathBuf::from(decoded))
 }
 
 fn percent_encode(value: &str) -> String {
     value
         .bytes()
         .map(|byte| {
-            if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_' | b'.' | b'~') {
+            if byte.is_ascii_alphanumeric()
+                || matches!(byte, b'/' | b':' | b'-' | b'_' | b'.' | b'~')
+            {
                 (byte as char).to_string()
             } else {
                 format!("%{byte:02X}")
@@ -945,8 +977,8 @@ fn feature_cfgs(config: &LensConfig, source_path: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        definition_location, is_semantic_candidate, percent_decode, percent_encode, resolve,
-        utf16_column_to_byte,
+        definition_location, file_uri, is_semantic_candidate, percent_decode, percent_encode,
+        resolve, uri_path, utf16_column_to_byte,
     };
     use crate::config::{LensConfig, SemanticIdentityMode};
     use crate::facts::{DependencyReferenceFact, FileFacts};
@@ -959,6 +991,18 @@ mod tests {
     fn uri_encoding_round_trips_paths() {
         let path = "/tmp/a project/src/über.rs";
         assert_eq!(percent_decode(&percent_encode(path)).as_deref(), Some(path));
+    }
+
+    #[test]
+    fn file_uris_round_trip_native_paths() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("a project.rs");
+        fs::write(&path, "")?;
+        let uri = file_uri(&path);
+        assert!(uri.starts_with("file:///"));
+        let decoded = uri_path(&uri).expect("file URI should decode");
+        assert_eq!(fs::canonicalize(decoded)?, fs::canonicalize(path)?);
+        Ok(())
     }
 
     #[test]

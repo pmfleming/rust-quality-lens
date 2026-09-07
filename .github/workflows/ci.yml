@@ -1,5 +1,10 @@
 name: CI
 
+permissions:
+  contents: read
+  checks: write
+  issues: write
+
 on:
   pull_request:
   push:
@@ -41,6 +46,8 @@ jobs:
 
       - name: RustSec audit
         uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Dependency policy
         uses: EmbarkStudios/cargo-deny-action@v2

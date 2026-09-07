@@ -76,6 +76,7 @@ fn metadata_target_paths(config: &LensConfig) -> Option<Vec<String>> {
                 package["manifest_path"]
                     .as_str()
                     .and_then(|path| Path::new(path).parent())
+                    .map(|root| root.canonicalize().unwrap_or_else(|_| root.to_path_buf()))
                     .is_some_and(|root| root.starts_with(&project_root))
             })
             .flat_map(|package| package["targets"].as_array().into_iter().flatten())
