@@ -237,8 +237,44 @@ output_dir = "target/analysis"
             .expect("locality should be written");
         fs::write(analysis.join("leverage_metrics.json"), "[]")
             .expect("leverage should be written");
+        wrap_fixture_artifacts(&root);
     }
     root
+}
+
+fn wrap_fixture_artifacts(root: &Path) {
+    run(&[
+        "measure",
+        "api-health",
+        "--config",
+        root.join("rqlens.toml").to_str().unwrap(),
+    ]);
+    let analysis = root.join("target/analysis");
+    let template = read_document(analysis.join("api_health.json"));
+    for (file, tool) in [
+        ("hotspots.json", "hotspots"),
+        ("correctness_review.json", "correctness-run"),
+        ("locality_metrics.json", "locality"),
+        ("leverage_metrics.json", "leverage"),
+    ] {
+        let mut payload = read_json(analysis.join(file));
+        if tool == "correctness-run" {
+            payload["summary"] =
+                serde_json::json!({"failed": 1, "run_failed": false, "compile_failed": false});
+        }
+        let mut envelope = template.clone();
+        envelope.as_object_mut().unwrap().remove("records");
+        envelope["tool"] = serde_json::json!(tool);
+        envelope["measurement_confidence"] =
+            serde_json::json!({"complete": true, "partial": false});
+        let payload_key = if payload.is_array() {
+            "records"
+        } else {
+            "data"
+        };
+        envelope[payload_key] = payload;
+        fs::write(analysis.join(file), serde_json::to_vec(&envelope).unwrap()).unwrap();
+    }
 }
 
 fn write_syntax_error_fixture(name: &str) -> PathBuf {
@@ -935,8 +971,17 @@ fn correctness_attributes_inline_tests_to_production_modules() {
 
 #[test]
 fn check_command_enforces_threshold_policy() {
-    let config = "tests/fixtures/mini_rust_project/rqlens.toml";
-    run(&["measure", "all", "--config", config]);
+    let root = write_architecture_fixture("threshold-policy", true);
+    let config_path = root.join("rqlens.toml");
+    let config = config_path.to_str().unwrap();
+    let analysis = root.join("target/analysis");
+    let mut map = read_document(analysis.join("api_health.json"));
+    map.as_object_mut().unwrap().remove("records");
+    map["tool"] = serde_json::json!("map");
+    map["measurement_confidence"] = serde_json::json!({"complete": true, "partial": false});
+    map["data"] =
+        serde_json::json!({"graph": {"nodes": [{"data": {"id": "lib", "total_score": 10.0}}]}});
+    fs::write(analysis.join("map.json"), serde_json::to_vec(&map).unwrap()).unwrap();
     let check = run(&[
         "check",
         "--fail-on",
@@ -944,7 +989,7 @@ fn check_command_enforces_threshold_policy() {
         "--fail-on",
         "regression",
         "--baseline",
-        "tests/fixtures/mini_rust_project/target/analysis",
+        analysis.to_str().unwrap(),
         "--max-total-score",
         "10000",
         "--config",

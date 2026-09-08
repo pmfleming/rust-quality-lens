@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, ModuleGraph, ModuleInfo};
-use crate::measurement::{MODEL_VERSION, module_for_path, source_confidence};
+use crate::measurement::{module_for_path, source_confidence};
 use crate::risk_model::{
     ArchitectureRiskInputs, ArchitectureRiskScores, ChangeFacts, CorrectnessFacts,
     architecture_risk_scores,
@@ -230,14 +230,16 @@ fn read_artifact(config: &LensConfig, file_name: &'static str, required: bool) -
         .ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
     {
-        Some(value) if artifact_contract_error(&value).is_some() => artifact_read(
-            file_name,
-            path,
-            required,
-            "incompatible",
-            artifact_contract_error(&value).unwrap_or("artifact contract is incompatible"),
-        ),
         Some(value) => {
+            if let Err(error) = crate::contracts::validate_artifact(file_name, &value) {
+                return artifact_read(
+                    file_name,
+                    path,
+                    required,
+                    "incompatible",
+                    &error.to_string(),
+                );
+            }
             let partial = value["measurement_confidence"]["partial"] == true;
             ArtifactRead {
                 name: file_name,
@@ -257,22 +259,6 @@ fn read_artifact(config: &LensConfig, file_name: &'static str, required: bool) -
             "artifact is not valid JSON",
         ),
     }
-}
-
-fn artifact_contract_error(value: &Value) -> Option<&'static str> {
-    let version = value.get("schema_version")?.as_u64();
-    if version != Some(3) {
-        return Some("unsupported artifact schema version");
-    }
-    if value.get("risk_model_version").and_then(Value::as_u64) != Some(MODEL_VERSION) {
-        return Some("artifact uses a different risk model version");
-    }
-    if value.get("measurement_confidence").is_none()
-        || (value.get("records").is_none() && value.get("data").is_none())
-    {
-        return Some("version 2 artifact is missing required envelope fields");
-    }
-    None
 }
 
 pub(super) fn artifact_payload(value: &Value) -> &Value {
@@ -329,7 +315,9 @@ pub(crate) fn map_measurement_confidence(
         artifacts
             .reads
             .iter()
-            .filter(|read| read.status == "missing" && read.required)
+            .filter(|read| {
+                matches!(read.status, "missing" | "incompatible" | "unreadable") && read.required
+            })
             .map(|read| read.name),
     ) || push_git_missing(object, git_history);
     let has_stale = push_artifact_inputs(
@@ -350,7 +338,8 @@ pub(crate) fn map_measurement_confidence(
             .filter(|read| read.status == "partial" && read.required)
             .map(|read| read.name),
     );
-    let partial = has_missing
+    let partial = object["partial"] == true
+        || has_missing
         || has_stale
         || has_partial_artifact
         || object["unsupported_pattern"]

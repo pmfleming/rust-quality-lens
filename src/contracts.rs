@@ -7,6 +7,9 @@ use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
 use crate::tool::MeasureTool;
 use crate::util::project_input_fingerprint;
 
+mod validation;
+pub(crate) use validation::validate_artifact;
+
 pub(crate) fn artifact_document(
     tool: &MeasureTool,
     config: &LensConfig,

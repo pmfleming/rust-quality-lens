@@ -1,13 +1,18 @@
 use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::LensConfig;
 use crate::tool::MeasureTool;
 use crate::util::write_json;
+
+#[cfg(test)]
+#[path = "policy/tests.rs"]
+mod input_tests;
+mod inputs;
 
 #[derive(Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum FailPolicy {
@@ -27,15 +32,22 @@ pub(crate) fn run_check(
     max_total_score: f64,
     max_regression: f64,
 ) -> Result<()> {
-    let documents = measurement_documents(config)?;
-    let stale_artifacts = stale_artifacts(config, &documents);
-    let partial_artifacts = partial_artifacts(&documents, &stale_artifacts);
-    let test_failures = test_failures(&documents);
-    let practices = classify_findings(config, practice_findings(&documents));
-    let reliability = classify_findings(config, reliability_findings(&documents));
-    let architecture = classify_findings(config, architecture_findings(&documents));
-    let test_quality = classify_findings(config, test_quality_findings(&documents));
-    let operational_failures = operational_failures(&documents);
+    let inputs = inputs::Inputs::load(config);
+    let input_failures = inputs.failures(config, fail_on, baseline.is_some());
+    let stale_artifacts = inputs
+        .status
+        .iter()
+        .filter(|(_, status)| status["status"] == "stale")
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let documents = &inputs.documents;
+    let partial_artifacts = partial_artifacts(documents, &stale_artifacts);
+    let test_failures = test_failures(documents);
+    let practices = classify_findings(config, practice_findings(documents));
+    let reliability = classify_findings(config, reliability_findings(documents));
+    let architecture = classify_findings(config, architecture_findings(documents));
+    let test_quality = classify_findings(config, test_quality_findings(documents));
+    let operational_failures = operational_failures(documents);
     let policy_rule_evaluations = evaluate_policy_rules(
         &config.policy,
         practices
@@ -68,13 +80,17 @@ pub(crate) fn run_check(
     let threshold_violations = current_map
         .map(|map| threshold_violations(map, max_total_score))
         .unwrap_or_default();
-    let regression = regression_evidence(
-        config,
-        &documents,
-        current_map,
-        baseline.as_deref(),
-        max_regression,
-    )?;
+    let regression = if inputs.status["map.json"]["status"] == "available" {
+        regression_evidence(
+            config,
+            documents,
+            current_map,
+            baseline.as_deref(),
+            max_regression,
+        )?
+    } else {
+        RegressionEvidence::default()
+    };
 
     let policy_evidence = PolicyEvidence {
         partial_artifacts: &partial_artifacts,
@@ -86,6 +102,12 @@ pub(crate) fn run_check(
         threshold_violations: &threshold_violations,
     };
     let mut failed_policies = failed_cli_policies(fail_on, &policy_evidence);
+    failed_policies.extend(
+        input_failures
+            .iter()
+            .filter_map(|failure| failure["policy"].as_str())
+            .map(str::to_string),
+    );
     if policy_rule_errors > 0 {
         failed_policies.push("configured-rules".to_string());
     }
@@ -102,6 +124,8 @@ pub(crate) fn run_check(
     if !config.architecture.rules.is_empty() {
         enabled_policies.push("architecture-rules".to_string());
     }
+    failed_policies.sort();
+    failed_policies.dedup();
     let report = json!({
         "version": 2,
         "generated_from": "rqlens",
@@ -110,6 +134,8 @@ pub(crate) fn run_check(
         "failed_policies": failed_policies,
         "partial_artifacts": partial_artifacts,
         "stale_artifacts": stale_artifacts,
+        "artifact_status": inputs.status,
+        "input_failures": input_failures,
         "test_failures": test_failures,
         "practice_failures": practices.errors,
         "practice_warnings": practices.warnings,
@@ -232,28 +258,6 @@ impl FailPolicy {
     }
 }
 
-fn measurement_documents(config: &LensConfig) -> Result<BTreeMap<String, Value>> {
-    let files = MeasureTool::schema_tools()
-        .into_iter()
-        .map(|tool| tool.output_file())
-        .collect::<BTreeSet<_>>();
-    let mut documents = BTreeMap::new();
-    for file in files.into_iter().chain([
-        "performance.json",
-        "repository_outcomes.json",
-        "operational_evidence.json",
-    ]) {
-        let path = config.output_dir.join(file);
-        if !path.exists() {
-            continue;
-        }
-        let value = serde_json::from_str(&fs::read_to_string(&path)?)
-            .with_context(|| format!("parsing {}", path.display()))?;
-        documents.insert(file.to_string(), value);
-    }
-    Ok(documents)
-}
-
 fn partial_artifacts(
     documents: &BTreeMap<String, Value>,
     stale_artifacts: &[String],
@@ -275,17 +279,6 @@ fn partial_artifacts(
     partial
 }
 
-fn stale_artifacts(config: &LensConfig, documents: &BTreeMap<String, Value>) -> Vec<String> {
-    let current =
-        crate::util::project_input_fingerprint(&config.project_root, &config.source_roots);
-    let current_digest = current["digest"].as_str();
-    documents
-        .iter()
-        .filter(|(_, document)| document["input_fingerprint"]["digest"].as_str() != current_digest)
-        .map(|(name, _)| name.clone())
-        .collect()
-}
-
 fn test_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
     let Some(document) = documents.get("correctness_review.json") else {
         return vec![json!({"reason": "correctness_review.json is missing"})];
@@ -293,7 +286,7 @@ fn test_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
     let data = artifact_payload(document);
     let failed = data["summary"]["failed"].as_u64().unwrap_or(0);
     let run_failed = data["summary"]["run_failed"].as_bool().unwrap_or(false);
-    if failed > 0 || run_failed {
+    if failed > 0 || run_failed || data["summary"]["compile_failed"] == true {
         vec![json!({
             "failed_tests": failed,
             "run_failed": run_failed,
@@ -562,6 +555,17 @@ fn read_baseline_map(path: &Path, current_model_version: Option<u64>) -> Result<
         &fs::read_to_string(&path)
             .with_context(|| format!("reading baseline {}", path.display()))?,
     )?;
+    crate::contracts::validate_artifact("map.json", &value)
+        .with_context(|| format!("invalid baseline {}", path.display()))?;
+    anyhow::ensure!(
+        value["measurement_confidence"]["complete"] == true
+            && value["data"]["graph"]["nodes"]
+                .as_array()
+                .is_some_and(|nodes| nodes
+                    .iter()
+                    .all(|node| node["data"]["total_score"].is_number())),
+        "baseline map contains incomplete evidence or unknown scores"
+    );
     let baseline_model_version = model_version(&value);
     if baseline_model_version != current_model_version {
         bail!(
