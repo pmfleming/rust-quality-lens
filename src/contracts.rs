@@ -5,7 +5,6 @@ use crate::config::LensConfig;
 use crate::facts::RunContext;
 use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
 use crate::tool::MeasureTool;
-use crate::util::project_input_fingerprint;
 
 mod validation;
 pub(crate) use validation::validate_artifact;
@@ -34,13 +33,21 @@ pub(crate) fn artifact_document(
             context.identity_resolution.to_json(),
         );
     }
+    let input_fingerprint = config.input_fingerprint();
+    if input_fingerprint["complete"] != true {
+        confidence["complete"] = json!(false);
+        confidence["partial"] = json!(true);
+        if let Some(missing) = confidence["missing_input"].as_array_mut() {
+            missing.push(json!("quality input fingerprint is incomplete"));
+        }
+    }
     let mut document = json!({
         "schema_version": 3,
         "generated_from": "rqlens",
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "generator_version": env!("CARGO_PKG_VERSION"),
         "toolchain": crate::toolchain::as_json(&context.toolchain),
-        "input_fingerprint": project_input_fingerprint(&config.project_root, &config.source_roots),
+        "input_fingerprint": input_fingerprint,
         "tool": tool.name(),
         "risk_model_id": MODEL_ID,
         "risk_model_version": MODEL_VERSION,

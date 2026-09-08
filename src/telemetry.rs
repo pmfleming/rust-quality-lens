@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::LensConfig;
-use crate::util::{project_input_fingerprint, stable_hash, write_json};
+use crate::util::{stable_hash, write_json};
 
 const MAX_FUTURE_SKEW_SECONDS: i64 = 300;
 
@@ -42,7 +42,7 @@ pub(crate) fn ingest(config: &LensConfig, input: &Path, max_age_hours: u64) -> R
         "generated_from": "rqlens",
         "generated_at": Utc::now().to_rfc3339(),
         "generator_version": env!("CARGO_PKG_VERSION"),
-        "input_fingerprint": project_input_fingerprint(&config.project_root, &config.source_roots),
+        "input_fingerprint": config.input_fingerprint(),
         "telemetry_input": {
             "algorithm": "fnv1a64-content-v1",
             "digest": stable_hash(&text),

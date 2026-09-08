@@ -1,8 +1,7 @@
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::path::PathBuf;
 
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, ModuleGraph, ModuleInfo};
@@ -11,10 +10,12 @@ use crate::risk_model::{
     ArchitectureRiskInputs, ArchitectureRiskScores, ChangeFacts, CorrectnessFacts,
     architecture_risk_scores,
 };
-use crate::util::{iter_rust_files, normalize_slashes};
+use crate::util::normalize_slashes;
 
 mod history;
 mod indices;
+#[cfg(test)]
+mod tests;
 mod topology;
 
 use history::{GitHistoryIndex, git_history_facts};
@@ -150,11 +151,12 @@ pub(crate) struct MapArtifacts {
 
 impl MapArtifacts {
     pub(crate) fn load(config: &LensConfig) -> Self {
-        let hotspot_read = read_artifact(config, "hotspots.json", true);
-        let correctness_read = read_artifact(config, "correctness_review.json", true);
-        let locality_read = read_artifact(config, "locality_metrics.json", true);
-        let leverage_read = read_artifact(config, "leverage_metrics.json", true);
-        let coverage_read = read_artifact(config, "coverage.json", false);
+        let fingerprint = config.input_fingerprint();
+        let hotspot_read = read_artifact(config, "hotspots.json", true, &fingerprint);
+        let correctness_read = read_artifact(config, "correctness_review.json", true, &fingerprint);
+        let locality_read = read_artifact(config, "locality_metrics.json", true, &fingerprint);
+        let leverage_read = read_artifact(config, "leverage_metrics.json", true, &fingerprint);
+        let coverage_read = read_artifact(config, "coverage.json", false, &fingerprint);
         let hotspots = hotspot_read.value.as_ref().map(indices::hotspot_index);
         let correctness = correctness_read
             .value
@@ -206,7 +208,12 @@ impl ArtifactRead {
     }
 }
 
-fn read_artifact(config: &LensConfig, file_name: &'static str, required: bool) -> ArtifactRead {
+fn read_artifact(
+    config: &LensConfig,
+    file_name: &'static str,
+    required: bool,
+    fingerprint: &Value,
+) -> ArtifactRead {
     let path = config.output_dir.join(file_name);
     if !path.exists() {
         return artifact_read(
@@ -215,15 +222,6 @@ fn read_artifact(config: &LensConfig, file_name: &'static str, required: bool) -
             required,
             "missing",
             "artifact has not been produced",
-        );
-    }
-    if artifact_is_stale(&path, &config.source_roots) {
-        return artifact_read(
-            file_name,
-            path,
-            required,
-            "stale",
-            "artifact is older than one or more Rust source files",
         );
     }
     match fs::read_to_string(&path)
@@ -239,6 +237,27 @@ fn read_artifact(config: &LensConfig, file_name: &'static str, required: bool) -
                     "incompatible",
                     &error.to_string(),
                 );
+            }
+            match crate::fingerprint::freshness(&value, fingerprint) {
+                crate::fingerprint::Freshness::Stale => {
+                    return artifact_read(
+                        file_name,
+                        path,
+                        required,
+                        "stale",
+                        "artifact inputs do not match current quality inputs",
+                    );
+                }
+                crate::fingerprint::Freshness::Incomplete => {
+                    return artifact_read(
+                        file_name,
+                        path,
+                        required,
+                        "partial",
+                        "input fingerprint is incomplete",
+                    );
+                }
+                crate::fingerprint::Freshness::Current => {}
             }
             let partial = value["measurement_confidence"]["partial"] == true;
             ArtifactRead {
@@ -283,20 +302,6 @@ fn artifact_read(
         reason: Some(reason.to_string()),
         value: None,
     }
-}
-
-fn artifact_is_stale(path: &Path, source_roots: &[String]) -> bool {
-    let artifact_modified = fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .unwrap_or(SystemTime::UNIX_EPOCH);
-    iter_rust_files(source_roots)
-        .into_iter()
-        .filter_map(|source| {
-            fs::metadata(source)
-                .and_then(|metadata| metadata.modified())
-                .ok()
-        })
-        .any(|modified| artifact_modified < modified)
 }
 
 pub(crate) fn map_measurement_confidence(

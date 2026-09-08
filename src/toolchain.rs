@@ -1,8 +1,8 @@
+use crate::command_runner::{CommandRequest, CommandStatus, run};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct ToolchainSnapshot {
@@ -115,21 +115,20 @@ pub(crate) fn parse_version(value: &str) -> Option<(u64, u64, u64)> {
 }
 
 fn command_lines(current_dir: &Path, program: &str, args: &[&str]) -> Vec<String> {
-    Command::new(program)
-        .args(args)
-        .current_dir(current_dir)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+    let args = args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+    let mut request = CommandRequest::new(program, &args, current_dir);
+    request.timeout = std::time::Duration::from_secs(3);
+    let output = run(request);
+    if output.status != CommandStatus::Passed {
+        return Vec::new();
+    }
+    output
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn verbose_field(lines: &[String], field: &str) -> Option<String> {

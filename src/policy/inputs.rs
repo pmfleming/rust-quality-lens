@@ -16,8 +16,7 @@ pub(super) struct Inputs {
 impl Inputs {
     pub(super) fn load(config: &LensConfig) -> Self {
         let mut inputs = Self::default();
-        let current =
-            crate::util::project_input_fingerprint(&config.project_root, &config.source_roots);
+        let current = config.input_fingerprint();
         for file in MeasureTool::schema_tools()
             .into_iter()
             .map(|tool| tool.output_file())
@@ -59,15 +58,15 @@ impl Inputs {
                 );
                 continue;
             }
-            let status = if document["input_fingerprint"]["digest"] != current["digest"] {
-                "stale"
-            } else if document["measurement_confidence"]["complete"] != true
-                || document["input_fingerprint"]["complete"] != true
-                || current["complete"] != true
-            {
-                "partial"
-            } else {
-                "available"
+            let status = match crate::fingerprint::freshness(&document, &current) {
+                crate::fingerprint::Freshness::Stale => "stale",
+                crate::fingerprint::Freshness::Incomplete => "partial",
+                crate::fingerprint::Freshness::Current
+                    if document["measurement_confidence"]["complete"] != true =>
+                {
+                    "partial"
+                }
+                crate::fingerprint::Freshness::Current => "available",
             };
             inputs
                 .status
@@ -81,7 +80,7 @@ impl Inputs {
         &self,
         config: &LensConfig,
         policies: &[FailPolicy],
-        has_baseline: bool,
+        baseline: Option<&std::path::Path>,
     ) -> Vec<Value> {
         let mut failures = Vec::new();
         for policy in policies {
@@ -106,7 +105,25 @@ impl Inputs {
             {
                 failures.push(json!({"policy": policy.as_str(), "artifact": "correctness_review.json", "status": "partial", "reason": "test execution must be observed and all test statuses known"}));
             }
-            if *policy == FailPolicy::Regression && !has_baseline {
+            if *policy == FailPolicy::Regression {
+                for file in ["coverage.json", "performance.json"] {
+                    let baseline_file = baseline.map(|path| {
+                        if path.is_dir() {
+                            path.join(file)
+                        } else {
+                            path.parent()
+                                .unwrap_or_else(|| std::path::Path::new("."))
+                                .join(file)
+                        }
+                    });
+                    if self.status[file]["status"] != "missing"
+                        || baseline_file.is_some_and(|path| path.exists())
+                    {
+                        self.require(policy.as_str(), file, &mut failures);
+                    }
+                }
+            }
+            if *policy == FailPolicy::Regression && baseline.is_none() {
                 failures.push(json!({"policy": policy.as_str(), "artifact": "baseline", "status": "missing", "reason": "regression policy requires --baseline"}));
             }
             if matches!(policy, FailPolicy::Threshold | FailPolicy::Regression)

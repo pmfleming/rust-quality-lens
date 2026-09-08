@@ -6,7 +6,7 @@ use std::fs;
 use crate::config::LensConfig;
 use crate::facts::{FunctionFact, RunContext};
 use crate::measurement::project_relative_path;
-use crate::util::{project_input_fingerprint, round2};
+use crate::util::round2;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let coverage = load_coverage(config);
@@ -79,11 +79,20 @@ fn load_coverage(config: &LensConfig) -> CoverageLoad {
             stale: Vec::new(),
         };
     };
-    let current = project_input_fingerprint(&config.project_root, &config.source_roots);
-    let stale = document["input_fingerprint"]["digest"] != current["digest"];
+    if let Err(error) = crate::contracts::validate_artifact("coverage.json", &document) {
+        return CoverageLoad {
+            document: None,
+            complete: false,
+            missing: vec![format!("coverage.json is incompatible: {error}")],
+            stale: Vec::new(),
+        };
+    }
+    let current = config.input_fingerprint();
+    let stale = crate::fingerprint::freshness(&document, &current)
+        != crate::fingerprint::Freshness::Current;
     let coverage_complete = document["measurement_confidence"]["complete"] == true;
     CoverageLoad {
-        document: Some(document),
+        document: (!stale).then_some(document),
         complete: coverage_complete && !stale,
         missing: if coverage_complete {
             Vec::new()

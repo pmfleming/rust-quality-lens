@@ -7,7 +7,7 @@ use std::process::Command;
 
 use crate::config::LensConfig;
 use crate::measurement::module_for_path;
-use crate::util::{normalize_slashes, project_input_fingerprint, write_json};
+use crate::util::{normalize_slashes, write_json};
 
 pub(crate) fn collect(config: &LensConfig, labels: Option<PathBuf>) -> Result<PathBuf> {
     let output = Command::new("git")
@@ -47,7 +47,7 @@ pub(crate) fn collect(config: &LensConfig, labels: Option<PathBuf>) -> Result<Pa
         "generated_from": "rqlens",
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "generator_version": env!("CARGO_PKG_VERSION"),
-        "input_fingerprint": project_input_fingerprint(&config.project_root, &config.source_roots),
+        "input_fingerprint": config.input_fingerprint(),
         "tool": "repository-outcomes",
         "measurement_confidence": {
             "complete": true,

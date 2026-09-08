@@ -9,7 +9,6 @@ use crate::measurement::{
     RULESET_ID, RULESET_VERSION, classify_path, module_for_path, project_relative_path,
     source_confidence, test_kind_for_path, title_from_name,
 };
-use crate::util::project_input_fingerprint;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> Result<Value> {
     let paths = &context.correctness_paths;
@@ -129,15 +128,17 @@ fn coverage_evidence(config: &LensConfig) -> CoverageEvidence {
     let Ok(document) = serde_json::from_str::<Value>(&text) else {
         return CoverageEvidence::default();
     };
-    let current = project_input_fingerprint(&config.project_root, &config.source_roots);
-    coverage_from_document(&document, current["digest"].as_str())
+    if crate::contracts::validate_artifact("coverage.json", &document).is_err() {
+        return CoverageEvidence::default();
+    }
+    coverage_from_document(&document, &config.input_fingerprint())
 }
 
-fn coverage_from_document(document: &Value, current_digest: Option<&str>) -> CoverageEvidence {
+fn coverage_from_document(document: &Value, current: &Value) -> CoverageEvidence {
     if document["measurement_confidence"]["complete"] != true {
         return CoverageEvidence::default();
     }
-    if document["input_fingerprint"]["digest"].as_str() != current_digest {
+    if crate::fingerprint::freshness(document, current) != crate::fingerprint::Freshness::Current {
         return CoverageEvidence {
             records: Vec::new(),
             stale: true,
@@ -422,7 +423,7 @@ mod tests {
     #[test]
     fn stale_coverage_is_not_attributed_to_current_sources() {
         let document = json!({
-            "input_fingerprint": {"digest": "old"},
+            "input_fingerprint": {"digest": "old", "algorithm": "test", "complete": true},
             "measurement_confidence": {"complete": true},
             "data": {"files": [{
                 "module_key": "domain",
@@ -432,11 +433,14 @@ mod tests {
             }]}
         });
 
-        let stale = coverage_from_document(&document, Some("current"));
+        let stale = coverage_from_document(
+            &document,
+            &json!({"digest": "current", "algorithm": "test", "complete": true}),
+        );
         assert!(stale.stale);
         assert!(stale.records.is_empty());
 
-        let fresh = coverage_from_document(&document, Some("old"));
+        let fresh = coverage_from_document(&document, &document["input_fingerprint"]);
         assert!(!fresh.stale);
         assert_eq!(fresh.records.len(), 1);
     }

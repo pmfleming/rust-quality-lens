@@ -16,6 +16,7 @@ mod config;
 mod contracts;
 mod external;
 mod facts;
+mod fingerprint;
 mod measurement;
 mod outcomes;
 mod performance;

@@ -33,7 +33,7 @@ pub(crate) fn run_check(
     max_regression: f64,
 ) -> Result<()> {
     let inputs = inputs::Inputs::load(config);
-    let input_failures = inputs.failures(config, fail_on, baseline.is_some());
+    let input_failures = inputs.failures(config, fail_on, baseline.as_deref());
     let stale_artifacts = inputs
         .status
         .iter()
@@ -559,6 +559,7 @@ fn read_baseline_map(path: &Path, current_model_version: Option<u64>) -> Result<
         .with_context(|| format!("invalid baseline {}", path.display()))?;
     anyhow::ensure!(
         value["measurement_confidence"]["complete"] == true
+            && value["input_fingerprint"]["complete"] == true
             && value["data"]["graph"]["nodes"]
                 .as_array()
                 .is_some_and(|nodes| nodes

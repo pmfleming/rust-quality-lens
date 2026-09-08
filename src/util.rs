@@ -166,23 +166,25 @@ pub(crate) fn stable_hash(value: &str) -> String {
 
 pub(crate) fn project_input_fingerprint(project_root: &Path, source_roots: &[String]) -> Value {
     let mut files = BTreeSet::new();
-    for entry in WalkDir::new(project_root)
-        .into_iter()
-        .filter_entry(|entry| !ignored_input_directory(entry.path(), project_root))
-        .filter_map(Result::ok)
-    {
-        let path = entry.path();
-        if path.is_file() && is_quality_input(path) {
-            files.insert(absolutize(path));
+    let mut read_errors = Vec::new();
+    for root in std::iter::once(project_root).chain(source_roots.iter().map(Path::new)) {
+        for entry in WalkDir::new(root)
+            .into_iter()
+            .filter_entry(|entry| !ignored_input_directory(entry.path(), root))
+        {
+            match entry {
+                Ok(entry) if entry.path().is_file() && is_quality_input(entry.path()) => {
+                    files.insert(absolutize(entry.path()));
+                }
+                Ok(_) => {}
+                Err(error) => read_errors.push(error.to_string()),
+            }
         }
     }
-    for path in iter_rust_files(source_roots) {
-        files.insert(absolutize(path));
-    }
-
+    read_errors.sort();
+    read_errors.dedup();
     let mut hash = 1469598103934665603;
     let mut observed = 0usize;
-    let mut read_errors = Vec::new();
     for path in files {
         let relative = path.strip_prefix(project_root).unwrap_or(&path);
         hash = fnv1a(hash, normalize_slashes(relative).as_bytes());
@@ -233,6 +235,14 @@ fn is_quality_input(path: &Path) -> bool {
                     | "deny.toml"
             )
         )
+        || (path
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == ".cargo")
+            && matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("config" | "config.toml")
+            ))
 }
 
 pub(crate) fn tail(text: &str, lines: usize) -> String {
@@ -303,6 +313,37 @@ mod tests {
             .write(true)
             .open(lock_path)?;
         assert!(contender.try_lock().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn fingerprint_detects_deleted_sources_and_preserved_timestamps() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("lib.rs");
+        std::fs::write(&path, "pub fn before() {}")?;
+        let modified = std::fs::metadata(&path)?.modified()?;
+        let initial = project_input_fingerprint(root.path(), &[]);
+        std::fs::write(&path, "pub fn after_() {}")?;
+        std::fs::File::options()
+            .write(true)
+            .open(&path)?
+            .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+        assert_ne!(
+            initial["digest"],
+            project_input_fingerprint(root.path(), &[])["digest"]
+        );
+        std::fs::remove_file(&path)?;
+        assert_ne!(
+            initial["digest"],
+            project_input_fingerprint(root.path(), &[])["digest"]
+        );
+        let missing = project_input_fingerprint(root.path(), &[path.to_string_lossy().to_string()]);
+        assert_eq!(missing["complete"], false);
+        assert!(
+            missing["read_errors"]
+                .as_array()
+                .is_some_and(|errors| !errors.is_empty())
+        );
         Ok(())
     }
 

@@ -8,7 +8,7 @@ use walkdir::WalkDir;
 
 use crate::command_runner::{CommandRequest, CommandStatus, run};
 use crate::config::LensConfig;
-use crate::util::{normalize_slashes, project_input_fingerprint, round2, write_json};
+use crate::util::{normalize_slashes, round2, write_json};
 
 pub(crate) fn run_benchmarks(
     config: &LensConfig,
@@ -48,7 +48,7 @@ pub(crate) fn run_benchmarks(
         "generated_from": "rqlens",
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "generator_version": env!("CARGO_PKG_VERSION"),
-        "input_fingerprint": project_input_fingerprint(&config.project_root, &config.source_roots),
+        "input_fingerprint": config.input_fingerprint(),
         "tool": "performance",
         "measurement_confidence": confidence,
         "summary": {

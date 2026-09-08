@@ -16,7 +16,7 @@ fn document(config: &LensConfig, tool: &str, data: Value) -> Value {
     json!({
         "schema_version": 3, "risk_model_version": MODEL_VERSION, "tool": tool,
         "measurement_confidence": {"complete": true, "partial": false},
-        "input_fingerprint": crate::util::project_input_fingerprint(&config.project_root, &config.source_roots),
+        "input_fingerprint": config.input_fingerprint(),
         "data": data,
     })
 }

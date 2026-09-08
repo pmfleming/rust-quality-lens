@@ -4,7 +4,7 @@ use crate::facts::FileFacts;
 use crate::facts::RunContext;
 use crate::producers::produce_measurement;
 use crate::tool::MeasureTool;
-use crate::util::{absolutize, normalize_slashes, project_input_fingerprint, write_json};
+use crate::util::{absolutize, normalize_slashes, write_json};
 use anyhow::{Context, Result};
 use std::collections::{BTreeSet, HashSet};
 use std::fs;
@@ -202,11 +202,18 @@ fn changed_line_coverage(
     let Ok(document) = serde_json::from_str::<serde_json::Value>(&text) else {
         return serde_json::json!({"status": "unavailable", "reason": "coverage.json is invalid"});
     };
-    let current = project_input_fingerprint(&config.project_root, &config.source_roots);
-    if document["input_fingerprint"]["digest"] != current["digest"] {
+    if let Err(error) = crate::contracts::validate_artifact("coverage.json", &document) {
+        return serde_json::json!({"status": "unavailable", "reason": error.to_string()});
+    }
+    let current = config.input_fingerprint();
+    if crate::fingerprint::freshness(&document, &current) != crate::fingerprint::Freshness::Current
+    {
         return serde_json::json!({"status": "stale", "reason": "coverage inputs do not match the current source"});
     }
-    let data = document.get("data").unwrap_or(&document);
+    if document["measurement_confidence"]["complete"] != true {
+        return serde_json::json!({"status": "partial", "reason": "coverage measurement is incomplete"});
+    }
+    let data = &document["data"];
     let mut executable = 0u64;
     let mut covered = 0u64;
     for file in data["files"].as_array().into_iter().flatten() {

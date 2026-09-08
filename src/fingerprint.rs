@@ -1,0 +1,209 @@
+use serde_json::{Value, json};
+use std::time::Duration;
+
+use crate::command_runner::{CommandRequest, CommandStatus, run};
+use crate::config::LensConfig;
+use crate::util::{project_input_fingerprint, stable_hash};
+
+pub(crate) fn project(config: &LensConfig) -> Value {
+    let source = project_input_fingerprint(&config.project_root, &config.source_roots);
+    let mut errors = source["read_errors"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let git = git_state(config, &mut errors);
+    let toolchain = crate::toolchain::snapshot(&config.project_root);
+    if toolchain.rustc_version.is_none() || toolchain.cargo_version.is_none() {
+        errors.push(json!("active Rust toolchain version is unavailable"));
+    }
+    let inputs = json!({
+        "source": source["digest"],
+        "config": config,
+        "git": git,
+        "toolchain": toolchain,
+        "generator_version": env!("CARGO_PKG_VERSION"),
+    });
+    json!({
+        "algorithm": "fnv1a64-quality-inputs-v2",
+        "digest": stable_hash(&inputs.to_string()),
+        "file_count": source["file_count"],
+        "read_errors": errors,
+        "complete": errors.is_empty(),
+        "source_digest": source["digest"],
+        "config_digest": stable_hash(&inputs["config"].to_string()),
+        "git": git,
+        "toolchain": toolchain,
+    })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Freshness {
+    Current,
+    Stale,
+    Incomplete,
+}
+
+pub(crate) fn freshness(document: &Value, current: &Value) -> Freshness {
+    let recorded = &document["input_fingerprint"];
+    if current["complete"] != true || recorded["complete"] != true {
+        return Freshness::Incomplete;
+    }
+    if !current["digest"].is_string()
+        || !current["algorithm"].is_string()
+        || recorded["digest"] != current["digest"]
+        || recorded["algorithm"] != current["algorithm"]
+    {
+        return Freshness::Stale;
+    }
+    Freshness::Current
+}
+
+fn git_state(config: &LensConfig, errors: &mut Vec<Value>) -> Value {
+    let probe = git(config, &["rev-parse", "--is-inside-work-tree"]);
+    if probe.status != CommandStatus::Passed {
+        // A source archive need not contain Git metadata. Other failures must
+        // not certify a complete fingerprint (e.g. missing git or timeouts).
+        if probe.stderr.contains("not a git repository") {
+            return json!({"status": "not-a-repository"});
+        }
+        errors.push(json!(format!(
+            "cannot inspect Git state: {}",
+            probe.reason.as_deref().unwrap_or(&probe.stderr_tail)
+        )));
+        return json!({"status": "unavailable"});
+    }
+    let mut state = serde_json::Map::new();
+    for (key, args) in [
+        ("head", vec!["rev-parse", "--verify", "HEAD"]),
+        ("shallow", vec!["rev-parse", "--is-shallow-repository"]),
+        (
+            "replacements",
+            vec![
+                "for-each-ref",
+                "--format=%(refname):%(objectname)",
+                "refs/replace",
+            ],
+        ),
+    ] {
+        let output = git(config, &args);
+        if output.status == CommandStatus::Passed {
+            state.insert(key.to_string(), json!(output.stdout.trim()));
+        } else {
+            errors.push(json!(format!(
+                "cannot inspect Git {key}: {}",
+                output.stderr_tail
+            )));
+        }
+    }
+    if state.get("shallow").and_then(Value::as_str) == Some("true") {
+        let output = git(config, &["rev-parse", "--git-path", "shallow"]);
+        let path = config.project_root.join(output.stdout.trim());
+        match std::fs::read_to_string(path) {
+            Ok(text) if output.status == CommandStatus::Passed => {
+                state.insert("shallow_boundary".to_string(), json!(stable_hash(&text)));
+            }
+            _ => errors.push(json!("cannot inspect Git shallow boundary")),
+        }
+    }
+    Value::Object(state)
+}
+
+fn git(config: &LensConfig, args: &[&str]) -> crate::command_runner::CommandOutcome {
+    let args = args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+    let mut request = CommandRequest::new("git", &args, &config.project_root);
+    request.timeout = Duration::from_secs(3);
+    request
+        .environment
+        .insert("LC_ALL".to_string(), "C".to_string());
+    run(request)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn custom_effective_configuration_and_git_history_change_fingerprints() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        fs::create_dir(root.path().join("src"))?;
+        fs::write(root.path().join("src/lib.rs"), "pub fn value() {}")?;
+        let config_path = root.path().join("custom-settings.toml");
+        fs::write(&config_path, "source_roots = [\"src\"]\n")?;
+        let config = LensConfig::load(Some(config_path.clone()))?;
+        let initial = project(&config);
+        assert_eq!(initial["complete"], true);
+        fs::write(
+            &config_path,
+            "source_roots = [\"src\"]\n[verification]\nall_features = true\n",
+        )?;
+        let changed = project(&LensConfig::load(Some(config_path))?);
+        assert_ne!(initial["digest"], changed["digest"]);
+        assert_eq!(initial["source_digest"], changed["source_digest"]);
+        for args in [
+            vec!["init", "-q"],
+            vec![
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "first",
+            ],
+        ] {
+            assert_eq!(git(&config, &args).status, CommandStatus::Passed);
+        }
+        let first_commit = project(&config);
+        assert_eq!(
+            git(
+                &config,
+                &[
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                    "commit",
+                    "--allow-empty",
+                    "-qm",
+                    "second"
+                ]
+            )
+            .status,
+            CommandStatus::Passed
+        );
+        let second_commit = project(&config);
+        assert_ne!(first_commit["digest"], second_commit["digest"]);
+        assert_eq!(
+            first_commit["source_digest"],
+            second_commit["source_digest"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn incomplete_or_legacy_fingerprints_are_never_current() {
+        let current = json!({"algorithm": "v2", "digest": "same", "complete": true});
+        assert_eq!(
+            freshness(&json!({"input_fingerprint": current}), &current),
+            Freshness::Current
+        );
+        for recorded in [
+            json!({"digest": "same"}),
+            json!({"algorithm": "v2", "digest": "same", "complete": false}),
+        ] {
+            assert_eq!(
+                freshness(&json!({"input_fingerprint": recorded}), &current),
+                Freshness::Incomplete
+            );
+        }
+        assert_eq!(
+            freshness(
+                &json!({"input_fingerprint": {"algorithm": "v1", "digest": "same", "complete": true}}),
+                &current
+            ),
+            Freshness::Stale
+        );
+    }
+}

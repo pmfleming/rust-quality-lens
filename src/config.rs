@@ -60,7 +60,7 @@ struct RawVerificationConfig {
     miri: Option<bool>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct VerificationConfig {
     pub(crate) timeout_seconds: u64,
     pub(crate) workspace: bool,
@@ -434,11 +434,12 @@ pub(crate) enum SemanticIdentityMode {
     Disabled,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct LensConfig {
     pub(crate) project_name: String,
     pub(crate) project_root: PathBuf,
     pub(crate) source_roots: Vec<String>,
+    #[serde(skip)]
     pub(crate) output_dir: PathBuf,
     pub(crate) helper_manifest: PathBuf,
     pub(crate) identity_resolution: SemanticIdentityMode,
@@ -451,6 +452,10 @@ pub(crate) struct LensConfig {
 }
 
 impl LensConfig {
+    pub(crate) fn input_fingerprint(&self) -> Value {
+        crate::fingerprint::project(self)
+    }
+
     pub(crate) fn load(path: Option<PathBuf>) -> Result<Self> {
         let config_path = resolve_config_input(path)?;
         let config_dir = config_path
