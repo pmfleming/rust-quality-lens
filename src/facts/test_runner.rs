@@ -58,11 +58,12 @@ fn metadata_target_paths(config: &LensConfig) -> Option<Vec<String>> {
     if config.identity_offline {
         command.arg("--offline");
     }
-    let output = command.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let output = crate::command_runner::checked_output(
+        &mut command,
+        Duration::from_secs(config.verification.timeout_seconds),
+    )
+    .ok()?;
+    let metadata: serde_json::Value = serde_json::from_str(&output.stdout).ok()?;
     let project_root = config
         .project_root
         .canonicalize()

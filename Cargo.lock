@@ -473,6 +473,7 @@ dependencies = [
  "clap",
  "hostname",
  "regex",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

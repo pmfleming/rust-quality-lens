@@ -335,13 +335,15 @@ fn unresolved(
 }
 
 fn analyzer_version(config: &LensConfig) -> Option<String> {
-    Command::new(&config.rust_analyzer)
-        .arg("--version")
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|version| version.trim().to_string())
+    crate::command_runner::checked_output(
+        Command::new(&config.rust_analyzer)
+            .arg("--version")
+            .current_dir(&config.project_root),
+        Duration::from_secs(3),
+    )
+    .ok()
+    .map(|output| output.stdout)
+    .map(|version| version.trim().to_string())
 }
 
 fn fingerprint(config: &LensConfig, facts: &[FileFacts], analyzer_version: Option<&str>) -> String {
@@ -867,10 +869,11 @@ fn detached_rust_project(config: &LensConfig, facts: &[FileFacts]) -> Result<Opt
     if config.identity_offline {
         metadata.arg("--offline");
     }
-    let metadata_ok = metadata
-        .current_dir(&config.project_root)
-        .output()
-        .is_ok_and(|output| output.status.success());
+    let metadata_ok = crate::command_runner::checked_output(
+        metadata.current_dir(&config.project_root),
+        Duration::from_secs(config.identity_timeout_seconds),
+    )
+    .is_ok();
     if metadata_ok {
         return Ok(None);
     }
@@ -890,7 +893,7 @@ fn detached_rust_project(config: &LensConfig, facts: &[FileFacts]) -> Result<Opt
         .enumerate()
         .map(|(index, fact)| (index, fact.package_name.clone(), fact.target_kind.clone()))
         .collect::<Vec<_>>();
-    let target_cfgs = rustc_cfgs();
+    let target_cfgs = rustc_cfgs(&config.project_root);
     let crates = roots
         .iter()
         .enumerate()
@@ -934,15 +937,17 @@ fn detached_rust_project(config: &LensConfig, facts: &[FileFacts]) -> Result<Opt
     Ok(Some(path))
 }
 
-fn rustc_cfgs() -> Vec<String> {
-    Command::new("rustc")
-        .args(["--print", "cfg"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|output| output.lines().map(str::to_string).collect())
-        .unwrap_or_default()
+fn rustc_cfgs(project_root: &Path) -> Vec<String> {
+    crate::command_runner::checked_output(
+        Command::new("rustc")
+            .args(["--print", "cfg"])
+            .current_dir(project_root),
+        Duration::from_secs(3),
+    )
+    .ok()
+    .map(|output| output.stdout)
+    .map(|output| output.lines().map(str::to_string).collect())
+    .unwrap_or_default()
 }
 
 fn feature_cfgs(config: &LensConfig, source_path: &str) -> Vec<String> {
@@ -1000,7 +1005,7 @@ mod tests {
         fs::write(&path, "")?;
         let uri = file_uri(&path);
         assert!(uri.starts_with("file:///"));
-        let decoded = uri_path(&uri).expect("file URI should decode");
+        let decoded = uri_path(&uri).ok_or_else(|| anyhow::anyhow!("file URI should decode"))?;
         assert_eq!(fs::canonicalize(decoded)?, fs::canonicalize(path)?);
         Ok(())
     }
@@ -1068,10 +1073,11 @@ mod tests {
 
     #[test]
     fn detached_project_resolves_and_caches_local_definitions() -> anyhow::Result<()> {
-        if !Command::new("rust-analyzer")
-            .arg("--version")
-            .output()
-            .is_ok_and(|output| output.status.success())
+        if crate::command_runner::checked_output(
+            Command::new("rust-analyzer").arg("--version"),
+            std::time::Duration::from_secs(3),
+        )
+        .is_err()
         {
             return Ok(());
         }

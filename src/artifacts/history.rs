@@ -90,11 +90,11 @@ pub(crate) fn git_history_facts(config: &LensConfig, graph: &ModuleGraph) -> Git
         return unavailable("project root is not inside a git work tree");
     }
     let output = match git_log(config, graph) {
-        Ok(output) if output.status.success() => output,
+        Ok(output) => output,
         _ => return unavailable("git log could not be read"),
     };
     GitHistoryIndex {
-        by_module: parse_git_history(config, &String::from_utf8_lossy(&output.stdout), graph),
+        by_module: parse_git_history(config, &output.stdout, graph),
         status: "available",
         reason: None,
     }
@@ -109,16 +109,19 @@ fn unavailable(reason: &str) -> GitHistoryIndex {
 }
 
 fn is_git_work_tree(config: &LensConfig) -> bool {
-    Command::new("git")
-        .arg("rev-parse")
-        .arg("--is-inside-work-tree")
-        .current_dir(&config.project_root)
-        .output()
-        .as_ref()
-        .is_ok_and(|output| output.status.success())
+    crate::command_runner::checked_output(
+        Command::new("git")
+            .args(["rev-parse", "--is-inside-work-tree"])
+            .current_dir(&config.project_root),
+        std::time::Duration::from_secs(3),
+    )
+    .is_ok()
 }
 
-fn git_log(config: &LensConfig, graph: &ModuleGraph) -> std::io::Result<std::process::Output> {
+fn git_log(
+    config: &LensConfig,
+    graph: &ModuleGraph,
+) -> anyhow::Result<crate::command_runner::CommandOutcome> {
     let mut command = Command::new("git");
     command
         .arg("log")
@@ -129,7 +132,10 @@ fn git_log(config: &LensConfig, graph: &ModuleGraph) -> std::io::Result<std::pro
     for root in module_source_roots(config, graph) {
         command.arg(root);
     }
-    command.current_dir(&config.project_root).output()
+    crate::command_runner::checked_output(
+        command.current_dir(&config.project_root),
+        std::time::Duration::from_secs(config.verification.timeout_seconds),
+    )
 }
 
 fn parse_git_history(

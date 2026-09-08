@@ -581,11 +581,9 @@ fn cargo_metadata(project_root: &Path, offline: bool, no_dependencies: bool) -> 
     if no_dependencies {
         command.arg("--no-deps");
     }
-    command
-        .output()
+    crate::command_runner::checked_output(&mut command, std::time::Duration::from_secs(30))
         .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| serde_json::from_slice(&output.stdout).ok())
+        .and_then(|output| serde_json::from_str(&output.stdout).ok())
 }
 
 fn metadata_source_roots(project_root: &Path, metadata: &Value) -> BTreeSet<PathBuf> {

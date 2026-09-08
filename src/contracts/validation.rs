@@ -30,7 +30,8 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<()> {
         "unsupported or missing artifact schema version"
     );
     ensure!(
-        value["tool"].as_str() == expected_tool,
+        value["tool"].as_str() == expected_tool
+            || (file == "correctness_review.json" && value["tool"] == "correctness"),
         "artifact tool does not match {file}"
     );
     if auxiliary.is_none() {
@@ -185,6 +186,17 @@ fn finding(value: &Value) -> Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn static_correctness_is_valid_evidence_but_not_a_test_execution() {
+        let document = json!({
+            "schema_version": 3, "risk_model_version": MODEL_VERSION, "tool": "correctness",
+            "measurement_confidence": {"complete": true, "partial": false},
+            "input_fingerprint": {"digest": "test", "complete": true},
+            "data": {"summary": {"failed": 0, "run_failed": false, "compile_failed": false}, "tests": []}
+        });
+        assert!(validate_artifact("correctness_review.json", &document).is_ok());
+    }
 
     #[test]
     fn rejects_unversioned_wrong_tool_and_inconsistent_envelopes() {

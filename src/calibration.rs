@@ -410,15 +410,16 @@ fn percent(part: usize, whole: usize) -> f64 {
 }
 
 fn git_revision(root: &Path) -> Value {
-    Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(root)
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|revision| Value::from(revision.trim().to_string()))
-        .unwrap_or(Value::Null)
+    crate::command_runner::checked_output(
+        Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(root),
+        std::time::Duration::from_secs(3),
+    )
+    .ok()
+    .map(|output| output.stdout)
+    .map(|revision| Value::from(revision.trim().to_string()))
+    .unwrap_or(Value::Null)
 }
 
 #[cfg(test)]

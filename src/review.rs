@@ -123,21 +123,14 @@ fn review_diff(
 }
 
 fn git_diff(project_root: &Path, base: &str) -> Result<String> {
-    let output = Command::new("git")
-        .arg("diff")
-        .arg("--unified=0")
-        .arg(base)
-        .arg("--")
-        .current_dir(project_root)
-        .output()
-        .with_context(|| format!("running git diff from {}", project_root.display()))?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "git diff failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    let output = crate::command_runner::checked_output(
+        Command::new("git")
+            .args(["diff", "--unified=0", base, "--"])
+            .current_dir(project_root),
+        std::time::Duration::from_secs(30),
+    )
+    .with_context(|| format!("running git diff from {}", project_root.display()))?;
+    Ok(output.stdout)
 }
 
 fn diff_paths(project_root: &Path, diff: &str) -> Vec<PathBuf> {

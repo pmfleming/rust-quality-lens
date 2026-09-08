@@ -92,16 +92,12 @@ fn helper_json_for_paths<T: serde::de::DeserializeOwned>(
             env::join_paths(config.source_roots.iter().map(PathBuf::from))?,
         );
     }
-    let output = command
-        .output()
-        .with_context(|| format!("running {label} helper {}", helper.display()))?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "{label} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    Ok(serde_json::from_slice(&output.stdout)?)
+    let output = crate::command_runner::checked_output(
+        &mut command,
+        std::time::Duration::from_secs(config.verification.timeout_seconds),
+    )
+    .with_context(|| format!("running {label} helper {}", helper.display()))?;
+    Ok(serde_json::from_str(&output.stdout)?)
 }
 
 fn rust_file_args(paths: &[String]) -> Vec<String> {
@@ -147,47 +143,37 @@ fn helper_binary(config: &LensConfig, bin: &str) -> Result<PathBuf> {
 }
 
 fn build_helper(config: &LensConfig, manifest: &Path, bin: &str) -> Result<()> {
-    let build = Command::new("cargo")
-        .arg("build")
-        .arg("--quiet")
-        .arg("--manifest-path")
-        .arg(manifest)
-        .arg("--bin")
-        .arg(bin)
-        .current_dir(&config.project_root)
-        .output()
-        .with_context(|| format!("building helper binary {bin}"))?;
-    if build.status.success() {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "helper binary build failed for {bin}: {}",
-            String::from_utf8_lossy(&build.stderr)
-        ))
-    }
+    crate::command_runner::checked_output(
+        Command::new("cargo")
+            .args(["build", "--quiet", "--manifest-path"])
+            .arg(manifest)
+            .args(["--bin", bin])
+            .current_dir(&config.project_root),
+        std::time::Duration::from_secs(config.verification.timeout_seconds),
+    )
+    .with_context(|| format!("building helper binary {bin}"))?;
+    Ok(())
 }
 
 fn helper_target_dir(manifest: &Path, current_dir: &Path) -> Result<PathBuf> {
     if let Some(target_dir) = env::var_os("CARGO_TARGET_DIR") {
         return Ok(PathBuf::from(target_dir));
     }
-    let output = Command::new("cargo")
-        .arg("metadata")
-        .arg("--no-deps")
-        .arg("--format-version")
-        .arg("1")
-        .arg("--manifest-path")
-        .arg(manifest)
-        .current_dir(current_dir)
-        .output()
-        .context("reading helper cargo metadata")?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "helper cargo metadata failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-    let metadata: Value = serde_json::from_slice(&output.stdout)?;
+    let output = crate::command_runner::checked_output(
+        Command::new("cargo")
+            .args([
+                "metadata",
+                "--no-deps",
+                "--format-version",
+                "1",
+                "--manifest-path",
+            ])
+            .arg(manifest)
+            .current_dir(current_dir),
+        std::time::Duration::from_secs(30),
+    )
+    .context("reading helper cargo metadata")?;
+    let metadata: Value = serde_json::from_str(&output.stdout)?;
     metadata["target_directory"]
         .as_str()
         .map(PathBuf::from)
@@ -300,17 +286,16 @@ fn target_metadata_for_target(target: &CargoTarget, kind: &str) -> TargetMetadat
 }
 
 fn cargo_targets(config: &LensConfig) -> Vec<CargoTarget> {
-    let output = Command::new("cargo")
-        .args(["metadata", "--no-deps", "--format-version", "1"])
-        .current_dir(&config.project_root)
-        .output();
+    let output = crate::command_runner::checked_output(
+        Command::new("cargo")
+            .args(["metadata", "--no-deps", "--format-version", "1"])
+            .current_dir(&config.project_root),
+        std::time::Duration::from_secs(config.verification.timeout_seconds),
+    );
     let Ok(output) = output else {
         return manifest_targets(config);
     };
-    if !output.status.success() {
-        return manifest_targets(config);
-    }
-    let Ok(metadata) = serde_json::from_slice::<Value>(&output.stdout) else {
+    let Ok(metadata) = serde_json::from_str::<Value>(&output.stdout) else {
         return Vec::new();
     };
     metadata["packages"]

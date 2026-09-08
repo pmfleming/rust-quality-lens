@@ -70,17 +70,16 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
 }
 
 fn git_changes(config: &LensConfig) -> BTreeMap<String, u64> {
-    let Ok(output) = Command::new("git")
-        .args(["log", "--numstat", "--format="])
-        .current_dir(&config.project_root)
-        .output()
-    else {
+    let Ok(output) = crate::command_runner::checked_output(
+        Command::new("git")
+            .args(["log", "--numstat", "--format="])
+            .current_dir(&config.project_root),
+        std::time::Duration::from_secs(config.verification.timeout_seconds),
+    ) else {
         return BTreeMap::new();
     };
-    if !output.status.success() {
-        return BTreeMap::new();
-    }
-    String::from_utf8_lossy(&output.stdout)
+    output
+        .stdout
         .lines()
         .filter_map(|line| {
             let mut fields = line.splitn(3, '\t');

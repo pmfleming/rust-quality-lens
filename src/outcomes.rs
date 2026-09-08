@@ -10,24 +10,20 @@ use crate::measurement::module_for_path;
 use crate::util::{normalize_slashes, write_json};
 
 pub(crate) fn collect(config: &LensConfig, labels: Option<PathBuf>) -> Result<PathBuf> {
-    let output = Command::new("git")
-        .args([
-            "log",
-            "--name-only",
-            "--no-renames",
-            "--format=commit:%H%x09%aI%x09%s",
-            "--",
-        ])
-        .current_dir(&config.project_root)
-        .output()
-        .context("reading repository outcomes from git log")?;
-    if !output.status.success() {
-        bail!(
-            "git log failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    let mut records = parse_outcomes(&String::from_utf8_lossy(&output.stdout));
+    let output = crate::command_runner::checked_output(
+        Command::new("git")
+            .args([
+                "log",
+                "--name-only",
+                "--no-renames",
+                "--format=commit:%H%x09%aI%x09%s",
+                "--",
+            ])
+            .current_dir(&config.project_root),
+        std::time::Duration::from_secs(config.verification.timeout_seconds),
+    )
+    .context("reading repository outcomes from git log")?;
+    let mut records = parse_outcomes(&output.stdout);
     if let Some(path) = labels {
         records.extend(read_labels(&path)?);
     }

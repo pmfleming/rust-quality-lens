@@ -576,13 +576,13 @@ fn cargo_version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
     VERSION
         .get_or_init(|| {
-            Command::new("cargo")
-                .arg("--version")
-                .output()
-                .ok()
-                .filter(|output| output.status.success())
-                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-                .unwrap_or_else(|| "unavailable".to_string())
+            crate::command_runner::checked_output(
+                Command::new("cargo").arg("--version"),
+                Duration::from_secs(3),
+            )
+            .ok()
+            .map(|output| output.stdout.trim().to_string())
+            .unwrap_or_else(|| "unavailable".to_string())
         })
         .as_str()
 }
