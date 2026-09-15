@@ -1,10 +1,11 @@
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
+use std::path::Path;
 
 use super::FailPolicy;
 use crate::config::{LensConfig, PolicyRuleLevel};
-use crate::contracts::{InputState, InputStatus, validate_artifact};
+use crate::contracts::{ArtifactHeader, InputState, InputStatus, validate_artifact};
 use crate::tool::MeasureTool;
 
 #[derive(Default)]
@@ -26,66 +27,15 @@ impl Inputs {
                 "operational_evidence.json",
             ])
         {
-            let text = match fs::read_to_string(config.output_dir.join(file)) {
-                Ok(text) => text,
-                Err(error) => {
-                    let status = if error.kind() == std::io::ErrorKind::NotFound {
-                        InputStatus::Missing
-                    } else {
-                        InputStatus::Unreadable
-                    };
-                    inputs.status.insert(
-                        file.to_string(),
-                        InputState::new(status, Some(error.to_string())),
-                    );
-                    continue;
+            let state = match read_document(config, file) {
+                Ok((document, header)) => {
+                    let state = document_state(file, &document, &header, &current);
+                    inputs.documents.insert(file.to_string(), document);
+                    state
                 }
+                Err(state) => state,
             };
-            let document: Value = match serde_json::from_str(&text) {
-                Ok(document) => document,
-                Err(error) => {
-                    inputs.status.insert(
-                        file.to_string(),
-                        InputState::new(InputStatus::Unreadable, Some(error.to_string())),
-                    );
-                    continue;
-                }
-            };
-            let header = match validate_artifact(file, &document) {
-                Ok(header) => header,
-                Err(error) => {
-                    inputs.status.insert(
-                        file.to_string(),
-                        InputState::new(InputStatus::Incompatible, Some(error.to_string())),
-                    );
-                    continue;
-                }
-            };
-            if file == "operational_evidence.json"
-                && let Err(error) =
-                    crate::telemetry::validate_freshness(&document, chrono::Utc::now())
-            {
-                inputs.status.insert(
-                    file.to_string(),
-                    InputState::new(InputStatus::Stale, Some(error.to_string())),
-                );
-                inputs.documents.insert(file.to_string(), document);
-                continue;
-            }
-            let status = match crate::fingerprint::freshness(&document, &current) {
-                crate::fingerprint::Freshness::Stale => InputStatus::Stale,
-                crate::fingerprint::Freshness::Incomplete => InputStatus::Partial,
-                crate::fingerprint::Freshness::Current
-                    if !header.measurement_confidence.is_complete() =>
-                {
-                    InputStatus::Partial
-                }
-                crate::fingerprint::Freshness::Current => InputStatus::Available,
-            };
-            inputs
-                .status
-                .insert(file.to_string(), InputState::new(status, None));
-            inputs.documents.insert(file.to_string(), document);
+            inputs.status.insert(file.to_string(), state);
         }
         inputs
     }
@@ -94,64 +44,17 @@ impl Inputs {
         &self,
         config: &LensConfig,
         policies: &[FailPolicy],
-        baseline: Option<&std::path::Path>,
+        baseline: Option<&Path>,
     ) -> Vec<Value> {
         let mut failures = Vec::new();
         for policy in policies {
-            let files: Vec<&str> = match policy {
-                FailPolicy::Partial => MeasureTool::all_tools()
-                    .iter()
-                    .map(MeasureTool::output_file)
-                    .collect(),
-                FailPolicy::TestFailure => vec!["correctness_review.json"],
-                FailPolicy::PracticeFailure => vec!["rust_practices.json"],
-                FailPolicy::ReliabilityFinding => vec!["reliability_findings.json"],
-                FailPolicy::OperationalFailure => vec!["operational_evidence.json"],
-                FailPolicy::Threshold | FailPolicy::Regression => vec!["map.json"],
-            };
-            for file in files {
+            for file in required_files(policy) {
                 self.require(policy.as_str(), file, &mut failures);
             }
-            if *policy == FailPolicy::TestFailure
-                && let Some(document) = self.documents.get("correctness_review.json")
-                && (document["data"]["summary"]["last_run"]["status"] != "passed"
-                    || document["data"]["summary"]["unknown"].as_u64() != Some(0))
-            {
-                failures.push(json!({"policy": policy.as_str(), "artifact": "correctness_review.json", "status": "partial", "reason": "test execution must be observed and all test statuses known"}));
-            }
             if *policy == FailPolicy::Regression {
-                for file in ["coverage.json", "performance.json"] {
-                    let baseline_file = baseline.map(|path| {
-                        if path.is_dir() {
-                            path.join(file)
-                        } else {
-                            path.parent()
-                                .unwrap_or_else(|| std::path::Path::new("."))
-                                .join(file)
-                        }
-                    });
-                    if self.status[file].status != InputStatus::Missing
-                        || baseline_file.is_some_and(|path| path.exists())
-                    {
-                        self.require(policy.as_str(), file, &mut failures);
-                    }
-                }
+                self.require_regression_inputs(baseline, &mut failures);
             }
-            if *policy == FailPolicy::Regression && baseline.is_none() {
-                failures.push(json!({"policy": policy.as_str(), "artifact": "baseline", "status": "missing", "reason": "regression policy requires --baseline"}));
-            }
-            if matches!(policy, FailPolicy::Threshold | FailPolicy::Regression)
-                && let Some(map) = self.documents.get("map.json")
-                && map["data"]["graph"]["nodes"]
-                    .as_array()
-                    .is_some_and(|nodes| {
-                        nodes
-                            .iter()
-                            .any(|node| !node["data"]["total_score"].is_number())
-                    })
-            {
-                failures.push(json!({"policy": policy.as_str(), "artifact": "map.json", "status": "partial", "reason": "one or more modules have unknown scores"}));
-            }
+            failures.extend(self.semantic_failure(policy));
         }
         if config
             .architecture
@@ -165,8 +68,7 @@ impl Inputs {
                 &mut failures,
             );
         }
-        // Rule IDs are configurable, including custom architecture rules. Require
-        // all finding sources rather than guess a producer from a rule's prefix.
+        // Custom rule IDs need every finding source, not a guessed producer prefix.
         if config
             .policy
             .rules
@@ -185,10 +87,114 @@ impl Inputs {
         failures
     }
 
+    fn require_regression_inputs(&self, baseline: Option<&Path>, failures: &mut Vec<Value>) {
+        for file in ["coverage.json", "performance.json"] {
+            if self.status[file].status != InputStatus::Missing
+                || baseline.is_some_and(|path| super::baseline_artifact(path, file).exists())
+            {
+                self.require("regression", file, failures);
+            }
+        }
+        if baseline.is_none() {
+            failures.push(json!({"policy": "regression", "artifact": "baseline", "status": "missing", "reason": "regression policy requires --baseline"}));
+        }
+    }
+
+    fn semantic_failure(&self, policy: &FailPolicy) -> Option<Value> {
+        let (file, reason) = match policy {
+            FailPolicy::TestFailure
+                if self
+                    .documents
+                    .get("correctness_review.json")
+                    .is_some_and(|document| {
+                        document["data"]["summary"]["last_run"]["status"] != "passed"
+                            || document["data"]["summary"]["unknown"].as_u64() != Some(0)
+                    }) =>
+            {
+                (
+                    "correctness_review.json",
+                    "test execution must be observed and all test statuses known",
+                )
+            }
+            FailPolicy::Threshold | FailPolicy::Regression
+                if self.documents.get("map.json").is_some_and(unknown_scores) =>
+            {
+                ("map.json", "one or more modules have unknown scores")
+            }
+            _ => return None,
+        };
+        Some(
+            json!({"policy": policy.as_str(), "artifact": file, "status": "partial", "reason": reason}),
+        )
+    }
+
     fn require(&self, policy: &str, file: &str, failures: &mut Vec<Value>) {
         let status = &self.status[file];
         if status.status != InputStatus::Available {
             failures.push(json!({"policy": policy, "artifact": file, "status": status.status, "reason": status.reason}));
         }
     }
+}
+
+fn required_files(policy: &FailPolicy) -> Vec<&'static str> {
+    match policy {
+        FailPolicy::Partial => MeasureTool::all_tools()
+            .iter()
+            .map(MeasureTool::output_file)
+            .collect(),
+        FailPolicy::TestFailure => vec!["correctness_review.json"],
+        FailPolicy::PracticeFailure => vec!["rust_practices.json"],
+        FailPolicy::ReliabilityFinding => vec!["reliability_findings.json"],
+        FailPolicy::OperationalFailure => vec!["operational_evidence.json"],
+        FailPolicy::Threshold | FailPolicy::Regression => vec!["map.json"],
+    }
+}
+
+fn unknown_scores(map: &Value) -> bool {
+    map["data"]["graph"]["nodes"]
+        .as_array()
+        .is_some_and(|nodes| {
+            nodes
+                .iter()
+                .any(|node| !node["data"]["total_score"].is_number())
+        })
+}
+
+// Failed reads/validation have no usable document; stale but valid documents
+// remain available for diagnostics, classified separately by document_state.
+fn read_document(config: &LensConfig, file: &str) -> Result<(Value, ArtifactHeader), InputState> {
+    let text = fs::read_to_string(config.output_dir.join(file)).map_err(|error| {
+        let status = if error.kind() == std::io::ErrorKind::NotFound {
+            InputStatus::Missing
+        } else {
+            InputStatus::Unreadable
+        };
+        InputState::new(status, Some(error.to_string()))
+    })?;
+    let document = serde_json::from_str(&text)
+        .map_err(|error| InputState::new(InputStatus::Unreadable, Some(error.to_string())))?;
+    let header = validate_artifact(file, &document)
+        .map_err(|error| InputState::new(InputStatus::Incompatible, Some(error.to_string())))?;
+    Ok((document, header))
+}
+
+fn document_state(
+    file: &str,
+    document: &Value,
+    header: &ArtifactHeader,
+    current: &Value,
+) -> InputState {
+    if file == "operational_evidence.json"
+        && let Err(error) = crate::telemetry::validate_freshness(document, chrono::Utc::now())
+    {
+        return InputState::new(InputStatus::Stale, Some(error.to_string()));
+    }
+    use crate::fingerprint::Freshness;
+    let status = match crate::fingerprint::freshness(document, current) {
+        Freshness::Stale => InputStatus::Stale,
+        Freshness::Incomplete => InputStatus::Partial,
+        Freshness::Current if !header.measurement_confidence.is_complete() => InputStatus::Partial,
+        Freshness::Current => InputStatus::Available,
+    };
+    InputState::new(status, None)
 }

@@ -465,6 +465,15 @@ fn threshold_violations(map: &Value, maximum: f64) -> Vec<Value> {
         .collect()
 }
 
+fn baseline_artifact(baseline: &Path, file: &str) -> PathBuf {
+    let directory = if baseline.is_dir() {
+        baseline
+    } else {
+        baseline.parent().unwrap_or_else(|| Path::new("."))
+    };
+    directory.join(file)
+}
+
 fn coverage_regression(
     config: &LensConfig,
     documents: &BTreeMap<String, Value>,
@@ -474,14 +483,7 @@ fn coverage_regression(
     let Some(current) = documents.get("coverage.json") else {
         return Ok(None);
     };
-    let path = if baseline.is_dir() {
-        baseline.join("coverage.json")
-    } else {
-        baseline
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("coverage.json")
-    };
+    let path = baseline_artifact(baseline, "coverage.json");
     let old = crate::contracts::read_baseline(&path, "coverage.json")?;
     crate::contracts::validate_comparison_evidence("coverage.json", current)?;
     let current_percent = crate::contracts::coverage_percent(current)?;
@@ -506,14 +508,7 @@ fn performance_regressions(
     let Some(current) = documents.get("performance.json") else {
         return Ok(Vec::new());
     };
-    let path = if baseline.is_dir() {
-        baseline.join("performance.json")
-    } else {
-        baseline
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("performance.json")
-    };
+    let path = baseline_artifact(baseline, "performance.json");
     let old = crate::contracts::read_baseline(&path, "performance.json")?;
     crate::contracts::validate_comparison_evidence("performance.json", current)?;
     let current_records = crate::contracts::benchmark_records(&current["data"]["records"])?;

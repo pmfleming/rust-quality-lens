@@ -192,10 +192,11 @@ fn auxiliary_baseline_errors_are_reported_instead_of_skipping_comparisons() -> a
             );
         }
         write_json(&baseline.join(file), &current)?;
+        // A map-file baseline must resolve auxiliary artifacts beside that file.
         assert!(
             run_check(
                 &config,
-                Some(baseline.clone()),
+                Some(baseline.join("map.json")),
                 &[FailPolicy::Regression],
                 600.0,
                 0.0
