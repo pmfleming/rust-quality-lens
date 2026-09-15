@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use walkdir::WalkDir;
 
-use crate::command_runner::{CommandRequest, CommandStatus, run};
+use crate::command_runner::{CommandOutcome, CommandRequest, CommandStatus, run};
 use crate::config::LensConfig;
 use crate::contracts::{BenchmarkRecord, benchmark_index, benchmark_records};
 use crate::util::{normalize_slashes, round2, write_json};
@@ -20,27 +20,7 @@ pub(crate) fn run_benchmarks(
     let baseline_records = baseline.as_deref().map(read_baseline).transpose()?;
     let target = cargo_target_directory(config)?;
     let snapshot = crate::measurement::InputSnapshot::capture(config);
-    // Criterion honors CRITERION_HOME. A fresh directory prevents removed or
-    // skipped benchmarks from being certified by an unrelated successful run.
-    let criterion_root = if no_run {
-        target.join("criterion")
-    } else {
-        let runs = target.join("rqlens-bench-runs");
-        fs::create_dir_all(&runs)?;
-        tempfile::tempdir_in(runs)?.keep()
-    };
-    let command = if no_run {
-        None
-    } else {
-        let arguments = config.verification.cargo_arguments("bench", false, false);
-        let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
-        request.timeout = Duration::from_secs(config.verification.timeout_seconds);
-        request.environment.insert(
-            "CRITERION_HOME".to_string(),
-            criterion_root.to_string_lossy().into_owned(),
-        );
-        Some(run(request))
-    };
+    let (criterion_root, command) = execute_benchmarks(config, &target, no_run)?;
     let (records, mut read_errors) = criterion_records(&criterion_root);
     let comparisons = baseline_records
         .as_deref()
@@ -93,6 +73,29 @@ pub(crate) fn run_benchmarks(
     snapshot.ensure_unchanged(config)?;
     write_json(&output, &document)?;
     Ok(output)
+}
+
+fn execute_benchmarks(
+    config: &LensConfig,
+    target: &Path,
+    no_run: bool,
+) -> Result<(PathBuf, Option<CommandOutcome>)> {
+    if no_run {
+        return Ok((target.join("criterion"), None));
+    }
+    // Criterion honors CRITERION_HOME. A fresh directory prevents removed or
+    // skipped benchmarks from being certified by an unrelated successful run.
+    let runs = target.join("rqlens-bench-runs");
+    fs::create_dir_all(&runs)?;
+    let criterion_root = tempfile::tempdir_in(runs)?.keep();
+    let arguments = config.verification.cargo_arguments("bench", false, false);
+    let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
+    request.timeout = Duration::from_secs(config.verification.timeout_seconds);
+    request.environment.insert(
+        "CRITERION_HOME".to_string(),
+        criterion_root.to_string_lossy().into_owned(),
+    );
+    Ok((criterion_root, Some(run(request))))
 }
 
 fn cargo_target_directory(config: &LensConfig) -> Result<PathBuf> {
