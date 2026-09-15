@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+# Package verification compiles the unpacked crate. Never let that build replace
+# the checkout executable or share its incremental/fingerprint cache.
 version=$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)
-cargo package --locked --allow-dirty
-package_dir="target/package/rust-quality-lens-${version}"
-cargo build --manifest-path "$package_dir/Cargo.toml" --bin rqlens
+cargo package --locked --allow-dirty --target-dir "$scratch/target"
+package_dir="$scratch/target/package/rust-quality-lens-${version}"
+cargo build --locked --manifest-path "$package_dir/Cargo.toml" --bin rqlens --target-dir "$scratch/target"
 
-fixture=$(mktemp -d)
-trap 'rm -rf "$fixture"' EXIT
+fixture="$scratch/fixture"
 mkdir -p "$fixture/src"
 cat >"$fixture/Cargo.toml" <<'TOML'
 [package]
@@ -32,7 +35,7 @@ output_dir = "target/analysis"
 identity_resolution = "disabled"
 TOML
 
-"$package_dir/target/debug/rqlens" measure reliability --config "$fixture/rqlens.toml"
+"$scratch/target/debug/rqlens" measure reliability --config "$fixture/rqlens.toml"
 test -f "$fixture/target/analysis/reliability_findings.json"
 grep -q '"tool": "reliability"' "$fixture/target/analysis/reliability_findings.json"
 echo "Packaged rqlens analyzed an external fixture successfully."
