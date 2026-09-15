@@ -15,15 +15,29 @@ pub(crate) fn run_benchmarks(
     baseline: Option<PathBuf>,
     no_run: bool,
 ) -> Result<PathBuf> {
+    let target = cargo_target_directory(config)?;
+    // Criterion honors CRITERION_HOME. A fresh directory prevents removed or
+    // skipped benchmarks from being certified by an unrelated successful run.
+    let criterion_root = if no_run {
+        target.join("criterion")
+    } else {
+        let runs = target.join("rqlens-bench-runs");
+        fs::create_dir_all(&runs)?;
+        tempfile::tempdir_in(runs)?.keep()
+    };
     let command = if no_run {
         None
     } else {
         let arguments = config.verification.cargo_arguments("bench", false, false);
         let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
         request.timeout = Duration::from_secs(config.verification.timeout_seconds);
+        request.environment.insert(
+            "CRITERION_HOME".to_string(),
+            criterion_root.to_string_lossy().into_owned(),
+        );
         Some(run(request))
     };
-    let records = criterion_records(&config.project_root.join("target/criterion"));
+    let records = criterion_records(&criterion_root);
     let baseline_records = baseline
         .as_deref()
         .map(read_baseline)
@@ -67,6 +81,25 @@ pub(crate) fn run_benchmarks(
     let output = config.output_dir.join("performance.json");
     write_json(&output, &document)?;
     Ok(output)
+}
+
+fn cargo_target_directory(config: &LensConfig) -> Result<PathBuf> {
+    let mut command = std::process::Command::new("cargo");
+    command
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(&config.project_root);
+    if config.verification.locked {
+        command.arg("--locked");
+    }
+    if config.identity_offline {
+        command.arg("--offline");
+    }
+    let output = crate::command_runner::checked_output(&mut command, Duration::from_secs(30))?;
+    let metadata: Value = serde_json::from_str(&output.stdout)?;
+    metadata["target_directory"]
+        .as_str()
+        .map(PathBuf::from)
+        .context("Cargo metadata is missing target_directory")
 }
 
 fn criterion_records(root: &Path) -> Vec<Value> {
@@ -142,8 +175,49 @@ fn comparisons(current: &[Value], baseline: &[Value]) -> Vec<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::comparisons;
+    use super::{comparisons, run_benchmarks};
     use serde_json::json;
+
+    #[test]
+    fn benchmark_runs_ignore_old_estimates_and_honor_cargo_target_directory() -> anyhow::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir(root.path().join("src"))?;
+        std::fs::create_dir(root.path().join(".cargo"))?;
+        std::fs::write(root.path().join("src/lib.rs"), "pub fn value() {}")?;
+        std::fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname = \"bench-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )?;
+        std::fs::write(
+            root.path().join(".cargo/config.toml"),
+            "[build]\ntarget-dir = \"custom-target\"\n",
+        )?;
+        let config_path = root.path().join("rqlens.toml");
+        std::fs::write(&config_path, "source_roots = [\"src\"]\n")?;
+        let config = crate::config::LensConfig::load(Some(config_path))?;
+        let target = super::cargo_target_directory(&config)?;
+        // Cargo environment overrides are respected too; do not mutate them in tests.
+        if std::env::var_os("CARGO_TARGET_DIR").is_none() {
+            assert_eq!(target, root.path().join("custom-target"));
+        }
+        let old = target.join("criterion/removed/new/estimates.json");
+        std::fs::create_dir_all(
+            old.parent()
+                .ok_or_else(|| anyhow::anyhow!("missing parent"))?,
+        )?;
+        std::fs::write(old, r#"{"mean":{"point_estimate":123}}"#)?;
+        let path = run_benchmarks(&config, None, true)?;
+        let reused: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
+        assert_eq!(reused["measurement_confidence"]["complete"], false);
+        assert_eq!(reused["data"]["records"][0]["id"], "removed");
+        run_benchmarks(&config, None, false)?;
+        let fresh: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path)?)?;
+        assert_eq!(fresh["summary"]["command_status"], "passed");
+        assert_eq!(fresh["measurement_confidence"]["complete"], false);
+        assert_eq!(fresh["data"]["records"], json!([]));
+        Ok(())
+    }
 
     #[test]
     fn benchmark_comparisons_report_relative_regressions() {

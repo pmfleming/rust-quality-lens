@@ -24,7 +24,7 @@ pub(crate) fn ingest(config: &LensConfig, input: &Path, max_age_hours: u64) -> R
         .with_timezone(&Utc);
     let now = Utc::now();
     let age_hours = telemetry_age_hours(end, now)?;
-    let stale = age_hours > max_age_hours;
+    let stale = telemetry_expired(end, now, max_age_hours)?;
     let records = signals
         .iter()
         .map(normalize_signal)
@@ -87,6 +87,32 @@ fn telemetry_age_hours(end: DateTime<Utc>, now: DateTime<Utc>) -> Result<u64> {
     Ok(now.signed_duration_since(end).num_hours().max(0) as u64)
 }
 
+fn telemetry_expired(end: DateTime<Utc>, now: DateTime<Utc>, max_age_hours: u64) -> Result<bool> {
+    // Keep the rounded age for display only, never for enforcing a deadline.
+    telemetry_age_hours(end, now)?;
+    let maximum = i64::try_from(max_age_hours)
+        .ok()
+        .and_then(chrono::Duration::try_hours)
+        .context("telemetry max_age_hours is out of range")?;
+    Ok(now.signed_duration_since(end) > maximum)
+}
+
+pub(crate) fn validate_freshness(document: &Value, now: DateTime<Utc>) -> Result<()> {
+    let input = &document["telemetry_input"];
+    let end = input["window"]["end"]
+        .as_str()
+        .context("telemetry evidence is missing window.end")?;
+    let end = DateTime::parse_from_rfc3339(end)?.with_timezone(&Utc);
+    let maximum = input["max_age_hours"]
+        .as_u64()
+        .context("telemetry evidence is missing max_age_hours")?;
+    anyhow::ensure!(
+        !telemetry_expired(end, now, maximum)?,
+        "telemetry observation window exceeds the {maximum} hour age limit"
+    );
+    Ok(())
+}
+
 fn normalize_signal(signal: &Value) -> Result<Value> {
     let id = required_string(signal, "id")?;
     let kind = required_string(signal, "kind")?;
@@ -123,7 +149,7 @@ fn required_string<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_signal, telemetry_age_hours};
+    use super::{normalize_signal, telemetry_age_hours, telemetry_expired, validate_freshness};
     use chrono::{TimeZone, Utc};
     use serde_json::json;
 
@@ -141,6 +167,28 @@ mod tests {
             telemetry_age_hours(now - chrono::Duration::hours(25), now).ok(),
             Some(25)
         );
+    }
+
+    #[test]
+    fn freshness_is_exact_and_rechecked_at_consumption() -> anyhow::Result<()> {
+        let end = chrono::DateTime::parse_from_rfc3339("2026-08-20T12:00:00Z")?.with_timezone(&Utc);
+        let document = json!({"telemetry_input": {
+            "window": {"end": end.to_rfc3339()}, "max_age_hours": 24
+        }});
+        let boundary = end + chrono::Duration::hours(24);
+        assert!(validate_freshness(&document, boundary).is_ok());
+        assert!(
+            validate_freshness(&document, boundary + chrono::Duration::nanoseconds(1)).is_err()
+        );
+        assert!(telemetry_expired(
+            end,
+            boundary + chrono::Duration::minutes(30),
+            24
+        )?);
+        assert!(validate_freshness(&document, end + chrono::Duration::days(30)).is_err());
+        assert!(validate_freshness(&json!({}), end).is_err());
+        assert!(telemetry_expired(end, end, u64::MAX).is_err());
+        Ok(())
     }
 
     #[test]

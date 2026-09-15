@@ -24,7 +24,7 @@ pub(crate) fn project(config: &LensConfig) -> Value {
         "generator_version": env!("CARGO_PKG_VERSION"),
     });
     json!({
-        "algorithm": "fnv1a64-quality-inputs-v2",
+        "algorithm": "fnv1a64-quality-inputs-v3",
         "digest": stable_hash(&inputs.to_string()),
         "file_count": source["file_count"],
         "read_errors": errors,

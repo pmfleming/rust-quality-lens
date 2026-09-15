@@ -3,18 +3,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use crate::config::{LensConfig, SemanticIdentityMode};
 use crate::facts::{DependencyReferenceFact, FileFacts, ResolvedDependencyFact};
 use crate::util::{lock_file, normalize_slashes, write_json};
 
-const CACHE_VERSION: u64 = 8;
+const CACHE_VERSION: u64 = 9;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct IdentityResolutionSummary {
@@ -92,7 +91,10 @@ pub(crate) fn resolve(
     let _cache_lock = lock_file(&cache_path(config))?;
     let analyzer_version = analyzer_version(config);
     let fingerprint = fingerprint(config, facts, analyzer_version.as_deref());
-    if let Some(summary) = restore_cache(config, facts, &fingerprint) {
+    if let Some(summary) = fingerprint
+        .as_deref()
+        .and_then(|key| restore_cache(config, facts, key))
+    {
         return enforce_required(config, summary);
     }
 
@@ -122,7 +124,9 @@ pub(crate) fn resolve(
         started.elapsed(),
         analyzer_version,
     );
-    write_cache(config, facts, &fingerprint, &summary)?;
+    if let Some(fingerprint) = fingerprint {
+        write_cache(config, facts, &fingerprint, &summary)?;
+    }
     enforce_required(config, summary)
 }
 
@@ -346,43 +350,30 @@ fn analyzer_version(config: &LensConfig) -> Option<String> {
     .map(|version| version.trim().to_string())
 }
 
-fn fingerprint(config: &LensConfig, facts: &[FileFacts], analyzer_version: Option<&str>) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    CACHE_VERSION.hash(&mut hasher);
-    analyzer_version.hash(&mut hasher);
-    config.identity_offline.hash(&mut hasher);
-    config.identity_timeout_seconds.hash(&mut hasher);
-    normalize_slashes(&config.rust_analyzer).hash(&mut hasher);
-    for fact in facts {
-        let path = absolute_path(config, &fact.path);
-        normalize_slashes(&path).hash(&mut hasher);
-        if let Ok(metadata) = fs::metadata(path) {
-            metadata.len().hash(&mut hasher);
-            metadata
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                .map(|duration| duration.as_nanos())
-                .hash(&mut hasher);
-        }
+fn fingerprint(
+    config: &LensConfig,
+    facts: &[FileFacts],
+    analyzer_version: Option<&str>,
+) -> Option<String> {
+    // Includes member manifests and configuration, and detects edits even when
+    // file lengths and timestamps are preserved. Never cache unreadable inputs.
+    let source = crate::util::project_input_fingerprint(&config.project_root, &config.source_roots);
+    if source["complete"] != true {
+        return None;
     }
-    for name in ["Cargo.toml", "Cargo.lock"] {
-        hash_file_metadata(&config.project_root.join(name), &mut hasher);
-    }
-    format!("{:016x}", hasher.finish())
-}
-
-fn hash_file_metadata(path: &Path, hasher: &mut impl Hasher) {
-    normalize_slashes(path).hash(hasher);
-    if let Ok(metadata) = fs::metadata(path) {
-        metadata.len().hash(hasher);
-        metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| duration.as_nanos())
-            .hash(hasher);
-    }
+    let identities = facts.iter().map(|fact| {
+        json!({"path": fact.path, "module_id": fact.module_id, "module_key": fact.module_key})
+    }).collect::<Vec<_>>();
+    Some(crate::util::stable_hash(
+        &json!({
+            "cache_version": CACHE_VERSION,
+            "analyzer_version": analyzer_version,
+            "config": config,
+            "source": source["digest"],
+            "identities": identities,
+        })
+        .to_string(),
+    ))
 }
 
 fn cache_path(config: &LensConfig) -> PathBuf {
@@ -991,6 +982,45 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command;
+
+    #[test]
+    fn cache_keys_cover_contents_member_manifests_and_configuration() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        fs::create_dir_all(root.path().join("src"))?;
+        fs::create_dir_all(root.path().join("member"))?;
+        let source = root.path().join("src/lib.rs");
+        fs::write(&source, "pub fn before() {}")?;
+        let manifest = root.path().join("member/Cargo.toml");
+        fs::write(&manifest, "before")?;
+        let config_path = root.path().join("rqlens.toml");
+        fs::write(&config_path, "source_roots = [\"src\"]\n")?;
+        let mut config = LensConfig::load(Some(config_path))?;
+        for path in [&source, &manifest] {
+            let before = super::fingerprint(&config, &[], Some("analyzer-v1"));
+            let modified = fs::metadata(path)?.modified()?;
+            let text = fs::read_to_string(path)?.replace("before", "after_");
+            fs::write(path, text)?;
+            fs::File::options()
+                .write(true)
+                .open(path)?
+                .set_times(fs::FileTimes::new().set_modified(modified))?;
+            assert_ne!(
+                before,
+                super::fingerprint(&config, &[], Some("analyzer-v1"))
+            );
+        }
+        let before = super::fingerprint(&config, &[], Some("analyzer-v1"));
+        config.verification.all_features = true;
+        assert_ne!(
+            before,
+            super::fingerprint(&config, &[], Some("analyzer-v1"))
+        );
+        config
+            .source_roots
+            .push(root.path().join("missing").to_string_lossy().into_owned());
+        assert!(super::fingerprint(&config, &[], Some("analyzer-v1")).is_none());
+        Ok(())
+    }
 
     #[test]
     fn uri_encoding_round_trips_paths() {

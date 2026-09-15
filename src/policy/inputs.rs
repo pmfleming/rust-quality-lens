@@ -58,6 +58,17 @@ impl Inputs {
                 );
                 continue;
             }
+            if file == "operational_evidence.json"
+                && let Err(error) =
+                    crate::telemetry::validate_freshness(&document, chrono::Utc::now())
+            {
+                inputs.status.insert(
+                    file.to_string(),
+                    json!({"status": "stale", "reason": error.to_string()}),
+                );
+                inputs.documents.insert(file.to_string(), document);
+                continue;
+            }
             let status = match crate::fingerprint::freshness(&document, &current) {
                 crate::fingerprint::Freshness::Stale => "stale",
                 crate::fingerprint::Freshness::Incomplete => "partial",

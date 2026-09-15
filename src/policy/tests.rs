@@ -102,6 +102,32 @@ fn malformed_partial_and_stale_test_evidence_cannot_pass() -> anyhow::Result<()>
 }
 
 #[test]
+fn operational_policy_rechecks_observation_age() -> anyhow::Result<()> {
+    let (_root, config) = fixture()?;
+    let mut evidence = document(
+        &config,
+        "operational-evidence",
+        json!({"records": [{"status": "healthy"}]}),
+    );
+    evidence["schema_version"] = json!(1);
+    evidence["telemetry_input"] = json!({
+        "window": {"end": (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339()},
+        "max_age_hours": 24
+    });
+    write_json(
+        &config.output_dir.join("operational_evidence.json"),
+        &evidence,
+    )?;
+    assert!(run_check(&config, None, &[FailPolicy::OperationalFailure], 600.0, 0.0).is_err());
+    let inputs = super::inputs::Inputs::load(&config);
+    assert_eq!(
+        inputs.status["operational_evidence.json"]["status"],
+        "stale"
+    );
+    Ok(())
+}
+
+#[test]
 fn scoring_policies_reject_unknown_scores_and_missing_baselines() -> anyhow::Result<()> {
     let (_root, config) = fixture()?;
     let path = config.output_dir.join("map.json");

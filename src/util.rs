@@ -233,6 +233,19 @@ fn is_quality_input(path: &Path) -> bool {
                     | "rust-toolchain.toml"
                     | "rqlens.toml"
                     | "deny.toml"
+                    | "rustfmt.toml"
+                    | ".rustfmt.toml"
+                    | "clippy.toml"
+                    | ".clippy.toml"
+                    | "LICENSE"
+                    | "LICENSE.md"
+                    | "LICENSE-MIT"
+                    | "LICENSE-APACHE"
+                    | "CONTRIBUTING.md"
+                    | "CODE_OF_CONDUCT.md"
+                    | "SECURITY.md"
+                    | "CHANGELOG.md"
+                    | "CHANGES.md"
             )
         )
         || (path
@@ -344,6 +357,37 @@ mod tests {
                 .as_array()
                 .is_some_and(|errors| !errors.is_empty())
         );
+        Ok(())
+    }
+
+    #[test]
+    fn verification_files_invalidate_fingerprints_on_add_edit_and_delete() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        for name in [
+            "SECURITY.md",
+            "LICENSE",
+            "rustfmt.toml",
+            ".github/CONTRIBUTING.md",
+        ] {
+            let path = root.path().join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let before = project_input_fingerprint(root.path(), &[]);
+            std::fs::write(&path, "before")?;
+            let added = project_input_fingerprint(root.path(), &[]);
+            assert_ne!(before["digest"], added["digest"], "{name}");
+            std::fs::write(&path, "after")?;
+            assert_ne!(
+                added["digest"],
+                project_input_fingerprint(root.path(), &[])["digest"]
+            );
+            std::fs::remove_file(path)?;
+            assert_eq!(
+                before["digest"],
+                project_input_fingerprint(root.path(), &[])["digest"]
+            );
+        }
         Ok(())
     }
 

@@ -178,13 +178,19 @@ This writes `target/analysis/rqlens.sarif` by default for code-scanning tools.
 | Print artifact schemas | `rqlens artifact-schema` |
 
 `review` reports changed hunks and executable changed-line coverage when fresh
-coverage exists. `performance --no-run` parses existing Criterion output but
-marks it partial because execution time cannot be established.
+coverage exists. `performance` isolates each execution using Criterion's
+`CRITERION_HOME` under Cargo's configured target directory (`rqlens-bench-runs/`).
+Benchmarks that override that directory are reported as missing rather than
+reusing old estimates. `performance --no-run` parses existing `target/criterion`
+output (respecting Cargo's target-directory configuration) but marks it partial
+because execution time cannot be established.
 
 Outcome inference from commit messages is always marked `review_required`.
 Validation uses reviewed labels by default and reports ranking associations,
 not defect probabilities. Telemetry retains explicit status, source, window,
 and freshness rather than turning missing or stale observations into a pass.
+Observation age is checked with exact durations both at ingestion and whenever
+operational policy consumes the evidence.
 
 Use `<command> --help` for input contracts and command-specific options.
 
