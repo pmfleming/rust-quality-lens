@@ -31,7 +31,7 @@ pub(crate) fn project_with_toolchain(
         "generator_version": env!("CARGO_PKG_VERSION"),
     });
     json!({
-        "algorithm": "fnv1a64-quality-inputs-v3",
+        "algorithm": "fnv1a64-quality-inputs-v4",
         "digest": stable_hash(&inputs.to_string()),
         "file_count": source["file_count"],
         "read_errors": errors,
@@ -186,6 +186,63 @@ mod tests {
             first_commit["source_digest"],
             second_commit["source_digest"]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn sibling_dependency_and_inherited_workspace_inputs_invalidate_evidence() -> anyhow::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        let app = root.path().join("app");
+        let shared = root.path().join("framework/core");
+        fs::create_dir_all(app.join("src"))?;
+        fs::create_dir_all(shared.join("src"))?;
+        fs::write(
+            app.join("Cargo.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nshared = { path = \"../framework/core\" }\n",
+        )?;
+        let workspace = root.path().join("framework/Cargo.toml");
+        fs::write(
+            &workspace,
+            "[workspace]\nmembers = [\"core\"]\n[workspace.package]\nversion = \"0.1.0\"\n",
+        )?;
+        fs::write(
+            shared.join("Cargo.toml"),
+            "[package]\nname = \"shared\"\nversion.workspace = true\n",
+        )?;
+        fs::write(app.join("src/lib.rs"), "pub fn app() {}")?;
+        let source = shared.join("src/lib.rs");
+        fs::write(&source, "pub fn before() {}")?;
+        let config_path = app.join("rqlens.toml");
+        fs::write(&config_path, "source_roots = [\"src\"]\n")?;
+        let config = LensConfig::load(Some(config_path))?;
+        assert_eq!(
+            config.source_roots.len(),
+            1,
+            "dependency code must not inflate daemon metrics"
+        );
+        let initial = config.source_fingerprint();
+        assert_eq!(initial["complete"], true);
+        let modified = fs::metadata(&source)?.modified()?;
+        fs::write(&source, "pub fn after_() {}")?;
+        fs::File::options()
+            .write(true)
+            .open(&source)?
+            .set_times(fs::FileTimes::new().set_modified(modified))?;
+        let changed = config.source_fingerprint();
+        assert_ne!(initial["digest"], changed["digest"]);
+        fs::write(
+            &workspace,
+            fs::read_to_string(&workspace)?.replace("0.1.0", "0.2.0"),
+        )?;
+        assert_ne!(changed["digest"], config.source_fingerprint()["digest"]);
+        let mut unresolved = config.clone();
+        let metadata = unresolved
+            .cargo_metadata
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("missing fixture metadata"))?;
+        metadata["resolve"] = Value::Null;
+        assert_eq!(unresolved.source_fingerprint()["complete"], false);
         Ok(())
     }
 

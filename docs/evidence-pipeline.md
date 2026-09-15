@@ -14,6 +14,11 @@ extracted facts, and a lazily initialized module graph. Producers and their
 artifact consumers use this same fingerprint rather than independently
 fingerprinting after expensive commands.
 
+Local path dependencies (including sibling repositories) are fingerprinted by
+content without being added to the measured source scope. Their nearest workspace
+manifest, lockfile and toolchain/Cargo configuration are included for inherited
+settings. An unresolved local dependency graph makes the fingerprint partial.
+
 Automatic fingerprint inputs include Rust sources, Cargo manifests and lockfiles,
 Cargo configuration, Rust toolchain files, rustfmt/Clippy configuration, and the
 license/security/contribution/changelog files inspected by verification.

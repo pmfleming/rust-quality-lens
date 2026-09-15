@@ -461,12 +461,52 @@ impl LensConfig {
     }
 
     pub(crate) fn source_fingerprint(&self) -> Value {
-        crate::util::quality_input_fingerprint(
+        // Path dependencies are mutable even when Cargo.lock is unchanged.
+        // Fingerprint their inputs without adding them to the measured scope.
+        let local_roots = self.local_package_roots();
+        let mut roots = self.source_roots.clone();
+        roots.extend(local_roots.iter().cloned());
+        let mut extra_inputs = self.fingerprint_inputs.clone();
+        extra_inputs.extend(local_workspace_inputs(&local_roots));
+        let mut fingerprint = crate::util::quality_input_fingerprint(
             &self.project_root,
-            &self.source_roots,
-            &self.fingerprint_inputs,
+            &roots,
+            &extra_inputs,
             &[self.output_dir.clone(), self.target_directory()],
-        )
+        );
+        if self.has_unresolved_path_dependencies() {
+            fingerprint["complete"] = json!(false);
+            if let Some(errors) = fingerprint["read_errors"].as_array_mut() {
+                errors.push(json!(
+                    "Cargo metadata did not resolve the complete local path dependency graph"
+                ));
+            }
+        }
+        fingerprint
+    }
+
+    fn local_package_roots(&self) -> BTreeSet<String> {
+        self.cargo_metadata
+            .as_ref()
+            .into_iter()
+            .flat_map(|metadata| metadata["packages"].as_array().into_iter().flatten())
+            .filter(|package| package["source"].is_null())
+            .filter_map(|package| Path::new(package["manifest_path"].as_str()?).parent())
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn has_unresolved_path_dependencies(&self) -> bool {
+        let Some(metadata) = &self.cargo_metadata else {
+            return false;
+        };
+        metadata["resolve"].is_null()
+            && metadata["packages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|package| package["dependencies"].as_array().into_iter().flatten())
+                .any(|dependency| dependency["path"].is_string())
     }
 
     pub(crate) fn target_directory(&self) -> PathBuf {
@@ -596,6 +636,37 @@ impl LensConfig {
             policy,
         })
     }
+}
+
+fn local_workspace_inputs(roots: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut inputs = BTreeSet::new();
+    for root in roots {
+        for directory in Path::new(root).ancestors() {
+            let manifest = directory.join("Cargo.toml");
+            let workspace = fs::read_to_string(&manifest)
+                .ok()
+                .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+                .is_some_and(|value| value.get("workspace").is_some());
+            if !workspace {
+                continue;
+            }
+            for name in [
+                "Cargo.toml",
+                "Cargo.lock",
+                "rust-toolchain",
+                "rust-toolchain.toml",
+                ".cargo/config",
+                ".cargo/config.toml",
+            ] {
+                let path = directory.join(name);
+                if path.is_file() {
+                    inputs.insert(path.to_string_lossy().into_owned());
+                }
+            }
+            break;
+        }
+    }
+    inputs
 }
 
 fn discover_rust_source_roots(project_root: &Path, metadata: Option<&Value>) -> Vec<String> {
