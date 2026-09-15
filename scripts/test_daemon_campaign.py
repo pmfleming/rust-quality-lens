@@ -49,9 +49,35 @@ class CampaignTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "source changed"):
                 campaign.compare(Path("before"), Path("after"))
 
+    def test_changed_policy_cannot_be_compared(self):
+        with tempfile.TemporaryDirectory() as directory:
+            before, after = [Path(directory) / name for name in ["before", "after"]]
+            for root, enabled in [(before, "true"), (after, "false")]:
+                root.mkdir()
+                (root / "rqlens.toml").write_text(f'[verification]\naudit = {enabled}\n')
+            with patch.object(campaign, "summarize", return_value={"run": {"source_stable": True}}):
+                with self.assertRaisesRegex(RuntimeError, "configuration differs"):
+                    campaign.compare(before, after)
+
+    def test_missing_evidence_and_verification_make_comparison_provisional(self):
+        with tempfile.TemporaryDirectory() as directory:
+            roots = [Path(directory) / name for name in ["before", "after"]]
+            for root in roots:
+                (root / "analysis").mkdir(parents=True)
+                (root / "rqlens.toml").write_text(f'output_dir = "{root}/analysis"\n')
+                (root / "run.json").write_text(campaign.json.dumps({
+                    "root": "/project", "source_stable": True, "binary_sha256": "same", "commands": [],
+                }))
+            result = campaign.compare(*roots)
+            self.assertEqual(result["comparison_status"], "provisional")
+            self.assertIsNone(result["deltas"]["production_panic_findings_in_src"])
+            self.assertTrue(any("nonconformant" in warning for warning in result["warnings"]))
+
     def test_test_and_vendor_code_are_not_production_functions(self):
         root = Path("/project")
-        for path, name in [("src/tests.rs", "test"), ("src/a.rs", "a::tests::helper"), ("vendor/a/src/lib.rs", "run")]:
+        for path, name in [("src/tests.rs", "test"), ("src/a.rs", "a::tests::helper"),
+                           ("src/background_tests.rs", "case"), ("src/a.rs", "a::disk_tests::helper"),
+                           ("vendor/a/src/lib.rs", "run")]:
             self.assertFalse(campaign.production_function(root, {"path": str(root / path), "name": name}))
         self.assertTrue(campaign.production_function(root, {"path": "/project/src/domain.rs", "name": "domain::run"}))
 

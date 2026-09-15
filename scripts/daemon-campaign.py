@@ -105,8 +105,8 @@ def production_function(root, row):
     if not own_source(root, row):
         return False
     path = relative(root, row.get("path", ""))
-    return not ("tests" in Path(path).parts or Path(path).name == "tests.rs"
-                or "tests" in row.get("name", "").split("::"))
+    parts = [*Path(path).parts[:-1], Path(path).stem, *row.get("name", "").split("::")]
+    return not any(part == "tests" or part.endswith("_tests") for part in parts)
 
 
 def distribution(rows, field):
@@ -136,9 +136,14 @@ def summarize(destination):
     own_clones = [row for row in clones or [] if any(own_source(root, item) for item in row.get("instances", []))]
     escapes = documents.get("rust_escape_hatches.json", {}).get("records")
     practices = documents.get("rust_practices.json", {}).get("data", {})
+    reliability = documents.get("reliability_findings.json", {}).get("records")
+    escape_counts = Counter()
+    for row in escapes or []:
+        if own_source(root, row):
+            escape_counts.update(row.get("counts", {}))
     summary = {
-        "schema_version": 1, "run": run,
-        "scope": "src/ functions excluding tests modules/files by naming convention; src LOC includes inline tests; dependencies remain in raw evidence",
+        "schema_version": 2, "run": run,
+        "scope": "src/ functions excluding tests and *_tests modules/files by naming convention, NOT cfg-aware production classification; src LOC includes tests; dependencies remain in raw evidence",
         "artifact_status": status,
         "src_nonblank_lines": None if hotspots is None else sum(row.get("sloc", 0) for row in modules),
         "production_functions": None if hotspots is None else len(functions),
@@ -148,6 +153,10 @@ def summarize(destination):
         "topology": topology,
         "clone_groups_touching_src": None if clones is None else dict(Counter(row.get("engine") for row in own_clones)),
         "escape_records_in_src": None if escapes is None else sum(own_source(root, row) for row in escapes),
+        "escape_counts_in_src": None if escapes is None else dict(escape_counts),
+        "production_panic_findings_in_src": None if reliability is None else sum(
+            own_source(root, row) and row.get("kind") == "panic-path" and row.get("scope") == "production"
+            for row in reliability),
         "verification": practices.get("summary"),
         "compiler_dead_code_diagnostics": [diagnostic for check in practices.get("checks", []) for diagnostic in check.get("diagnostics", []) if diagnostic.get("rule_id") == "dead_code"],
         "dead_code_scope": "compiler diagnostics only; no whole-program dead-code claim",
@@ -162,23 +171,34 @@ def compare(before, after):
     for label, summary in [("before", old), ("after", new)]:
         if summary["run"].get("source_stable") is not True:
             raise RuntimeError(f"{label}: source changed during capture; recapture before comparing")
+    policies = []
+    for directory in [before, after]:
+        policy = tomllib.loads((directory / "rqlens.toml").read_text())
+        policy.pop("output_dir", None)
+        policies.append(policy)
+    if policies[0] != policies[1]:
+        raise RuntimeError("Measurement configuration differs; recapture with identical scope and policy")
     same_lens = old["run"]["binary_sha256"] == new["run"]["binary_sha256"]
-    required = ["hotspots.json", "clones.json", "rust_escape_hatches.json", "locality_metrics.json", "leverage_metrics.json"]
+    required = ["hotspots.json", "clones.json", "rust_escape_hatches.json", "locality_metrics.json", "leverage_metrics.json", "reliability_findings.json"]
     warnings = [f"{label}: {name} is missing or partial" for label, summary in [("before", old), ("after", new)]
                 for name in required if (summary["artifact_status"].get(name, {}).get("confidence") or {}).get("complete") is not True]
     warnings += [f"{label}: command did not succeed: {row['command']}"
                  for label, summary in [("before", old), ("after", new)]
                  for row in summary["run"]["commands"] if row.get("exit_code") != 0]
+    warnings += [f"{label}: verification is missing or nonconformant"
+                 for label, summary in [("before", old), ("after", new)]
+                 if (summary.get("verification") or {}).get("conformant") is not True]
     result = {"same_lens_binary": same_lens, "comparison_status": "provisional" if warnings else "observed",
               "warnings": warnings, "before": str(before), "after": str(after), "deltas": {},
               "verification": {"before": old["verification"], "after": new["verification"]}}
     if not same_lens:
         raise RuntimeError("Remeasure both source revisions with the same lens binary before comparing")
-    for metric in ["src_nonblank_lines", "production_functions", "escape_records_in_src"]:
+    for metric in ["src_nonblank_lines", "production_functions", "escape_records_in_src", "production_panic_findings_in_src"]:
         a, b = old[metric], new[metric]
         result["deltas"][metric] = None if a is None or b is None else b - a
     result["complexity"] = {key: {"before": old["complexity"][key], "after": new["complexity"][key]} for key in old["complexity"]}
     result["clone_groups_touching_src"] = {"before": old["clone_groups_touching_src"], "after": new["clone_groups_touching_src"]}
+    result["escape_counts_in_src"] = {"before": old["escape_counts_in_src"], "after": new["escape_counts_in_src"]}
     result["topology_changes"] = {}
     for metric in old["topology"]:
         a, b = old["topology"][metric], new["topology"][metric]
