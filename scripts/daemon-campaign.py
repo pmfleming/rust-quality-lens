@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -58,11 +59,25 @@ def command(args, cwd, log, timeout=1800):
             return {"command": args, "exit_code": None, "status": "timed-out", "log": str(log)}
 
 
+def build_binary():
+    output = subprocess.check_output(
+        ["cargo", "build", "--locked", "--bin", "rqlens", "--message-format=json-render-diagnostics"],
+        cwd=LENS, text=True,
+    )
+    artifacts = [json.loads(line) for line in output.splitlines() if line.startswith("{")]
+    return Path(next(row["executable"] for row in reversed(artifacts)
+                     if row.get("reason") == "compiler-artifact" and row.get("executable")
+                     and row.get("target", {}).get("name") == "rqlens"))
+
+
 def collect(root, destination, binary):
     before = revision(root)
     if before["dirty"]:
         raise RuntimeError(f"{root} is dirty; checkpoint source before capturing evidence")
     destination.mkdir(parents=True, exist_ok=False)
+    frozen = destination / "rqlens"
+    shutil.copy2(binary, frozen)
+    binary = frozen
     text = (root / "rqlens.toml").read_text()
     text = override(text, "", "project_root", str(root))
     text = override(text, "", "output_dir", str(destination / "analysis"))
@@ -77,6 +92,7 @@ def collect(root, destination, binary):
     after = revision(root)
     provenance = {
         "project": root.name, "root": str(root), "before": before, "after": after,
+        "repository_id": git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"),
         "lens": revision(LENS), "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
         "commands": results, "source_stable": before == after,
     }
@@ -171,10 +187,16 @@ def compare(before, after):
     for label, summary in [("before", old), ("after", new)]:
         if summary["run"].get("source_stable") is not True:
             raise RuntimeError(f"{label}: source changed during capture; recapture before comparing")
+    relocated = old["run"].get("root") != new["run"].get("root")
+    if relocated and (not old["run"].get("repository_id") or
+                      old["run"]["repository_id"] != new["run"].get("repository_id")):
+        raise RuntimeError("Relocated captures must belong to the same Git repository")
     policies = []
     for directory in [before, after]:
         policy = tomllib.loads((directory / "rqlens.toml").read_text())
         policy.pop("output_dir", None)
+        if relocated:
+            policy.pop("project_root", None)
         policies.append(policy)
     if policies[0] != policies[1]:
         raise RuntimeError("Measurement configuration differs; recapture with identical scope and policy")
@@ -182,6 +204,13 @@ def compare(before, after):
     required = ["hotspots.json", "clones.json", "rust_escape_hatches.json", "locality_metrics.json", "leverage_metrics.json", "reliability_findings.json"]
     warnings = [f"{label}: {name} is missing or partial" for label, summary in [("before", old), ("after", new)]
                 for name in required if (summary["artifact_status"].get(name, {}).get("confidence") or {}).get("complete") is not True]
+    for label, summary in [("before", old), ("after", new)]:
+        fingerprints = [row.get("fingerprint") or {} for row in summary["artifact_status"].values()]
+        if not fingerprints or any(fp.get("algorithm") != "fnv1a64-quality-inputs-v4" or
+                                   fp.get("complete") is not True for fp in fingerprints):
+            warnings.append(f"{label}: complete path-dependency-aware fingerprints are unavailable")
+        if len({json.dumps(fp, sort_keys=True) for fp in fingerprints}) > 1:
+            raise RuntimeError(f"{label}: artifacts describe different input snapshots; recapture")
     warnings += [f"{label}: command did not succeed: {row['command']}"
                  for label, summary in [("before", old), ("after", new)]
                  for row in summary["run"]["commands"] if row.get("exit_code") != 0]
@@ -213,7 +242,7 @@ def main():
     capture = sub.add_parser("capture")
     capture.add_argument("project", type=Path)
     capture.add_argument("destination", type=Path)
-    capture.add_argument("--binary", type=Path, default=LENS / "target/debug/rqlens")
+    capture.add_argument("--binary", type=Path, help="Use an explicit executable instead of building this checkout")
     capture.add_argument("--inside-shell", action="store_true", help=argparse.SUPPRESS)
     report = sub.add_parser("summarize")
     report.add_argument("destination", type=Path)
@@ -222,7 +251,8 @@ def main():
     delta.add_argument("after", type=Path)
     args = parser.parse_args()
     if args.action == "capture":
-        root, destination, binary = args.project.resolve(), args.destination.resolve(), args.binary.resolve()
+        root, destination = args.project.resolve(), args.destination.resolve()
+        binary = args.binary.resolve() if args.binary else build_binary()
         if args.inside_shell:
             return collect(root, destination, binary)
         return subprocess.call(["nix", "develop", "--offline", str(root), "--command", sys.executable,

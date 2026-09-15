@@ -33,6 +33,32 @@ class CampaignTests(unittest.TestCase):
         self.assertIsNone(campaign.distribution([{"score": None}], "score"))
         self.assertEqual(campaign.distribution([{"score": 0}], "score")["max"], 0)
 
+    def test_default_build_uses_cargos_reported_executable(self):
+        message = campaign.json.dumps({"reason": "compiler-artifact", "target": {"name": "rqlens"},
+                                      "executable": "/custom-target/debug/rqlens"})
+        with patch.object(campaign.subprocess, "check_output", return_value=message) as build:
+            self.assertEqual(campaign.build_binary(), Path("/custom-target/debug/rqlens"))
+            self.assertIn("--locked", build.call_args.args[0])
+
+    def test_capture_freezes_binary_before_commands_can_replace_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "rqlens.toml").write_text('project_root = "."\n')
+            binary = root / "built-rqlens"
+            binary.write_bytes(b"original executable")
+            destination = root / "capture"
+            def run(args, cwd, log):
+                self.assertEqual(args[0], str(destination / "rqlens"))
+                binary.write_bytes(b"replaced executable")
+                return {"command": args, "exit_code": 0}
+            with patch.object(campaign, "revision", return_value={"head": "fixed", "dirty": False}), \
+                 patch.object(campaign, "git", return_value="/repository/.git"), \
+                 patch.object(campaign, "command", side_effect=run):
+                campaign.collect(root, destination, binary)
+            provenance = campaign.json.loads((destination / "run.json").read_text())
+            self.assertEqual((destination / "rqlens").read_bytes(), b"original executable")
+            self.assertEqual(provenance["binary_sha256"], campaign.hashlib.sha256(b"original executable").hexdigest())
+
     def test_profile_output_is_isolated_from_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -64,9 +90,10 @@ class CampaignTests(unittest.TestCase):
             roots = [Path(directory) / name for name in ["before", "after"]]
             for root in roots:
                 (root / "analysis").mkdir(parents=True)
-                (root / "rqlens.toml").write_text(f'output_dir = "{root}/analysis"\n')
+                (root / "rqlens.toml").write_text(f'project_root = "{root}"\noutput_dir = "{root}/analysis"\n')
                 (root / "run.json").write_text(campaign.json.dumps({
-                    "root": "/project", "source_stable": True, "binary_sha256": "same", "commands": [],
+                    "root": str(root), "repository_id": "/shared/.git",
+                    "source_stable": True, "binary_sha256": "same", "commands": [],
                 }))
             result = campaign.compare(*roots)
             self.assertEqual(result["comparison_status"], "provisional")
