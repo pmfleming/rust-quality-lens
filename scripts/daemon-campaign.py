@@ -8,6 +8,7 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -46,9 +47,12 @@ def override(text, section, key, value):
 
 
 def command(args, cwd, log, timeout=1800):
+    profiles = log.parent / "profiles"
+    profiles.mkdir(exist_ok=True)
+    env = {**os.environ, "LLVM_PROFILE_FILE": str(profiles.resolve() / "%m_%p.profraw")}
     with log.open("w") as output:
         try:
-            result = subprocess.run(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
+            result = subprocess.run(args, cwd=cwd, env=env, stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
             return {"command": args, "exit_code": result.returncode, "log": str(log)}
         except subprocess.TimeoutExpired:
             return {"command": args, "exit_code": None, "status": "timed-out", "log": str(log)}
@@ -155,10 +159,16 @@ def summarize(destination):
 def compare(before, after):
     old = summarize(before)
     new = summarize(after)
+    for label, summary in [("before", old), ("after", new)]:
+        if summary["run"].get("source_stable") is not True:
+            raise RuntimeError(f"{label}: source changed during capture; recapture before comparing")
     same_lens = old["run"]["binary_sha256"] == new["run"]["binary_sha256"]
     required = ["hotspots.json", "clones.json", "rust_escape_hatches.json", "locality_metrics.json", "leverage_metrics.json"]
     warnings = [f"{label}: {name} is missing or partial" for label, summary in [("before", old), ("after", new)]
                 for name in required if (summary["artifact_status"].get(name, {}).get("confidence") or {}).get("complete") is not True]
+    warnings += [f"{label}: command did not succeed: {row['command']}"
+                 for label, summary in [("before", old), ("after", new)]
+                 for row in summary["run"]["commands"] if row.get("exit_code") != 0]
     result = {"same_lens_binary": same_lens, "comparison_status": "provisional" if warnings else "observed",
               "warnings": warnings, "before": str(before), "after": str(after), "deltas": {},
               "verification": {"before": old["verification"], "after": new["verification"]}}
