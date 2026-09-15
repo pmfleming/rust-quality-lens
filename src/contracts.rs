@@ -6,6 +6,10 @@ use crate::facts::RunContext;
 use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
 use crate::tool::MeasureTool;
 
+mod baseline;
+pub(crate) use baseline::{
+    benchmark_estimates, coverage_percent, read_baseline, validate_comparison_evidence,
+};
 mod validation;
 pub(crate) use validation::validate_artifact;
 

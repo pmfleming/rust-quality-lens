@@ -127,7 +127,11 @@ rqlens check \
 ```
 
 Regression tolerance is measured in risk-score points, line-coverage percentage
-points, or benchmark percentage increase, depending on the evidence.
+points, or benchmark percentage increase, depending on the evidence. Baseline
+artifacts must have compatible schemas and complete evidence. When current
+coverage or benchmark evidence exists, its baseline counterpart is required;
+unmatched benchmark IDs are reported as incomparable and fail regression policy.
+Historical fingerprints need not match the current source.
 
 Stable per-rule limits prevent finding-count regressions:
 

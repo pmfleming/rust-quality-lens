@@ -83,6 +83,9 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<()> {
         },
         "missing or invalid {key} payload"
     );
+    if file == "coverage.json" && confidence.complete {
+        super::coverage_percent(value)?;
+    }
     validate_policy_payload(file, payload)
 }
 
@@ -156,7 +159,10 @@ fn validate_policy_payload(file: &str, payload: &Value) -> Result<()> {
                 );
             }
         }
-        "performance.json" | "repository_outcomes.json" => {
+        "performance.json" => {
+            super::benchmark_estimates(array(&payload["records"])?)?;
+        }
+        "repository_outcomes.json" => {
             array(&payload["records"])?;
         }
         _ => {}

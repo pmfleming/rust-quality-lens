@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -33,7 +34,7 @@ pub(crate) fn run_check(
     max_regression: f64,
 ) -> Result<()> {
     let inputs = inputs::Inputs::load(config);
-    let input_failures = inputs.failures(config, fail_on, baseline.as_deref());
+    let mut input_failures = inputs.failures(config, fail_on, baseline.as_deref());
     let stale_artifacts = inputs
         .status
         .iter()
@@ -81,16 +82,28 @@ pub(crate) fn run_check(
         .map(|map| threshold_violations(map, max_total_score))
         .unwrap_or_default();
     let regression = if inputs.status["map.json"]["status"] == "available" {
-        regression_evidence(
+        match regression_evidence(
             config,
             documents,
             current_map,
             baseline.as_deref(),
             max_regression,
-        )?
+        ) {
+            Ok(evidence) => evidence,
+            Err(error) => {
+                input_failures.push(json!({"policy": "regression", "artifact": "baseline", "status": "incompatible", "reason": format!("{error:#}")}));
+                RegressionEvidence::default()
+            }
+        }
     } else {
         RegressionEvidence::default()
     };
+
+    if fail_on.contains(&FailPolicy::Regression) {
+        input_failures.extend(regression.evidence_deltas.iter()
+            .filter(|delta| delta["status"] == "incomparable")
+            .map(|delta| json!({"policy": "regression", "artifact": "performance.json", "status": "incomparable", "reason": delta["reason"], "benchmark": delta["benchmark"]})));
+    }
 
     let policy_evidence = PolicyEvidence {
         partial_artifacts: &partial_artifacts,
@@ -468,18 +481,10 @@ fn coverage_regression(
             .unwrap_or_else(|| Path::new("."))
             .join("coverage.json")
     };
-    if !path.exists() {
-        return Ok(None);
-    }
-    let old: Value = serde_json::from_str(
-        &fs::read_to_string(&path)
-            .with_context(|| format!("reading baseline coverage {}", path.display()))?,
-    )?;
-    let current_percent = artifact_payload(current)["summary"]["lines"]["percent"].as_f64();
-    let baseline_percent = artifact_payload(&old)["summary"]["lines"]["percent"].as_f64();
-    let Some((current_percent, baseline_percent)) = current_percent.zip(baseline_percent) else {
-        return Ok(None);
-    };
+    let old = crate::contracts::read_baseline(&path, "coverage.json")?;
+    crate::contracts::validate_comparison_evidence("coverage.json", current)?;
+    let current_percent = crate::contracts::coverage_percent(current)?;
+    let baseline_percent = crate::contracts::coverage_percent(&old)?;
     let decrease = crate::util::round2(baseline_percent - current_percent);
     Ok(Some(json!({
         "metric": "line_coverage_percent",
@@ -508,65 +513,41 @@ fn performance_regressions(
             .unwrap_or_else(|| Path::new("."))
             .join("performance.json")
     };
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let old: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
+    let old = crate::contracts::read_baseline(&path, "performance.json")?;
+    crate::contracts::validate_comparison_evidence("performance.json", current)?;
+    let current_records = current["data"]["records"]
+        .as_array()
+        .context("missing current benchmark records")?;
     let old_records = old["data"]["records"]
         .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|row| {
-            Some((
-                row["id"].as_str()?.to_string(),
-                row["estimate_nanoseconds"].as_f64()?,
-            ))
-        })
-        .collect::<BTreeMap<_, _>>();
-    Ok(current["data"]["records"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|row| {
-            let id = row["id"].as_str()?;
-            let current = row["estimate_nanoseconds"].as_f64()?;
-            let baseline = *old_records.get(id)?;
-            let increase = if baseline == 0.0 { 0.0 } else { crate::util::round2((current - baseline) / baseline * 100.0) };
-            Some(json!({
-                "metric": "benchmark_estimate_percent",
-                "benchmark": id,
-                "baseline": baseline,
-                "current": current,
-                "increase": increase,
-                "maximum_increase": maximum,
-                "status": if increase > maximum { "regressed" } else if increase < 0.0 { "improved" } else { "unchanged" },
-            }))
-        })
-        .collect())
+        .context("missing baseline benchmark records")?;
+    Ok(
+        crate::performance::comparisons(current_records, old_records)?
+            .into_iter()
+            .map(|comparison| {
+                let increase = comparison["delta_percent"].as_f64();
+                json!({
+                    "metric": "benchmark_estimate_percent",
+                    "benchmark": comparison["id"],
+                    "baseline": comparison["baseline_nanoseconds"],
+                    "current": comparison["current_nanoseconds"],
+                    "increase": increase,
+                    "maximum_increase": maximum,
+                    "reason": comparison["reason"],
+                    "status": match increase {
+                        Some(value) if value > maximum => "regressed",
+                        Some(value) if value < 0.0 => "improved",
+                        Some(_) => "unchanged",
+                        None => "incomparable",
+                    },
+                })
+            })
+            .collect(),
+    )
 }
 
 fn read_baseline_map(path: &Path, current_model_version: Option<u64>) -> Result<Value> {
-    let path = if path.is_dir() {
-        path.join("map.json")
-    } else {
-        path.to_path_buf()
-    };
-    let value: Value = serde_json::from_str(
-        &fs::read_to_string(&path)
-            .with_context(|| format!("reading baseline {}", path.display()))?,
-    )?;
-    crate::contracts::validate_artifact("map.json", &value)
-        .with_context(|| format!("invalid baseline {}", path.display()))?;
-    anyhow::ensure!(
-        value["measurement_confidence"]["complete"] == true
-            && value["input_fingerprint"]["complete"] == true
-            && value["data"]["graph"]["nodes"]
-                .as_array()
-                .is_some_and(|nodes| nodes
-                    .iter()
-                    .all(|node| node["data"]["total_score"].is_number())),
-        "baseline map contains incomplete evidence or unknown scores"
-    );
+    let value = crate::contracts::read_baseline(path, "map.json")?;
     let baseline_model_version = model_version(&value);
     if baseline_model_version != current_model_version {
         bail!(
