@@ -21,6 +21,35 @@ fn document(config: &LensConfig, tool: &str, data: Value) -> Value {
     })
 }
 
+fn read_report(config: &LensConfig) -> anyhow::Result<Value> {
+    Ok(serde_json::from_str(&fs::read_to_string(
+        config.output_dir.join("policy_report.json"),
+    )?)?)
+}
+
+fn check_regression(config: &LensConfig, baseline: &Path) -> anyhow::Result<()> {
+    run_check(
+        config,
+        Some(baseline.to_path_buf()),
+        &[FailPolicy::Regression],
+        600.0,
+        0.0,
+    )
+}
+
+fn regression_baseline(config: &LensConfig) -> anyhow::Result<PathBuf> {
+    let baseline = config.project_root.join("baseline");
+    fs::create_dir_all(&baseline)?;
+    let map = document(
+        config,
+        "map",
+        json!({"graph": {"nodes": [{"data": {"id": "lib", "total_score": 10}}]}}),
+    );
+    write_json(&config.output_dir.join("map.json"), &map)?;
+    write_json(&baseline.join("map.json"), &map)?;
+    Ok(baseline)
+}
+
 #[test]
 fn enabled_policies_require_evidence_and_write_failure_reports() -> anyhow::Result<()> {
     let (_root, config) = fixture()?;
@@ -33,9 +62,7 @@ fn enabled_policies_require_evidence_and_write_failure_reports() -> anyhow::Resu
         FailPolicy::Regression,
     ] {
         assert!(run_check(&config, None, std::slice::from_ref(&policy), 600.0, 0.0).is_err());
-        let report: Value = serde_json::from_str(&fs::read_to_string(
-            config.output_dir.join("policy_report.json"),
-        )?)?;
+        let report = read_report(&config)?;
         assert_eq!(report["passed"], false);
         assert!(
             report["failed_policies"]
@@ -91,9 +118,7 @@ fn malformed_partial_and_stale_test_evidence_cannot_pass() -> anyhow::Result<()>
     }
     fs::write(&path, "{broken")?;
     assert!(run_check(&config, None, &[FailPolicy::TestFailure], 600.0, 0.0).is_err());
-    let report: Value = serde_json::from_str(&fs::read_to_string(
-        config.output_dir.join("policy_report.json"),
-    )?)?;
+    let report = read_report(&config)?;
     assert_eq!(
         report["artifact_status"]["correctness_review.json"]["status"],
         "unreadable"
@@ -130,15 +155,7 @@ fn operational_policy_rechecks_observation_age() -> anyhow::Result<()> {
 #[test]
 fn auxiliary_baseline_errors_are_reported_instead_of_skipping_comparisons() -> anyhow::Result<()> {
     let (_root, config) = fixture()?;
-    let baseline = config.project_root.join("baseline");
-    fs::create_dir_all(&baseline)?;
-    let map = document(
-        &config,
-        "map",
-        json!({"graph": {"nodes": [{"data": {"id": "lib", "total_score": 10}}]}}),
-    );
-    write_json(&config.output_dir.join("map.json"), &map)?;
-    write_json(&baseline.join("map.json"), &map)?;
+    let baseline = regression_baseline(&config)?;
     for (file, tool, data) in [
         (
             "coverage.json",
@@ -168,19 +185,8 @@ fn auxiliary_baseline_errors_are_reported_instead_of_skipping_comparisons() -> a
             if let Some(invalid) = invalid {
                 write_json(&baseline.join(file), &invalid)?;
             }
-            assert!(
-                run_check(
-                    &config,
-                    Some(baseline.clone()),
-                    &[FailPolicy::Regression],
-                    600.0,
-                    0.0
-                )
-                .is_err()
-            );
-            let report: Value = serde_json::from_str(&fs::read_to_string(
-                config.output_dir.join("policy_report.json"),
-            )?)?;
+            assert!(check_regression(&config, &baseline).is_err());
+            let report = read_report(&config)?;
             assert_eq!(report["passed"], false);
             assert!(
                 report["input_failures"]
@@ -193,35 +199,27 @@ fn auxiliary_baseline_errors_are_reported_instead_of_skipping_comparisons() -> a
         }
         write_json(&baseline.join(file), &current)?;
         // A map-file baseline must resolve auxiliary artifacts beside that file.
-        assert!(
-            run_check(
-                &config,
-                Some(baseline.join("map.json")),
-                &[FailPolicy::Regression],
-                600.0,
-                0.0
-            )
-            .is_ok()
-        );
+        assert!(check_regression(&config, &baseline.join("map.json")).is_ok());
     }
-    // A benchmark disappearing from either side cannot silently become an empty comparison.
+    Ok(())
+}
+
+#[test]
+fn disappearing_benchmarks_are_incomparable_not_empty_comparisons() -> anyhow::Result<()> {
+    let (_root, config) = fixture()?;
+    let baseline = regression_baseline(&config)?;
+    let mut current = document(
+        &config,
+        "performance",
+        json!({"records": [{"id": "parse", "estimate_nanoseconds": 100.0}]}),
+    );
+    current["schema_version"] = json!(1);
+    write_json(&baseline.join("performance.json"), &current)?;
     let performance = config.output_dir.join("performance.json");
-    let mut current: Value = serde_json::from_str(&fs::read_to_string(&performance)?)?;
     current["data"]["records"][0]["id"] = json!("new-benchmark");
     write_json(&performance, &current)?;
-    assert!(
-        run_check(
-            &config,
-            Some(baseline),
-            &[FailPolicy::Regression],
-            600.0,
-            0.0
-        )
-        .is_err()
-    );
-    let report: Value = serde_json::from_str(&fs::read_to_string(
-        config.output_dir.join("policy_report.json"),
-    )?)?;
+    assert!(check_regression(&config, &baseline).is_err());
+    let report = read_report(&config)?;
     assert_eq!(
         report["evidence_deltas"].as_array().map(|rows| rows
             .iter()
