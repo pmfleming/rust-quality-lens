@@ -997,13 +997,8 @@ mod tests {
         let mut config = LensConfig::load(Some(config_path))?;
         for path in [&source, &manifest] {
             let before = super::fingerprint(&config, &[], Some("analyzer-v1"));
-            let modified = fs::metadata(path)?.modified()?;
             let text = fs::read_to_string(path)?.replace("before", "after_");
-            fs::write(path, text)?;
-            fs::File::options()
-                .write(true)
-                .open(path)?
-                .set_times(fs::FileTimes::new().set_modified(modified))?;
+            crate::util::write_preserving_mtime(path, text)?;
             assert_ne!(
                 before,
                 super::fingerprint(&config, &[], Some("analyzer-v1"))

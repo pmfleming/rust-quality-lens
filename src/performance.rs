@@ -180,24 +180,40 @@ mod tests {
     use super::{comparisons, run_benchmarks};
     use serde_json::json;
 
+    fn benchmark_project(
+        manifest: &str,
+        extra_files: &[(&str, &str)],
+    ) -> anyhow::Result<(tempfile::TempDir, crate::config::LensConfig)> {
+        let root = tempfile::tempdir()?;
+        for (name, contents) in [
+            ("src/lib.rs", "pub fn value() {}"),
+            ("Cargo.toml", manifest),
+            ("rqlens.toml", "source_roots = [\"src\"]\n"),
+        ]
+        .into_iter()
+        .chain(extra_files.iter().copied())
+        {
+            let path = root.path().join(name);
+            std::fs::create_dir_all(
+                path.parent()
+                    .ok_or_else(|| anyhow::anyhow!("missing fixture parent"))?,
+            )?;
+            std::fs::write(path, contents)?;
+        }
+        let config = crate::config::LensConfig::load(Some(root.path().join("rqlens.toml")))?;
+        Ok((root, config))
+    }
+
     #[test]
     fn benchmark_runs_ignore_old_estimates_and_honor_cargo_target_directory() -> anyhow::Result<()>
     {
-        let root = tempfile::tempdir()?;
-        std::fs::create_dir(root.path().join("src"))?;
-        std::fs::create_dir(root.path().join(".cargo"))?;
-        std::fs::write(root.path().join("src/lib.rs"), "pub fn value() {}")?;
-        std::fs::write(
-            root.path().join("Cargo.toml"),
+        let (root, config) = benchmark_project(
             "[package]\nname = \"bench-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            &[(
+                ".cargo/config.toml",
+                "[build]\ntarget-dir = \"custom-target\"\n",
+            )],
         )?;
-        std::fs::write(
-            root.path().join(".cargo/config.toml"),
-            "[build]\ntarget-dir = \"custom-target\"\n",
-        )?;
-        let config_path = root.path().join("rqlens.toml");
-        std::fs::write(&config_path, "source_roots = [\"src\"]\n")?;
-        let config = crate::config::LensConfig::load(Some(config_path))?;
         let target = super::cargo_target_directory(&config)?;
         // Cargo environment overrides are respected too; do not mutate them in tests.
         if std::env::var_os("CARGO_TARGET_DIR").is_none() {
@@ -243,16 +259,11 @@ mod tests {
 
     #[test]
     fn benchmark_execution_writes_into_its_isolated_directory() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        std::fs::create_dir(root.path().join("src"))?;
-        std::fs::write(root.path().join("src/lib.rs"), "pub fn value() {}")?;
-        std::fs::write(
-            root.path().join("Cargo.toml"),
+        let (_root, config) = benchmark_project(
             "[package]\nname = \"criterion-protocol-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[[bench]]\nname = \"probe\"\npath = \"probe.rs\"\nharness = false\n",
-        )?;
-        std::fs::write(
-            root.path().join("probe.rs"),
-            r#"
+            &[(
+                "probe.rs",
+                r#"
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let home = std::path::PathBuf::from(std::env::var_os("CRITERION_HOME").ok_or("missing CRITERION_HOME")?);
     let directory = home.join("probe/new");
@@ -261,10 +272,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 "#,
+            )],
         )?;
-        let config_path = root.path().join("rqlens.toml");
-        std::fs::write(&config_path, "source_roots = [\"src\"]\n")?;
-        let config = crate::config::LensConfig::load(Some(config_path))?;
         let output = run_benchmarks(&config, None, false)?;
         let document: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output)?)?;
         assert_eq!(document["measurement_confidence"]["complete"], true);

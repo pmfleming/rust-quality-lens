@@ -165,6 +165,16 @@ pub(crate) fn stable_hash(value: &str) -> String {
 }
 
 #[cfg(test)]
+pub(crate) fn write_preserving_mtime(path: &Path, bytes: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let modified = fs::metadata(path)?.modified()?;
+    fs::write(path, bytes)?;
+    fs::File::options()
+        .write(true)
+        .open(path)?
+        .set_times(fs::FileTimes::new().set_modified(modified))
+}
+
+#[cfg(test)]
 fn project_input_fingerprint(project_root: &Path, source_roots: &[String]) -> Value {
     quality_input_fingerprint(project_root, source_roots, &[], &[])
 }
@@ -360,13 +370,10 @@ mod tests {
         let root = tempfile::tempdir()?;
         let path = root.path().join("lib.rs");
         std::fs::write(&path, "pub fn before() {}")?;
-        let modified = std::fs::metadata(&path)?.modified()?;
         let initial = project_input_fingerprint(root.path(), &[]);
-        std::fs::write(&path, "pub fn after_() {}")?;
-        std::fs::File::options()
-            .write(true)
-            .open(&path)?
-            .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+        let modified = std::fs::metadata(&path)?.modified()?;
+        super::write_preserving_mtime(&path, "pub fn after_() {}")?;
+        assert_eq!(std::fs::metadata(&path)?.modified()?, modified);
         assert_ne!(
             initial["digest"],
             project_input_fingerprint(root.path(), &[])["digest"]

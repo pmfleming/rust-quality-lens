@@ -225,12 +225,7 @@ mod tests {
         );
         let initial = config.source_fingerprint();
         assert_eq!(initial["complete"], true);
-        let modified = fs::metadata(&source)?.modified()?;
-        fs::write(&source, "pub fn after_() {}")?;
-        fs::File::options()
-            .write(true)
-            .open(&source)?
-            .set_times(fs::FileTimes::new().set_modified(modified))?;
+        crate::util::write_preserving_mtime(&source, "pub fn after_() {}")?;
         let changed = config.source_fingerprint();
         assert_ne!(initial["digest"], changed["digest"]);
         fs::write(

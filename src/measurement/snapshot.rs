@@ -58,12 +58,10 @@ mod tests {
         for path in [&source, &asset] {
             let snapshot = InputSnapshot::capture(&config);
             snapshot.ensure_unchanged(&config)?;
-            let modified = fs::metadata(path)?.modified()?;
-            fs::write(path, fs::read_to_string(path)?.replace("before", "after_"))?;
-            fs::File::options()
-                .write(true)
-                .open(path)?
-                .set_times(fs::FileTimes::new().set_modified(modified))?;
+            crate::util::write_preserving_mtime(
+                path,
+                fs::read_to_string(path)?.replace("before", "after_"),
+            )?;
             assert!(snapshot.ensure_unchanged(&config).is_err());
         }
         let mut missing = config.clone();
