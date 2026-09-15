@@ -11,16 +11,17 @@ mod tests;
 
 const DEFAULT_OUTPUT_LIMIT: u64 = 64 * 1024 * 1024;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum CommandStatus {
     Passed,
     Failed,
+    #[default]
     Unavailable,
     TimedOut,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(crate) struct CommandOutcome {
     pub(crate) status: CommandStatus,
     pub(crate) command: Vec<String>,
@@ -102,7 +103,6 @@ fn execute(
 ) -> CommandOutcome {
     let started = Instant::now();
     let mut outcome = CommandOutcome {
-        status: CommandStatus::Unavailable,
         command: std::iter::once(command.get_program())
             .chain(command.get_args())
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -110,15 +110,7 @@ fn execute(
         working_directory: display_path(
             command.get_current_dir().unwrap_or_else(|| Path::new(".")),
         ),
-        exit_code: None,
-        duration_ms: 0,
-        stdout_tail: String::new(),
-        stderr_tail: String::new(),
-        stdout_truncated: false,
-        stderr_truncated: false,
-        reason: None,
-        stdout: String::new(),
-        stderr: String::new(),
+        ..CommandOutcome::default()
     };
     let capture = match capture::Capture::new(command, limit) {
         Ok(capture) => capture,
@@ -137,51 +129,72 @@ fn execute(
             return outcome;
         }
     };
-    let exited = loop {
-        match has_exited(&mut child) {
-            Ok(true) => break true,
-            Err(error) => {
-                outcome.reason = Some(format!("waiting for command: {error}"));
-                break false;
-            }
+    let stop = wait_for_stop(&mut child, &capture, started, timeout, limit);
+    // Also clean up descendants after a successful direct-child exit. Output is
+    // disk-backed, so inherited handles can never block a reader waiting for EOF.
+    terminate_process_tree(&mut child, matches!(stop, Stop::Exited));
+    let status = reap(child);
+    outcome.exit_code = status.as_ref().and_then(ExitStatus::code);
+    (outcome.status, outcome.reason) = match stop {
+        Stop::Exited if status.is_some_and(|status| status.success()) => {
+            (CommandStatus::Passed, None)
+        }
+        Stop::Exited => (CommandStatus::Failed, None),
+        Stop::TimedOut => (
+            CommandStatus::TimedOut,
+            Some(format!(
+                "command exceeded {} milliseconds",
+                timeout.as_millis()
+            )),
+        ),
+        Stop::Failed(reason) => (CommandStatus::Failed, Some(reason)),
+    };
+    record_output(&mut outcome, &capture, tail_lines, limit);
+    outcome.duration_ms = started.elapsed().as_millis();
+    outcome
+}
+
+enum Stop {
+    Exited,
+    TimedOut,
+    Failed(String),
+}
+
+fn wait_for_stop(
+    child: &mut Child,
+    capture: &capture::Capture,
+    started: Instant,
+    timeout: Duration,
+    limit: u64,
+) -> Stop {
+    loop {
+        match has_exited(child) {
+            Ok(true) => return Stop::Exited,
+            Err(error) => return Stop::Failed(format!("waiting for command: {error}")),
             Ok(false) => {}
         }
         if started.elapsed() >= timeout {
-            outcome.status = CommandStatus::TimedOut;
-            outcome.reason = Some(format!(
-                "command exceeded {} milliseconds",
-                timeout.as_millis()
-            ));
-            break false;
+            return Stop::TimedOut;
         }
         match capture.exceeds_limit() {
             Ok(false) => {}
-            Ok(true) => {
-                outcome.reason = Some(format!(
-                    "command exceeded output limit of {limit} bytes per stream"
-                ));
-                break false;
-            }
-            Err(error) => {
-                outcome.reason = Some(format!("inspecting command output: {error}"));
-                break false;
-            }
+            Ok(true) => return Stop::Failed(output_limit_reason(limit)),
+            Err(error) => return Stop::Failed(format!("inspecting command output: {error}")),
         }
         thread::sleep(Duration::from_millis(10));
-    };
-    // Also clean up descendants after a successful direct-child exit. Output is
-    // disk-backed, so inherited handles can never block a reader waiting for EOF.
-    terminate_process_tree(&mut child, exited);
-    let status = reap(child);
-    outcome.exit_code = status.as_ref().and_then(ExitStatus::code);
-    if outcome.status != CommandStatus::TimedOut {
-        outcome.status =
-            if outcome.reason.is_none() && status.is_some_and(|status| status.success()) {
-                CommandStatus::Passed
-            } else {
-                CommandStatus::Failed
-            };
     }
+}
+
+fn output_limit_reason(limit: u64) -> String {
+    format!("command exceeded output limit of {limit} bytes per stream")
+}
+
+fn record_output(
+    outcome: &mut CommandOutcome,
+    capture: &capture::Capture,
+    tail_lines: usize,
+    limit: u64,
+) {
     match capture.read(tail_lines) {
         Ok((stdout, stderr)) => {
             outcome.stdout = stdout.text;
@@ -191,25 +204,20 @@ fn execute(
             outcome.stdout_truncated = stdout.truncated;
             outcome.stderr_truncated = stderr.truncated;
             if stdout.truncated || stderr.truncated {
-                outcome.reason.get_or_insert_with(|| {
-                    format!("command exceeded output limit of {limit} bytes per stream")
-                });
-                if outcome.status != CommandStatus::TimedOut {
-                    outcome.status = CommandStatus::Failed;
-                }
+                record_output_failure(outcome, output_limit_reason(limit));
             }
         }
         Err(error) => {
-            outcome
-                .reason
-                .get_or_insert_with(|| format!("reading command output: {error}"));
-            if outcome.status != CommandStatus::TimedOut {
-                outcome.status = CommandStatus::Failed;
-            }
+            record_output_failure(outcome, format!("reading command output: {error}"));
         }
     }
-    outcome.duration_ms = started.elapsed().as_millis();
-    outcome
+}
+
+fn record_output_failure(outcome: &mut CommandOutcome, reason: String) {
+    outcome.reason.get_or_insert(reason);
+    if outcome.status != CommandStatus::TimedOut {
+        outcome.status = CommandStatus::Failed;
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
