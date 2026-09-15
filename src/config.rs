@@ -9,7 +9,7 @@ use std::process::Command;
 
 pub(crate) const CONFIG_FILE_NAME: &str = "rqlens.toml";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     project_name: Option<String>,
@@ -18,7 +18,7 @@ struct RawConfig {
     fingerprint_inputs: Option<Vec<String>>,
     output_dir: Option<PathBuf>,
     rust: Option<RawRustConfig>,
-    verification: Option<RawVerificationConfig>,
+    verification: Option<VerificationConfig>,
     architecture: Option<ArchitectureConfig>,
     policy: Option<PolicyConfig>,
 }
@@ -33,35 +33,8 @@ struct RawRustConfig {
     identity_offline: Option<bool>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawVerificationConfig {
-    timeout_seconds: Option<u64>,
-    workspace: Option<bool>,
-    all_targets: Option<bool>,
-    all_features: Option<bool>,
-    locked: Option<bool>,
-    no_default_features: Option<bool>,
-    features: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    audit: Option<bool>,
-    deny: Option<bool>,
-    geiger: Option<bool>,
-    unused_dependencies: Option<bool>,
-    unused_dependency_backend: Option<String>,
-    semver: Option<bool>,
-    semver_baseline_rev: Option<String>,
-    public_api: Option<bool>,
-    feature_matrix: Option<bool>,
-    mutation: Option<bool>,
-    flaky_test_runs: Option<usize>,
-    fuzz_targets: Option<Vec<String>>,
-    fuzz_seconds: Option<u64>,
-    sanitizers: Option<Vec<String>>,
-    miri: Option<bool>,
-}
-
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
 pub(crate) struct VerificationConfig {
     pub(crate) timeout_seconds: u64,
     pub(crate) workspace: bool,
@@ -119,6 +92,13 @@ impl Default for VerificationConfig {
 }
 
 impl VerificationConfig {
+    fn normalized(mut self) -> Self {
+        self.timeout_seconds = self.timeout_seconds.max(1);
+        self.flaky_test_runs = self.flaky_test_runs.max(1);
+        self.fuzz_seconds = self.fuzz_seconds.max(1);
+        self
+    }
+
     pub(crate) fn cargo_arguments(
         &self,
         command: &str,
@@ -368,45 +348,6 @@ fn path_pattern_matches(pattern: &str, path: Option<&str>) -> bool {
         })
 }
 
-impl From<Option<RawVerificationConfig>> for VerificationConfig {
-    fn from(raw: Option<RawVerificationConfig>) -> Self {
-        let raw = raw.unwrap_or_default();
-        let defaults = Self::default();
-        Self {
-            timeout_seconds: raw
-                .timeout_seconds
-                .unwrap_or(defaults.timeout_seconds)
-                .max(1),
-            workspace: raw.workspace.unwrap_or(defaults.workspace),
-            all_targets: raw.all_targets.unwrap_or(defaults.all_targets),
-            all_features: raw.all_features.unwrap_or(defaults.all_features),
-            locked: raw.locked.unwrap_or(defaults.locked),
-            no_default_features: raw
-                .no_default_features
-                .unwrap_or(defaults.no_default_features),
-            features: raw.features.unwrap_or_default(),
-            exclude: raw.exclude.unwrap_or_default(),
-            audit: raw.audit.unwrap_or_default(),
-            deny: raw.deny.unwrap_or_default(),
-            geiger: raw.geiger.unwrap_or_default(),
-            unused_dependencies: raw.unused_dependencies.unwrap_or_default(),
-            unused_dependency_backend: raw
-                .unused_dependency_backend
-                .unwrap_or_else(|| "cargo-shear".to_string()),
-            semver: raw.semver.unwrap_or_default(),
-            semver_baseline_rev: raw.semver_baseline_rev,
-            public_api: raw.public_api.unwrap_or_default(),
-            feature_matrix: raw.feature_matrix.unwrap_or_default(),
-            mutation: raw.mutation.unwrap_or_default(),
-            flaky_test_runs: raw.flaky_test_runs.unwrap_or(1).max(1),
-            fuzz_targets: raw.fuzz_targets.unwrap_or_default(),
-            fuzz_seconds: raw.fuzz_seconds.unwrap_or(30).max(1),
-            sanitizers: raw.sanitizers.unwrap_or_default(),
-            miri: raw.miri.unwrap_or_default(),
-        }
-    }
-}
-
 fn validate_unused_dependency_backend(backend: &str) -> Result<()> {
     if matches!(backend, "cargo-shear" | "cargo-udeps" | "cargo-machete") {
         Ok(())
@@ -529,17 +470,7 @@ impl LensConfig {
                 &fs::read_to_string(path)
                     .with_context(|| format!("reading config {}", path.display()))?,
             )?,
-            _ => RawConfig {
-                project_name: None,
-                project_root: None,
-                source_roots: None,
-                fingerprint_inputs: None,
-                output_dir: None,
-                rust: None,
-                verification: None,
-                architecture: None,
-                policy: None,
-            },
+            _ => RawConfig::default(),
         };
         let project_root =
             resolve_config_path(raw.project_root.unwrap_or_else(|| ".".into()), &config_dir);
@@ -549,7 +480,7 @@ impl LensConfig {
             .as_ref()
             .and_then(|rust| rust.identity_offline)
             .unwrap_or(true);
-        let verification = VerificationConfig::from(raw.verification);
+        let verification = raw.verification.unwrap_or_default().normalized();
         // Resolve Cargo inputs once, before any measurement snapshot. Full
         // metadata may initialize Cargo.lock; the no-deps fallback stays useful
         // when optional dependencies are unavailable offline.
@@ -639,34 +570,31 @@ impl LensConfig {
 }
 
 fn local_workspace_inputs(roots: &BTreeSet<String>) -> BTreeSet<String> {
-    let mut inputs = BTreeSet::new();
-    for root in roots {
-        for directory in Path::new(root).ancestors() {
-            let manifest = directory.join("Cargo.toml");
-            let workspace = fs::read_to_string(&manifest)
-                .ok()
-                .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
-                .is_some_and(|value| value.get("workspace").is_some());
-            if !workspace {
-                continue;
-            }
-            for name in [
+    roots
+        .iter()
+        .filter_map(|root| {
+            Path::new(root).ancestors().find(|directory| {
+                fs::read_to_string(directory.join("Cargo.toml"))
+                    .ok()
+                    .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+                    .is_some_and(|value| value.get("workspace").is_some())
+            })
+        })
+        .flat_map(|directory| {
+            [
                 "Cargo.toml",
                 "Cargo.lock",
                 "rust-toolchain",
                 "rust-toolchain.toml",
                 ".cargo/config",
                 ".cargo/config.toml",
-            ] {
-                let path = directory.join(name);
-                if path.is_file() {
-                    inputs.insert(path.to_string_lossy().into_owned());
-                }
-            }
-            break;
-        }
-    }
-    inputs
+            ]
+            .into_iter()
+            .map(move |name| directory.join(name))
+        })
+        .filter(|path| path.is_file())
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
 }
 
 fn discover_rust_source_roots(project_root: &Path, metadata: Option<&Value>) -> Vec<String> {
@@ -989,6 +917,33 @@ mod tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn verification_defaults_and_explicit_overrides_share_one_definition() -> anyhow::Result<()> {
+        let empty: VerificationConfig = toml::from_str("")?;
+        assert_eq!(
+            serde_json::to_value(empty.normalized())?,
+            serde_json::to_value(VerificationConfig::default())?
+        );
+        let supplied: VerificationConfig = toml::from_str(
+            "timeout_seconds = 0\nworkspace = false\nall_targets = false\nlocked = true\nflaky_test_runs = 0\nfuzz_seconds = 0\nfeatures = ['dbus']\n",
+        )?;
+        let expected = VerificationConfig {
+            timeout_seconds: 1,
+            workspace: false,
+            all_targets: false,
+            locked: true,
+            flaky_test_runs: 1,
+            fuzz_seconds: 1,
+            features: vec!["dbus".into()],
+            ..VerificationConfig::default()
+        };
+        assert_eq!(
+            serde_json::to_value(supplied.normalized())?,
+            serde_json::to_value(expected)?
+        );
+        Ok(())
+    }
+
+    #[test]
     fn policy_waivers_are_scoped_and_time_bounded() {
         let policy = PolicyConfig {
             rules: BTreeMap::new(),
@@ -1061,8 +1016,8 @@ verification = {
         let Some(verification) = config.verification else {
             anyhow::bail!("verification table was not deserialized");
         };
-        assert_eq!(verification.workspace, Some(true));
-        assert_eq!(verification.all_targets, Some(false));
+        assert!(verification.workspace);
+        assert!(!verification.all_targets);
         Ok(())
     }
 

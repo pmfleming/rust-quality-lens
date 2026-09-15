@@ -169,12 +169,12 @@ fn project_input_fingerprint(project_root: &Path, source_roots: &[String]) -> Va
     quality_input_fingerprint(project_root, source_roots, &[], &[])
 }
 
-pub(crate) fn quality_input_fingerprint(
+fn quality_input_inventory(
     project_root: &Path,
     source_roots: &[String],
     extra_inputs: &[String],
     excluded: &[PathBuf],
-) -> Value {
+) -> (BTreeSet<PathBuf>, Vec<String>) {
     let mut files = BTreeSet::new();
     let mut read_errors = Vec::new();
     for (root, explicit) in std::iter::once((project_root, false))
@@ -198,6 +198,17 @@ pub(crate) fn quality_input_fingerprint(
     }
     read_errors.sort();
     read_errors.dedup();
+    (files, read_errors)
+}
+
+pub(crate) fn quality_input_fingerprint(
+    project_root: &Path,
+    source_roots: &[String],
+    extra_inputs: &[String],
+    excluded: &[PathBuf],
+) -> Value {
+    let (files, mut read_errors) =
+        quality_input_inventory(project_root, source_roots, extra_inputs, excluded);
     let mut hash = 1469598103934665603;
     let mut observed = 0usize;
     for path in files {
