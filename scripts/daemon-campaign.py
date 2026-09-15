@@ -61,7 +61,8 @@ def command(args, cwd, log, timeout=1800):
 
 def build_binary():
     output = subprocess.check_output(
-        ["cargo", "build", "--locked", "--bin", "rqlens", "--message-format=json-render-diagnostics"],
+        ["cargo", "build", "--locked", "--bin", "rqlens", "--message-format=json-render-diagnostics",
+         "--target-dir", str(LENS / "target/campaign-tool-build")],
         cwd=LENS, text=True,
     )
     artifacts = [json.loads(line) for line in output.splitlines() if line.startswith("{")]

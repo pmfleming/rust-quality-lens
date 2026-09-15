@@ -38,7 +38,10 @@ class CampaignTests(unittest.TestCase):
                                       "executable": "/custom-target/debug/rqlens"})
         with patch.object(campaign.subprocess, "check_output", return_value=message) as build:
             self.assertEqual(campaign.build_binary(), Path("/custom-target/debug/rqlens"))
-            self.assertIn("--locked", build.call_args.args[0])
+            arguments = build.call_args.args[0]
+            self.assertIn("--locked", arguments)
+            self.assertEqual(arguments[arguments.index("--target-dir") + 1],
+                             str(campaign.LENS / "target/campaign-tool-build"))
 
     def test_capture_freezes_binary_before_commands_can_replace_it(self):
         with tempfile.TemporaryDirectory() as directory:
