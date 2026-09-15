@@ -177,8 +177,10 @@ This writes `target/analysis/rqlens.sarif` by default for code-scanning tools.
 | Print task metadata | `rqlens catalog` |
 | Print artifact schemas | `rqlens artifact-schema` |
 
-`review` reports changed hunks and executable changed-line coverage when fresh
-coverage exists. `performance` isolates each execution using Criterion's
+`review` reports added/replaced lines and executable changed-line coverage when
+fresh coverage exists. Unified diff context lines are excluded; Git-quoted UTF-8
+filenames and renames are supported. Truncated or combined diffs are rejected
+rather than silently producing incomplete review scopes. `performance` isolates each execution using Criterion's
 `CRITERION_HOME` under Cargo's configured target directory (`rqlens-bench-runs/`).
 Benchmarks that override that directory are reported as missing rather than
 reusing old estimates. `performance --no-run` parses existing `target/criterion`

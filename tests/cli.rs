@@ -579,7 +579,7 @@ fn review_uses_diff_file_scope() {
     }
     fs::write(
         &diff_file,
-        "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n",
+        "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n",
     )
     .expect("diff should be written");
     run(&[
@@ -890,7 +890,7 @@ fn entrypoints_are_visible_and_discounted_in_outputs() {
     let diff_file = fixture.join("entrypoint.diff");
     fs::write(
         &diff_file,
-        "diff --git a/tools/custom.rs b/tools/custom.rs\n--- a/tools/custom.rs\n+++ b/tools/custom.rs\n@@ -1 +1 @@\n",
+        "diff --git a/tools/custom.rs b/tools/custom.rs\n--- a/tools/custom.rs\n+++ b/tools/custom.rs\n@@ -1 +1 @@\n-old\n+new\n",
     )
     .expect("entrypoint diff should be written");
     run(&[

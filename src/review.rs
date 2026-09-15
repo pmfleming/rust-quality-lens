@@ -6,10 +6,14 @@ use crate::producers::produce_measurement;
 use crate::tool::MeasureTool;
 use crate::util::{absolutize, normalize_slashes, write_json};
 use anyhow::{Context, Result};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+mod diff;
+#[cfg(test)]
+mod tests;
 
 const REVIEW_TOOLS: &[MeasureTool] = &[
     MeasureTool::Hotspots,
@@ -30,8 +34,13 @@ pub(crate) fn run_review(
 ) -> Result<PathBuf> {
     fs::create_dir_all(&config.output_dir)?;
     let diff = review_diff(&config.project_root, changed_since.as_deref(), &diff_file)?;
-    let changed_files = diff_paths(&config.project_root, &diff);
-    let changed_lines = diff_line_ranges(&diff);
+    let scope = diff::parse(&diff)?;
+    let changed_files = scope
+        .paths
+        .iter()
+        .map(|path| absolutize(config.project_root.join(path)))
+        .collect::<Vec<_>>();
+    let changed_lines = scope.additions;
     let measured_files = changed_files
         .iter()
         .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
@@ -125,63 +134,22 @@ fn review_diff(
 fn git_diff(project_root: &Path, base: &str) -> Result<String> {
     let output = crate::command_runner::checked_output(
         Command::new("git")
-            .args(["diff", "--unified=0", base, "--"])
+            .args([
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--relative",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--unified=0",
+                base,
+                "--",
+            ])
             .current_dir(project_root),
         std::time::Duration::from_secs(30),
     )
     .with_context(|| format!("running git diff from {}", project_root.display()))?;
     Ok(output.stdout)
-}
-
-fn diff_paths(project_root: &Path, diff: &str) -> Vec<PathBuf> {
-    let mut paths = BTreeSet::new();
-    for line in diff.lines() {
-        if let Some(path) = line.strip_prefix("+++ b/")
-            && path != "/dev/null"
-        {
-            paths.insert(absolutize(project_root.join(path)));
-        }
-    }
-    paths.into_iter().collect()
-}
-
-fn diff_line_ranges(diff: &str) -> std::collections::BTreeMap<String, Vec<[u64; 2]>> {
-    let mut current_path = None;
-    let mut ranges = std::collections::BTreeMap::<String, Vec<[u64; 2]>>::new();
-    for line in diff.lines() {
-        if let Some(path) = line.strip_prefix("+++ b/") {
-            current_path = (path != "/dev/null").then(|| normalize_slashes(path));
-            continue;
-        }
-        if !line.starts_with("@@") {
-            continue;
-        }
-        let Some(path) = current_path.as_ref() else {
-            continue;
-        };
-        let Some(added) = line
-            .split_whitespace()
-            .find(|part| part.starts_with('+'))
-            .map(|part| part.trim_start_matches('+'))
-        else {
-            continue;
-        };
-        let mut parts = added.split(',');
-        let Some(start) = parts.next().and_then(|value| value.parse::<u64>().ok()) else {
-            continue;
-        };
-        let count = parts
-            .next()
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(1);
-        if count > 0 {
-            ranges
-                .entry(path.clone())
-                .or_default()
-                .push([start, start + count - 1]);
-        }
-    }
-    ranges
 }
 
 fn changed_line_coverage(
@@ -322,5 +290,10 @@ fn path_key(path: impl AsRef<Path>) -> String {
     let path = path.as_ref();
     let absolute = absolutize(path);
     let canonical = fs::canonicalize(&absolute).unwrap_or(absolute);
-    normalize_slashes(canonical).to_lowercase()
+    let key = normalize_slashes(canonical);
+    if cfg!(windows) {
+        key.to_lowercase()
+    } else {
+        key
+    }
 }
