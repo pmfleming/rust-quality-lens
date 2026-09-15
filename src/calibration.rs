@@ -184,6 +184,7 @@ fn calibration_config(
             .collect(),
         output_dir: output_dir.join(safe_name(name)),
         helper_manifest: helper_manifest.to_path_buf(),
+        helper_metadata: crate::config::helper_metadata(helper_manifest, true),
         identity_resolution: SemanticIdentityMode::Auto,
         rust_analyzer: PathBuf::from("rust-analyzer"),
         identity_timeout_seconds: 90,

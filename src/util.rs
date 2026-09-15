@@ -102,7 +102,7 @@ tree-sitter-rust = "=0.23.2"
     Ok(root.join("Cargo.toml"))
 }
 
-fn helper_cache_root() -> PathBuf {
+pub(crate) fn helper_cache_root() -> PathBuf {
     env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))

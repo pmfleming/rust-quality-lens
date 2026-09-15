@@ -116,8 +116,9 @@ fn helper_binary(config: &LensConfig, bin: &str) -> Result<PathBuf> {
         return Ok(path);
     }
 
-    build_helper(config, &manifest, bin)?;
-    let binary = helper_target_dir(&manifest, &config.project_root)?
+    let target = helper_target_dir(&manifest);
+    build_helper(config, &manifest, bin, &target)?;
+    let binary = target
         .join("debug")
         .join(format!("{bin}{}", env::consts::EXE_SUFFIX));
     if !binary.exists() {
@@ -134,12 +135,13 @@ fn helper_binary(config: &LensConfig, bin: &str) -> Result<PathBuf> {
     Ok(binary)
 }
 
-fn build_helper(config: &LensConfig, manifest: &Path, bin: &str) -> Result<()> {
+fn build_helper(config: &LensConfig, manifest: &Path, bin: &str, target: &Path) -> Result<()> {
     crate::command_runner::checked_output(
         Command::new("cargo")
             .args(["build", "--quiet", "--manifest-path"])
             .arg(manifest)
-            .args(["--bin", bin])
+            .args(["--locked", "--bin", bin, "--target-dir"])
+            .arg(target)
             .current_dir(&config.project_root),
         std::time::Duration::from_secs(config.verification.timeout_seconds),
     )
@@ -147,29 +149,14 @@ fn build_helper(config: &LensConfig, manifest: &Path, bin: &str) -> Result<()> {
     Ok(())
 }
 
-fn helper_target_dir(manifest: &Path, current_dir: &Path) -> Result<PathBuf> {
-    if let Some(target_dir) = env::var_os("CARGO_TARGET_DIR") {
-        return Ok(PathBuf::from(target_dir));
-    }
-    let output = crate::command_runner::checked_output(
-        Command::new("cargo")
-            .args([
-                "metadata",
-                "--no-deps",
-                "--format-version",
-                "1",
-                "--manifest-path",
-            ])
-            .arg(manifest)
-            .current_dir(current_dir),
-        std::time::Duration::from_secs(30),
-    )
-    .context("reading helper cargo metadata")?;
-    let metadata: Value = serde_json::from_str(&output.stdout)?;
-    metadata["target_directory"]
-        .as_str()
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow!("helper cargo metadata did not include target_directory"))
+// Ordinary project builds can contain same-named helper executables from another
+// checkout. Keep each manifest's Cargo cache and executable paths isolated.
+fn helper_target_dir(manifest: &Path) -> PathBuf {
+    crate::util::helper_cache_root()
+        .join("builds")
+        .join(crate::util::stable_hash(&normalize_slashes(
+            canonical_or_original(manifest),
+        )))
 }
 
 fn canonical_or_original(path: &Path) -> PathBuf {
@@ -398,8 +385,69 @@ fn path_key(path: impl AsRef<Path>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::mark_test_module_findings;
+    use super::{helper_binary, helper_target_dir, mark_test_module_findings};
     use crate::facts::{FileFacts, ModuleFileFact, QualityFindingFact};
+
+    fn probe_helper(
+        root: &std::path::Path,
+        name: &str,
+    ) -> anyhow::Result<crate::config::LensConfig> {
+        let project = root.join(name);
+        std::fs::create_dir_all(project.join("src"))?;
+        std::fs::write(
+            project.join("Cargo.toml"),
+            "[package]\nname = 'helper-probe'\nversion = '0.1.0'\nedition = '2024'\n[workspace]\n",
+        )?;
+        std::fs::write(
+            project.join("src/main.rs"),
+            format!("fn main() {{ println!(\"{name}\"); }}"),
+        )?;
+        let path = project.join("rqlens.toml");
+        std::fs::write(
+            &path,
+            format!(
+                "project_root = '../project'\n[rust]\nhelper_manifest = '../{name}/Cargo.toml'\n"
+            ),
+        )?;
+        crate::config::LensConfig::load(Some(path))
+    }
+
+    #[test]
+    fn same_named_helpers_from_different_manifests_have_isolated_executables() -> anyhow::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir_all(root.path().join("project/src"))?;
+        let mut binaries = Vec::new();
+        for name in ["left", "right"] {
+            let config = probe_helper(root.path(), name)?;
+            let binary = helper_binary(&config, "helper-probe")?;
+            let before = config.input_fingerprint();
+            assert_eq!(before["complete"], true);
+            crate::util::write_preserving_mtime(
+                &root.path().join(name).join("src/main.rs"),
+                format!("fn main() {{ println!(\"{name}\"); }}\n"),
+            )?;
+            let after = config.input_fingerprint();
+            assert_ne!(before["source_digest"], after["source_digest"]);
+            assert_ne!(before["helper_digest"], after["helper_digest"]);
+            assert_eq!(config.source_roots.len(), 1);
+            let mut unresolved = config.clone();
+            unresolved.helper_metadata = None;
+            assert_eq!(unresolved.source_fingerprint()["complete"], false);
+            assert!(!binary.starts_with(config.target_directory()));
+            binaries.push((binary, name, helper_target_dir(&config.helper_manifest)));
+        }
+        assert_ne!(binaries[0].0, binaries[1].0);
+        for (binary, expected, cache) in binaries {
+            let output = crate::command_runner::checked_output(
+                &mut std::process::Command::new(binary),
+                std::time::Duration::from_secs(10),
+            )?;
+            assert_eq!(output.stdout.trim(), expected);
+            std::fs::remove_dir_all(cache)?;
+        }
+        Ok(())
+    }
 
     #[test]
     fn external_cfg_test_modules_mark_nested_findings_as_test_code() {

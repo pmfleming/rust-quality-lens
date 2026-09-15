@@ -385,6 +385,8 @@ pub(crate) struct LensConfig {
     #[serde(skip)]
     pub(crate) cargo_metadata: Option<Value>,
     #[serde(skip)]
+    pub(crate) helper_metadata: Option<Value>,
+    #[serde(skip)]
     pub(crate) output_dir: PathBuf,
     pub(crate) helper_manifest: PathBuf,
     pub(crate) identity_resolution: SemanticIdentityMode,
@@ -404,10 +406,18 @@ impl LensConfig {
     pub(crate) fn source_fingerprint(&self) -> Value {
         // Path dependencies are mutable even when Cargo.lock is unchanged.
         // Fingerprint their inputs without adding them to the measured scope.
-        let local_roots = self.local_package_roots();
+        let local_roots = local_package_roots(
+            self.cargo_metadata
+                .iter()
+                .chain(self.helper_metadata.iter()),
+        );
         let mut roots = self.source_roots.clone();
         roots.extend(local_roots.iter().cloned());
+        if let Some(parent) = self.helper_manifest.parent() {
+            roots.push(parent.to_string_lossy().into_owned());
+        }
         let mut extra_inputs = self.fingerprint_inputs.clone();
+        extra_inputs.push(self.helper_manifest.to_string_lossy().into_owned());
         extra_inputs.extend(local_workspace_inputs(&local_roots));
         let mut fingerprint = crate::util::quality_input_fingerprint(
             &self.project_root,
@@ -419,35 +429,32 @@ impl LensConfig {
             fingerprint["complete"] = json!(false);
             if let Some(errors) = fingerprint["read_errors"].as_array_mut() {
                 errors.push(json!(
-                    "Cargo metadata did not resolve the complete local path dependency graph"
+                    "Cargo metadata did not resolve the complete project/helper path dependency graph"
                 ));
             }
         }
         fingerprint
     }
 
-    fn local_package_roots(&self) -> BTreeSet<String> {
-        self.cargo_metadata
-            .as_ref()
-            .into_iter()
-            .flat_map(|metadata| metadata["packages"].as_array().into_iter().flatten())
-            .filter(|package| package["source"].is_null())
-            .filter_map(|package| Path::new(package["manifest_path"].as_str()?).parent())
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect()
+    pub(crate) fn helper_fingerprint(&self) -> Value {
+        let roots = local_package_roots(self.helper_metadata.iter());
+        let mut inputs = local_workspace_inputs(&roots);
+        inputs.insert(self.helper_manifest.to_string_lossy().into_owned());
+        crate::util::quality_input_fingerprint(
+            self.helper_manifest.parent().unwrap_or(&self.project_root),
+            &roots.into_iter().collect::<Vec<_>>(),
+            &inputs.into_iter().collect::<Vec<_>>(),
+            &[self.output_dir.clone(), self.target_directory()],
+        )
     }
 
     fn has_unresolved_path_dependencies(&self) -> bool {
-        let Some(metadata) = &self.cargo_metadata else {
-            return false;
-        };
-        metadata["resolve"].is_null()
-            && metadata["packages"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .flat_map(|package| package["dependencies"].as_array().into_iter().flatten())
-                .any(|dependency| dependency["path"].is_string())
+        self.helper_metadata.is_none()
+            || self
+                .cargo_metadata
+                .iter()
+                .chain(self.helper_metadata.iter())
+                .any(unresolved_paths)
     }
 
     pub(crate) fn target_directory(&self) -> PathBuf {
@@ -511,6 +518,9 @@ impl LensConfig {
             rust.helper_manifest.unwrap_or(default_helper_manifest),
             &project_root,
         );
+        // Resolve helper dependencies (and initialize their lockfile) before any
+        // measurement snapshot, just as for the measured project's Cargo graph.
+        let helper_metadata = helper_metadata(&helper_manifest, identity_offline);
         let identity_resolution = rust.identity_resolution.unwrap_or_default();
         let rust_analyzer = rust
             .rust_analyzer
@@ -535,6 +545,7 @@ impl LensConfig {
             source_roots,
             fingerprint_inputs,
             cargo_metadata,
+            helper_metadata,
             output_dir,
             helper_manifest,
             identity_resolution,
@@ -546,6 +557,31 @@ impl LensConfig {
             policy,
         })
     }
+}
+
+fn local_package_roots<'a>(metadata: impl Iterator<Item = &'a Value>) -> BTreeSet<String> {
+    metadata
+        .flat_map(|metadata| metadata["packages"].as_array().into_iter().flatten())
+        .filter(|package| package["source"].is_null())
+        .filter_map(|package| Path::new(package["manifest_path"].as_str()?).parent())
+        .map(|root| root.to_string_lossy().into_owned())
+        .collect()
+}
+
+pub(crate) fn helper_metadata(manifest: &Path, offline: bool) -> Option<Value> {
+    let root = manifest.parent()?;
+    cargo_metadata(root, offline, false, &VerificationConfig::default())
+        .or_else(|| cargo_metadata(root, offline, true, &VerificationConfig::default()))
+}
+
+fn unresolved_paths(metadata: &Value) -> bool {
+    metadata["resolve"].is_null()
+        && metadata["packages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|package| package["dependencies"].as_array().into_iter().flatten())
+            .any(|dependency| dependency["path"].is_string())
 }
 
 fn resolve_fingerprint_input(path: String, project_root: &Path) -> Result<String> {

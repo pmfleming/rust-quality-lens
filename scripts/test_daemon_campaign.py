@@ -102,6 +102,21 @@ class CampaignTests(unittest.TestCase):
             self.assertEqual(result["comparison_status"], "provisional")
             self.assertIsNone(result["deltas"]["production_panic_findings_in_src"])
             self.assertTrue(any("nonconformant" in warning for warning in result["warnings"]))
+            summaries = [campaign.summarize(root) for root in roots]
+            for version in [4, 5]:
+                for summary in summaries:
+                    summary["artifact_status"] = {"hotspots.json": {"fingerprint": {
+                        "algorithm": f"fnv1a64-quality-inputs-v{version}", "complete": True,
+                        "helper_digest": "same-helper-inputs",
+                    }}}
+                with patch.object(campaign, "summarize", side_effect=summaries):
+                    result = campaign.compare(*roots)
+                self.assertEqual(any("project-and-helper" in warning for warning in result["warnings"]),
+                                 version != 5)
+            summaries[1]["artifact_status"]["hotspots.json"]["fingerprint"]["helper_digest"] = "changed"
+            with patch.object(campaign, "summarize", side_effect=summaries):
+                with self.assertRaisesRegex(RuntimeError, "Helper inputs differ"):
+                    campaign.compare(*roots)
 
     def test_test_and_vendor_code_are_not_production_functions(self):
         root = Path("/project")

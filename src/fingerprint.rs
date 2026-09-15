@@ -15,28 +15,32 @@ pub(crate) fn project_with_toolchain(
     toolchain: &crate::toolchain::ToolchainSnapshot,
 ) -> Value {
     let source = config.source_fingerprint();
-    let mut errors = source["read_errors"]
-        .as_array()
+    let helper = config.helper_fingerprint();
+    let mut errors = [&source, &helper]
+        .into_iter()
+        .flat_map(|input| input["read_errors"].as_array().into_iter().flatten())
         .cloned()
-        .unwrap_or_default();
+        .collect::<Vec<_>>();
     let git = git_state(config, &mut errors);
     if toolchain.rustc_version.is_none() || toolchain.cargo_version.is_none() {
         errors.push(json!("active Rust toolchain version is unavailable"));
     }
     let inputs = json!({
         "source": source["digest"],
+        "helper": helper["digest"],
         "config": config,
         "git": git,
         "toolchain": toolchain,
         "generator_version": env!("CARGO_PKG_VERSION"),
     });
     json!({
-        "algorithm": "fnv1a64-quality-inputs-v4",
+        "algorithm": "fnv1a64-quality-inputs-v5",
         "digest": stable_hash(&inputs.to_string()),
         "file_count": source["file_count"],
         "read_errors": errors,
         "complete": errors.is_empty(),
         "source_digest": source["digest"],
+        "helper_digest": helper["digest"],
         "config_digest": stable_hash(&inputs["config"].to_string()),
         "git": git,
         "toolchain": toolchain,

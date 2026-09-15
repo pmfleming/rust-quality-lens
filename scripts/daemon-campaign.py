@@ -205,13 +205,20 @@ def compare(before, after):
     required = ["hotspots.json", "clones.json", "rust_escape_hatches.json", "locality_metrics.json", "leverage_metrics.json", "reliability_findings.json"]
     warnings = [f"{label}: {name} is missing or partial" for label, summary in [("before", old), ("after", new)]
                 for name in required if (summary["artifact_status"].get(name, {}).get("confidence") or {}).get("complete") is not True]
+    helper_digests = set()
     for label, summary in [("before", old), ("after", new)]:
         fingerprints = [row.get("fingerprint") or {} for row in summary["artifact_status"].values()]
-        if not fingerprints or any(fp.get("algorithm") != "fnv1a64-quality-inputs-v4" or
-                                   fp.get("complete") is not True for fp in fingerprints):
-            warnings.append(f"{label}: complete path-dependency-aware fingerprints are unavailable")
+        if not fingerprints or any(fp.get("algorithm") != "fnv1a64-quality-inputs-v5" or
+                                   fp.get("complete") is not True or
+                                   not isinstance(fp.get("helper_digest"), str) or not fp["helper_digest"]
+                                   for fp in fingerprints):
+            warnings.append(f"{label}: complete project-and-helper fingerprints are unavailable")
+        helper_digests.update(fp["helper_digest"] for fp in fingerprints
+                              if isinstance(fp.get("helper_digest"), str) and fp["helper_digest"])
         if len({json.dumps(fp, sort_keys=True) for fp in fingerprints}) > 1:
             raise RuntimeError(f"{label}: artifacts describe different input snapshots; recapture")
+    if len(helper_digests) > 1:
+        raise RuntimeError("Helper inputs differ; freeze helpers and remeasure both revisions")
     warnings += [f"{label}: command did not succeed: {row['command']}"
                  for label, summary in [("before", old), ("after", new)]
                  for row in summary["run"]["commands"] if row.get("exit_code") != 0]

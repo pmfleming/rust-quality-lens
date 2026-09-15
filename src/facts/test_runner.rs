@@ -265,6 +265,7 @@ path = "tests/integration.rs"
             source_roots: vec![root.path().join("src").to_string_lossy().to_string()],
             fingerprint_inputs: Vec::new(),
             cargo_metadata: None,
+            helper_metadata: None,
             output_dir: root.path().join("target/analysis"),
             helper_manifest: PathBuf::from("unused"),
             identity_resolution: SemanticIdentityMode::Disabled,

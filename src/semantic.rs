@@ -976,11 +976,10 @@ mod tests {
         definition_location, file_uri, is_semantic_candidate, percent_decode, percent_encode,
         resolve, uri_path, utf16_column_to_byte,
     };
-    use crate::config::{LensConfig, SemanticIdentityMode};
+    use crate::config::LensConfig;
     use crate::facts::{DependencyReferenceFact, FileFacts};
     use serde_json::json;
     use std::fs;
-    use std::path::PathBuf;
     use std::process::Command;
 
     #[test]
@@ -1062,25 +1061,23 @@ mod tests {
         assert!(is_semantic_candidate("crate::domain", &source, &facts));
     }
 
+    fn required_config(root: &std::path::Path, name: &str) -> anyhow::Result<LensConfig> {
+        let path = root.join("rqlens.toml");
+        fs::write(
+            &path,
+            format!(
+                "project_name = '{name}'\nsource_roots = ['src']\n[rust]\nidentity_resolution = 'required'\n"
+            ),
+        )?;
+        LensConfig::load(Some(path))
+    }
+
     #[test]
     fn required_mode_rejects_an_unavailable_analyzer() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
-        let config = LensConfig {
-            project_name: "semantic-test".to_string(),
-            fingerprint_inputs: Vec::new(),
-            cargo_metadata: None,
-            project_root: root.path().to_path_buf(),
-            source_roots: vec![root.path().join("src").to_string_lossy().to_string()],
-            output_dir: root.path().join("target/analysis"),
-            helper_manifest: PathBuf::from("unused"),
-            identity_resolution: SemanticIdentityMode::Required,
-            rust_analyzer: root.path().join("missing-rust-analyzer"),
-            identity_timeout_seconds: 1,
-            identity_offline: true,
-            verification: Default::default(),
-            architecture: Default::default(),
-            policy: Default::default(),
-        };
+        let mut config = required_config(root.path(), "semantic-test")?;
+        config.rust_analyzer = root.path().join("missing-rust-analyzer");
+        config.identity_timeout_seconds = 1;
         let source_path = root.path().join("src/lib.rs").to_string_lossy().to_string();
         let mut fact = FileFacts::test_fact(&source_path, "lib");
         fact.graph
@@ -1115,22 +1112,8 @@ mod tests {
             "mod domain;\nfn run() { domain::go(); }\n",
         )?;
         fs::write(root.path().join("src/domain.rs"), "pub fn go() {}\n")?;
-        let config = LensConfig {
-            project_name: "semantic-fixture".to_string(),
-            fingerprint_inputs: Vec::new(),
-            cargo_metadata: None,
-            project_root: root.path().to_path_buf(),
-            source_roots: vec![root.path().join("src").to_string_lossy().to_string()],
-            output_dir: root.path().join("target/analysis"),
-            helper_manifest: PathBuf::from("unused"),
-            identity_resolution: SemanticIdentityMode::Required,
-            rust_analyzer: PathBuf::from("rust-analyzer"),
-            identity_timeout_seconds: 20,
-            identity_offline: true,
-            verification: Default::default(),
-            architecture: Default::default(),
-            policy: Default::default(),
-        };
+        let mut config = required_config(root.path(), "semantic-fixture")?;
+        config.identity_timeout_seconds = 20;
         let library_path = root.path().join("src/lib.rs").to_string_lossy().to_string();
         let mut library = FileFacts::test_fact(&library_path, "lib");
         library.package_name = "semantic-fixture".to_string();
