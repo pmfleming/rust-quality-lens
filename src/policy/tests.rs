@@ -1,6 +1,12 @@
-use super::*;
-use crate::config::LensConfig;
+use super::{FailPolicy, run_check};
 use crate::measurement::MODEL_VERSION;
+use crate::util::write_json;
+use crate::{config::LensConfig, contracts::InputStatus};
+use serde_json::{Value, json};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 fn fixture() -> anyhow::Result<(tempfile::TempDir, LensConfig)> {
     let root = tempfile::tempdir()?;

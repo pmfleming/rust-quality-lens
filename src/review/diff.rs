@@ -241,7 +241,8 @@ fn decode_escape(bytes: &mut impl Iterator<Item = u8>) -> Result<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{decode_path, header_path, parse};
+    use anyhow::Result;
 
     #[test]
     fn quoted_octal_bytes_preserve_utf8_validation() -> Result<()> {

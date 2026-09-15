@@ -35,7 +35,9 @@ impl InputSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::InputSnapshot;
+    use crate::config::LensConfig;
+    use anyhow::Result;
     use std::fs;
 
     #[test]

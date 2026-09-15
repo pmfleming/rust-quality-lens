@@ -1,4 +1,7 @@
-use super::*;
+use super::read_artifact;
+use crate::config::LensConfig;
+use serde_json::json;
+use std::fs;
 
 #[test]
 fn map_uses_content_fingerprints_instead_of_artifact_timestamps() -> anyhow::Result<()> {

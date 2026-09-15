@@ -70,8 +70,11 @@ impl ArtifactBatch {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::ArtifactBatch;
+    use crate::{config::LensConfig, util::write_json};
+    use anyhow::Result;
     use serde_json::json;
+    use std::fs;
 
     #[test]
     fn changed_inputs_leave_previous_artifacts_untouched() -> Result<()> {

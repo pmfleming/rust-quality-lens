@@ -1,5 +1,8 @@
-use super::*;
+use super::{changed_line_coverage, diff, git_diff};
+use crate::{config::LensConfig, util::write_json};
+use anyhow::Result;
 use serde_json::json;
+use std::{fs, process::Command};
 
 #[test]
 fn git_quoted_unicode_filename_is_included_in_scope() -> Result<()> {
@@ -75,7 +78,7 @@ fn path_matching_preserves_case_on_case_sensitive_filesystems() -> Result<()> {
     fs::write(&lower, "lower")?;
     // macOS may have a case-insensitive filesystem even though it is Unix.
     if fs::read_to_string(&upper)? != fs::read_to_string(&lower)? {
-        assert_ne!(path_key(upper), path_key(lower));
+        assert_ne!(super::path_key(upper), super::path_key(lower));
     }
     Ok(())
 }

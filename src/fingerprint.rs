@@ -127,7 +127,9 @@ fn git(config: &LensConfig, args: &[&str]) -> crate::command_runner::CommandOutc
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Freshness, freshness, git, project};
+    use crate::{command_runner::CommandStatus, config::LensConfig};
+    use serde_json::{Value, json};
     use std::fs;
 
     #[test]

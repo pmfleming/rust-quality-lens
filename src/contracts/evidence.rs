@@ -178,7 +178,8 @@ impl InputState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::MeasurementConfidence;
+    use anyhow::Result;
     use serde_json::json;
 
     #[test]

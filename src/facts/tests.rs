@@ -1,4 +1,5 @@
-use super::*;
+use super::RunContext;
+use crate::{config::LensConfig, tool::MeasureTool};
 use serde_json::json;
 
 #[test]

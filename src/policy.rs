@@ -2,8 +2,6 @@ use anyhow::{Context, Result, bail};
 use clap::ValueEnum;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-#[cfg(test)]
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::LensConfig;

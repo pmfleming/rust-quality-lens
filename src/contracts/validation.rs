@@ -175,8 +175,10 @@ fn finding(value: &Value) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use serde_json::json;
+    use super::{map_node, operational, practice, reliability, validate_artifact};
+    use crate::measurement::MODEL_VERSION;
+    use anyhow::Result;
+    use serde_json::{Value, json};
 
     #[test]
     fn finding_status_domains_remain_distinct() {
