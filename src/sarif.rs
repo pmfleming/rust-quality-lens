@@ -326,6 +326,8 @@ mod tests {
             project_name: "sarif-test".to_string(),
             project_root: root.path().to_path_buf(),
             source_roots: vec![],
+            fingerprint_inputs: Vec::new(),
+            cargo_metadata: None,
             output_dir: analysis,
             helper_manifest: PathBuf::from("unused"),
             identity_resolution: SemanticIdentityMode::Disabled,

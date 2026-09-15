@@ -5,14 +5,12 @@ use std::collections::BTreeMap;
 use crate::artifacts::json_f64;
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext};
-use crate::measurement::{
-    escape_labels, escape_weights, provenance, source_confidence, tool_score_metadata,
-};
+use crate::measurement::{escape_labels, escape_weights, provenance, tool_score_metadata};
 use crate::util::round2;
 
-pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
+pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Value> {
     let facts = &context.source_facts;
-    let confidence = source_confidence(&config.source_roots, facts);
+    let confidence = context.source_confidence();
     let weights = escape_weights();
     let labels = escape_labels();
     let metadata = tool_score_metadata("escape_hatches");

@@ -9,7 +9,7 @@ use crate::measurement::project_relative_path;
 use crate::util::round2;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
-    let coverage = load_coverage(config);
+    let coverage = load_coverage(config, &context.snapshot.fingerprint);
     let coverage_index = coverage
         .document
         .as_ref()
@@ -61,7 +61,7 @@ struct CoverageLoad {
     stale: Vec<String>,
 }
 
-fn load_coverage(config: &LensConfig) -> CoverageLoad {
+fn load_coverage(config: &LensConfig, current: &Value) -> CoverageLoad {
     let path = config.output_dir.join("coverage.json");
     let Ok(contents) = fs::read_to_string(path) else {
         return CoverageLoad {
@@ -87,9 +87,8 @@ fn load_coverage(config: &LensConfig) -> CoverageLoad {
             stale: Vec::new(),
         };
     }
-    let current = config.input_fingerprint();
-    let stale = crate::fingerprint::freshness(&document, &current)
-        != crate::fingerprint::Freshness::Current;
+    let stale =
+        crate::fingerprint::freshness(&document, current) != crate::fingerprint::Freshness::Current;
     let coverage_complete = document["measurement_confidence"]["complete"] == true;
     CoverageLoad {
         document: (!stale).then_some(document),

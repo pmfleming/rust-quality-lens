@@ -4,9 +4,9 @@ use std::fs;
 use crate::config::LensConfig;
 use crate::contracts::artifact_document;
 use crate::facts::RunContext;
+use crate::measurement::ArtifactBatch;
 use crate::producers;
 use crate::tool::MeasureTool;
-use crate::util::write_json;
 
 pub(super) fn run(tool: MeasureTool, config: LensConfig) -> Result<()> {
     fs::create_dir_all(&config.output_dir)?;
@@ -17,26 +17,22 @@ pub(super) fn run(tool: MeasureTool, config: LensConfig) -> Result<()> {
         vec![tool]
     };
     let context = RunContext::new(&config, &tools)?;
+    let mut batch = ArtifactBatch::new(&config)?;
+    for tool in &tools {
+        let payload = producers::produce_measurement(tool, &batch.config, &context)?;
+        if matches!(tool, MeasureTool::Correctness | MeasureTool::CorrectnessRun) {
+            batch.write("test_catalog.json", &payload["tests"])?;
+        }
+        let document = artifact_document(tool, &config, &context, payload)?;
+        batch.write(tool.output_file(), &document)?;
+    }
+    batch.publish(&context.snapshot, &config)?;
     for tool in tools {
-        write_measurement(&tool, &config, &context)?;
+        println!(
+            "Wrote {} visibility data to {}",
+            tool.name(),
+            config.output_dir.join(tool.output_file()).display()
+        );
     }
-    Ok(())
-}
-
-fn write_measurement(tool: &MeasureTool, config: &LensConfig, context: &RunContext) -> Result<()> {
-    let output = config.output_dir.join(tool.output_file());
-    let payload = producers::produce_measurement(tool, config, context)?;
-    if matches!(tool, MeasureTool::Correctness | MeasureTool::CorrectnessRun) {
-        write_json(
-            &config.output_dir.join("test_catalog.json"),
-            &payload["tests"],
-        )?;
-    }
-    write_json(&output, &artifact_document(tool, config, context, payload))?;
-    println!(
-        "Wrote {} visibility data to {}",
-        tool.name(),
-        output.display()
-    );
     Ok(())
 }

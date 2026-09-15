@@ -33,6 +33,7 @@ pub(crate) fn run_review(
     diff_file: Option<PathBuf>,
 ) -> Result<PathBuf> {
     fs::create_dir_all(&config.output_dir)?;
+    let _output_lock = crate::util::lock_file(&config.output_dir.join("rqlens"))?;
     let diff = review_diff(&config.project_root, changed_since.as_deref(), &diff_file)?;
     let scope = diff::parse(&diff)?;
     let changed_files = scope
@@ -48,12 +49,16 @@ pub(crate) fn run_review(
         .cloned()
         .collect::<Vec<_>>();
 
+    let tools = if measured_files.is_empty() {
+        Vec::new()
+    } else {
+        REVIEW_TOOLS.to_vec()
+    };
+    let context = RunContext::new(&config, &tools)?;
     let (measurements, entrypoints) = if measured_files.is_empty() {
         (Vec::new(), Vec::new())
     } else {
         let measured_file_keys: HashSet<String> = measured_files.iter().map(path_key).collect();
-        let tools = REVIEW_TOOLS.to_vec();
-        let context = RunContext::new(&config, &tools)?;
         let measurements = tools
             .iter()
             .map(|tool| {
@@ -75,10 +80,12 @@ pub(crate) fn run_review(
         )
     };
 
-    let change_evidence = changed_line_coverage(&config, &changed_lines);
+    let change_evidence =
+        changed_line_coverage(&config, &changed_lines, &context.snapshot.fingerprint);
     let output = ReviewOutput {
         version: 2,
         generated_from: "rqlens",
+        input_fingerprint: context.snapshot.fingerprint.clone(),
         scope: ReviewScope {
             changed_since,
             diff_file: diff_file.map(normalize_slashes),
@@ -91,6 +98,7 @@ pub(crate) fn run_review(
         measurements,
     };
     let output_path = config.output_dir.join("review.json");
+    context.snapshot.ensure_unchanged(&config)?;
     write_json(&output_path, &serde_json::to_value(output)?)?;
     Ok(output_path)
 }
@@ -155,6 +163,7 @@ fn git_diff(project_root: &Path, base: &str) -> Result<String> {
 fn changed_line_coverage(
     config: &LensConfig,
     ranges: &std::collections::BTreeMap<String, Vec<[u64; 2]>>,
+    current: &serde_json::Value,
 ) -> serde_json::Value {
     let path = config.output_dir.join("coverage.json");
     let Ok(text) = fs::read_to_string(&path) else {
@@ -166,9 +175,7 @@ fn changed_line_coverage(
     if let Err(error) = crate::contracts::validate_artifact("coverage.json", &document) {
         return serde_json::json!({"status": "unavailable", "reason": error.to_string()});
     }
-    let current = config.input_fingerprint();
-    if crate::fingerprint::freshness(&document, &current) != crate::fingerprint::Freshness::Current
-    {
+    if crate::fingerprint::freshness(&document, current) != crate::fingerprint::Freshness::Current {
         return serde_json::json!({"status": "stale", "reason": "coverage inputs do not match the current source"});
     }
     if document["measurement_confidence"]["complete"] != true {

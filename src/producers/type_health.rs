@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::artifacts::json_f64;
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, ImplFact, RunContext, TypeFact};
-use crate::measurement::{provenance, source_confidence, tool_score_metadata, type_risk};
+use crate::measurement::{provenance, tool_score_metadata, type_risk};
 use crate::util::round2;
 
 #[derive(Clone, Default)]
@@ -15,9 +15,9 @@ struct ImplSummary {
     files: BTreeSet<String>,
 }
 
-pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
+pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Value> {
     let facts = &context.source_facts;
-    let confidence = source_confidence(&config.source_roots, facts);
+    let confidence = context.source_confidence();
     let metadata = tool_score_metadata("type_health");
     let provenance = provenance();
     let impls = impl_index(facts);

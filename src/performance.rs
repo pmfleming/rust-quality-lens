@@ -8,6 +8,7 @@ use walkdir::WalkDir;
 
 use crate::command_runner::{CommandRequest, CommandStatus, run};
 use crate::config::LensConfig;
+use crate::contracts::{BenchmarkRecord, benchmark_index, benchmark_records};
 use crate::util::{normalize_slashes, round2, write_json};
 
 pub(crate) fn run_benchmarks(
@@ -18,6 +19,7 @@ pub(crate) fn run_benchmarks(
     // Validate the requested baseline before starting an expensive command.
     let baseline_records = baseline.as_deref().map(read_baseline).transpose()?;
     let target = cargo_target_directory(config)?;
+    let snapshot = crate::measurement::InputSnapshot::capture(config);
     // Criterion honors CRITERION_HOME. A fresh directory prevents removed or
     // skipped benchmarks from being certified by an unrelated successful run.
     let criterion_root = if no_run {
@@ -39,7 +41,7 @@ pub(crate) fn run_benchmarks(
         );
         Some(run(request))
     };
-    let records = criterion_records(&criterion_root);
+    let (records, mut read_errors) = criterion_records(&criterion_root);
     let comparisons = baseline_records
         .as_deref()
         .map(|baseline| comparisons(&records, baseline))
@@ -51,22 +53,27 @@ pub(crate) fn run_benchmarks(
     let command_passed = command
         .as_ref()
         .is_none_or(|outcome| outcome.status == CommandStatus::Passed);
+    if !command_passed {
+        read_errors.push("cargo bench did not complete successfully".to_string());
+    }
+    let complete =
+        !no_run && command_passed && !records.is_empty() && !incomparable && read_errors.is_empty();
     let confidence = json!({
-        "complete": !no_run && command_passed && !records.is_empty() && !incomparable,
-        "partial": no_run || !command_passed || records.is_empty() || incomparable,
+        "complete": complete,
+        "partial": !complete,
         "confidence_scope": "criterion_benchmark_execution",
         "required_inputs": ["cargo_bench", "criterion_estimates"],
         "observed_inputs": {"benchmark_count": records.len(), "command_executed": !no_run},
         "missing_input": if records.is_empty() { vec!["no Criterion estimates were found"] } else if incomparable { vec!["current and baseline benchmark IDs do not match"] } else { Vec::<&str>::new() },
         "stale_input": if no_run { vec!["benchmark execution time is unknown because --no-run reused existing estimates"] } else { Vec::<&str>::new() },
-        "unsupported_pattern": if command_passed { Vec::<String>::new() } else { vec!["cargo bench did not complete successfully".to_string()] },
+        "unsupported_pattern": read_errors,
     });
     let document = json!({
         "schema_version": 1,
         "generated_from": "rqlens",
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "generator_version": env!("CARGO_PKG_VERSION"),
-        "input_fingerprint": config.input_fingerprint(),
+        "input_fingerprint": snapshot.fingerprint,
         "tool": "performance",
         "measurement_confidence": confidence,
         "summary": {
@@ -83,73 +90,78 @@ pub(crate) fn run_benchmarks(
     });
     fs::create_dir_all(&config.output_dir)?;
     let output = config.output_dir.join("performance.json");
+    snapshot.ensure_unchanged(config)?;
     write_json(&output, &document)?;
     Ok(output)
 }
 
 fn cargo_target_directory(config: &LensConfig) -> Result<PathBuf> {
-    let mut command = std::process::Command::new("cargo");
-    command
-        .args(["metadata", "--no-deps", "--format-version", "1"])
-        .current_dir(&config.project_root);
-    if config.verification.locked {
-        command.arg("--locked");
-    }
-    if config.identity_offline {
-        command.arg("--offline");
-    }
-    let output = crate::command_runner::checked_output(&mut command, Duration::from_secs(30))?;
-    let metadata: Value = serde_json::from_str(&output.stdout)?;
-    metadata["target_directory"]
-        .as_str()
+    config
+        .cargo_metadata
+        .as_ref()
+        .and_then(|metadata| metadata["target_directory"].as_str())
         .map(PathBuf::from)
         .context("Cargo metadata is missing target_directory")
 }
 
-fn criterion_records(root: &Path) -> Vec<Value> {
-    let mut rows = WalkDir::new(root)
-        .into_iter()
-        .filter_map(Result::ok)
-        .map(|entry| entry.into_path())
-        .filter(|path| normalize_slashes(path).ends_with("/new/estimates.json"))
-        .filter_map(|path| criterion_record(root, &path))
-        .collect::<Vec<_>>();
-    rows.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
-    rows
+fn criterion_records(root: &Path) -> (Vec<BenchmarkRecord>, Vec<String>) {
+    let mut rows = Vec::new();
+    let mut errors = Vec::new();
+    for entry in WalkDir::new(root) {
+        match entry {
+            Ok(entry) if normalize_slashes(entry.path()).ends_with("/new/estimates.json") => {
+                match criterion_record(root, entry.path()) {
+                    Ok(record) => rows.push(record),
+                    Err(error) => errors.push(format!("{}: {error:#}", entry.path().display())),
+                }
+            }
+            Ok(_) => {}
+            Err(error) => errors.push(error.to_string()),
+        }
+    }
+    rows.sort_by(|left, right| left.id.cmp(&right.id));
+    (rows, errors)
 }
 
-fn criterion_record(root: &Path, path: &Path) -> Option<Value> {
-    let estimates: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+fn criterion_record(root: &Path, path: &Path) -> Result<BenchmarkRecord> {
+    let estimates: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
     let estimate = estimates["slope"]["point_estimate"]
         .as_f64()
-        .or_else(|| estimates["mean"]["point_estimate"].as_f64())?;
-    let benchmark_dir = path.parent()?.parent()?;
-    let id = normalize_slashes(benchmark_dir.strip_prefix(root).ok()?);
-    Some(json!({
-        "id": id,
-        "estimate_nanoseconds": estimate,
-        "source": normalize_slashes(path),
-        "engine": "criterion",
-    }))
+        .or_else(|| estimates["mean"]["point_estimate"].as_f64())
+        .context("missing Criterion point estimate")?;
+    let benchmark_dir = path
+        .parent()
+        .and_then(Path::parent)
+        .context("invalid Criterion path")?;
+    let record = BenchmarkRecord {
+        id: normalize_slashes(benchmark_dir.strip_prefix(root)?),
+        estimate_nanoseconds: estimate,
+        details: serde_json::Map::from_iter([
+            ("source".to_string(), json!(normalize_slashes(path))),
+            ("engine".to_string(), json!("criterion")),
+        ]),
+    };
+    benchmark_index(std::slice::from_ref(&record))?;
+    Ok(record)
 }
 
-fn read_baseline(path: &Path) -> Result<Vec<Value>> {
+fn read_baseline(path: &Path) -> Result<Vec<BenchmarkRecord>> {
     let document = crate::contracts::read_baseline(path, "performance.json")?;
-    document["data"]["records"]
-        .as_array()
-        .cloned()
-        .context("missing baseline benchmark records")
+    benchmark_records(&document["data"]["records"])
 }
 
-pub(crate) fn comparisons(current: &[Value], baseline: &[Value]) -> Result<Vec<Value>> {
-    let current = crate::contracts::benchmark_estimates(current)?;
-    let old = crate::contracts::benchmark_estimates(baseline)?;
+pub(crate) fn comparisons(
+    current: &[BenchmarkRecord],
+    baseline: &[BenchmarkRecord],
+) -> Result<Vec<Value>> {
+    let current = benchmark_index(current)?;
+    let old = benchmark_index(baseline)?;
     current.keys().chain(old.keys()).collect::<BTreeSet<_>>().into_iter().map(|id| {
         let (Some(current), Some(baseline)) = (current.get(id), old.get(id)) else {
             return Ok(json!({"id": id, "direction": "incomparable", "reason": if current.contains_key(id) { "benchmark is missing from baseline" } else { "benchmark is missing from current run" }}));
         };
         let delta_percent = (current - baseline) / baseline * 100.0;
-        anyhow::ensure!(delta_percent.is_finite(), "benchmark {id} percentage change overflows");
+        anyhow::ensure!(round2(delta_percent).is_finite(), "benchmark {id} percentage change overflows");
         Ok(json!({
             "id": id,
             "baseline_nanoseconds": baseline,
@@ -207,9 +219,67 @@ mod tests {
     }
 
     #[test]
+    fn criterion_parse_failures_are_retained_without_dropping_valid_records() -> anyhow::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        for (name, text) in [
+            ("good", r#"{"mean":{"point_estimate":0.001}}"#),
+            ("bad", "{broken"),
+            ("zero", r#"{"mean":{"point_estimate":0}}"#),
+        ] {
+            let directory = root.path().join(name).join("new");
+            std::fs::create_dir_all(&directory)?;
+            std::fs::write(directory.join("estimates.json"), text)?;
+        }
+        let (records, errors) = super::criterion_records(root.path());
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].estimate_nanoseconds, 0.001);
+        assert_eq!(errors.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn benchmark_execution_writes_into_its_isolated_directory() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir(root.path().join("src"))?;
+        std::fs::write(root.path().join("src/lib.rs"), "pub fn value() {}")?;
+        std::fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname = \"criterion-protocol-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[[bench]]\nname = \"probe\"\npath = \"probe.rs\"\nharness = false\n",
+        )?;
+        std::fs::write(
+            root.path().join("probe.rs"),
+            r#"
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let home = std::path::PathBuf::from(std::env::var_os("CRITERION_HOME").ok_or("missing CRITERION_HOME")?);
+    let directory = home.join("probe/new");
+    std::fs::create_dir_all(&directory)?;
+    std::fs::write(directory.join("estimates.json"), "{\"mean\":{\"point_estimate\":42.0}}")?;
+    Ok(())
+}
+"#,
+        )?;
+        let config_path = root.path().join("rqlens.toml");
+        std::fs::write(&config_path, "source_roots = [\"src\"]\n")?;
+        let config = crate::config::LensConfig::load(Some(config_path))?;
+        let output = run_benchmarks(&config, None, false)?;
+        let document: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output)?)?;
+        assert_eq!(document["measurement_confidence"]["complete"], true);
+        assert_eq!(document["data"]["records"][0]["id"], "probe");
+        let source = document["data"]["records"][0]["source"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("missing estimate source"))?;
+        assert!(std::path::Path::new(source).is_file());
+        assert!(source.contains("rqlens-bench-runs"));
+        Ok(())
+    }
+
+    #[test]
     fn benchmark_comparisons_report_relative_regressions() -> anyhow::Result<()> {
-        let current = [json!({"id": "parse", "estimate_nanoseconds": 120.0})];
-        let baseline = [json!({"id": "parse", "estimate_nanoseconds": 100.0})];
+        let current =
+            super::benchmark_records(&json!([{"id": "parse", "estimate_nanoseconds": 120.0}]))?;
+        let baseline =
+            super::benchmark_records(&json!([{"id": "parse", "estimate_nanoseconds": 100.0}]))?;
         let rows = comparisons(&current, &baseline)?;
         assert_eq!(rows[0]["delta_percent"], 20.0);
         assert_eq!(rows[0]["direction"], "regressed");

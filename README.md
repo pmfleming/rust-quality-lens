@@ -81,7 +81,19 @@ Print the complete option set and defaults with:
 rqlens config-schema
 ```
 
-Unknown configuration fields are rejected.
+Unknown configuration fields are rejected. Declare non-Rust build/test inputs
+(such as `include_str!` assets, schemas, or fixtures) explicitly when they affect
+your results:
+
+```toml
+fingerprint_inputs = ["assets/schema.json", "tests/data"]
+```
+
+These are project-relative files or directories, not glob patterns. Missing
+paths make evidence partial. Standard Rust/Cargo inputs, formatting/lint
+configuration, and the repository-policy files checked by `verify` are included
+automatically; Cargo's target directory and the analysis output are excluded
+unless explicitly listed.
 
 ### Measure a project
 
@@ -229,6 +241,12 @@ Confidence records required, observed, missing, stale, and unsupported inputs.
 An empty complete result is therefore distinct from incomplete extraction.
 `check --fail-on partial` rejects incomplete or fingerprint-stale standard
 artifacts.
+
+Each measurement run shares one pre-extraction fingerprint, toolchain snapshot,
+source inventory, Cargo metadata result, and lazily constructed module graph.
+Outputs are staged and input fingerprints are checked again before publication;
+if inputs changed, the run fails without replacing previous artifacts. See
+[Evidence Pipeline](docs/evidence-pipeline.md) for the contracts and limits.
 
 RQLens normally extracts Rust facts with `syn`. If a readable file does not
 parse, `tree-sitter-rust` recovers text metrics, function spans, and raw

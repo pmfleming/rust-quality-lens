@@ -10,7 +10,7 @@ use crate::command_runner::{CommandOutcome, CommandRequest, CommandStatus, run};
 use crate::config::LensConfig;
 
 pub(super) fn produce(config: &LensConfig, context: &crate::facts::RunContext) -> Result<Value> {
-    let toolchain = &context.toolchain;
+    let toolchain = &context.snapshot.toolchain;
     let mut checks = official_checks(config);
     checks.extend([
         audit_check(config),

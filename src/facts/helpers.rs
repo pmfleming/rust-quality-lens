@@ -8,17 +8,17 @@ use tempfile::NamedTempFile;
 
 use crate::config::LensConfig;
 use crate::facts::{AstCloneFact, FileFacts, HELPER_BINARIES, HelperBinaryKey};
-use crate::util::{absolutize, iter_rust_files, normalize_slashes, resolve_project_path};
+use crate::util::{absolutize, normalize_slashes, resolve_project_path};
 
-pub(super) fn rust_facts_for_paths(
+pub(super) fn rust_facts_for_files(
     config: &LensConfig,
-    paths: &[String],
+    files: &[PathBuf],
+    targets: &[CargoTarget],
 ) -> Result<Vec<FileFacts>> {
     let mut facts: Vec<FileFacts> =
-        helper_json_for_paths(config, paths, "rust_facts", "Rust fact extraction")?;
-    let targets = cargo_targets(config);
+        helper_json_for_files(config, files, "rust_facts", "Rust fact extraction")?;
     for fact in &mut facts {
-        let metadata = target_metadata(config, &fact.path, &targets);
+        let metadata = target_metadata(config, &fact.path, targets);
         fact.target_kind = metadata.target_kind;
         fact.entrypoint_kind = metadata.entrypoint_kind;
         fact.is_entrypoint = fact.entrypoint_kind.is_some();
@@ -62,26 +62,25 @@ fn mark_test_module_findings(facts: &mut [FileFacts]) {
     }
 }
 
-pub(crate) fn ast_clone_facts_for_paths(
+pub(crate) fn ast_clone_facts_for_files(
     config: &LensConfig,
-    paths: &[String],
+    files: &[PathBuf],
 ) -> Result<Vec<AstCloneFact>> {
-    helper_json_for_paths(config, paths, "ast_hasher", "AST clone extraction")
+    helper_json_for_files(config, files, "ast_hasher", "AST clone extraction")
 }
 
-fn helper_json_for_paths<T: serde::de::DeserializeOwned>(
+fn helper_json_for_files<T: serde::de::DeserializeOwned>(
     config: &LensConfig,
-    paths: &[String],
+    files: &[PathBuf],
     bin: &str,
     label: &str,
 ) -> Result<Vec<T>> {
-    let files = rust_file_args(paths);
     if files.is_empty() {
         return Ok(Vec::new());
     }
     let mut temp = NamedTempFile::new()?;
-    for file in &files {
-        writeln!(temp, "{file}")?;
+    for file in files {
+        writeln!(temp, "{}", normalize_slashes(file))?;
     }
     let helper = helper_binary(config, bin)?;
     let mut command = Command::new(&helper);
@@ -98,13 +97,6 @@ fn helper_json_for_paths<T: serde::de::DeserializeOwned>(
     )
     .with_context(|| format!("running {label} helper {}", helper.display()))?;
     Ok(serde_json::from_str(&output.stdout)?)
-}
-
-fn rust_file_args(paths: &[String]) -> Vec<String> {
-    iter_rust_files(paths)
-        .into_iter()
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .collect()
 }
 
 fn helper_binary(config: &LensConfig, bin: &str) -> Result<PathBuf> {
@@ -192,7 +184,7 @@ struct TargetMetadata {
     identity_backend: String,
 }
 
-struct CargoTarget {
+pub(super) struct CargoTarget {
     src_path: PathBuf,
     manifest_dir: PathBuf,
     package_name: String,
@@ -285,18 +277,9 @@ fn target_metadata_for_target(target: &CargoTarget, kind: &str) -> TargetMetadat
     }
 }
 
-fn cargo_targets(config: &LensConfig) -> Vec<CargoTarget> {
-    let output = crate::command_runner::checked_output(
-        Command::new("cargo")
-            .args(["metadata", "--no-deps", "--format-version", "1"])
-            .current_dir(&config.project_root),
-        std::time::Duration::from_secs(config.verification.timeout_seconds),
-    );
-    let Ok(output) = output else {
+pub(super) fn cargo_targets(config: &LensConfig) -> Vec<CargoTarget> {
+    let Some(metadata) = &config.cargo_metadata else {
         return manifest_targets(config);
-    };
-    let Ok(metadata) = serde_json::from_str::<Value>(&output.stdout) else {
-        return Vec::new();
     };
     metadata["packages"]
         .as_array()

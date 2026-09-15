@@ -357,7 +357,7 @@ fn fingerprint(
 ) -> Option<String> {
     // Includes member manifests and configuration, and detects edits even when
     // file lengths and timestamps are preserved. Never cache unreadable inputs.
-    let source = crate::util::project_input_fingerprint(&config.project_root, &config.source_roots);
+    let source = config.source_fingerprint();
     if source["complete"] != true {
         return None;
     }
@@ -1072,6 +1072,8 @@ mod tests {
         let root = tempfile::tempdir()?;
         let config = LensConfig {
             project_name: "semantic-test".to_string(),
+            fingerprint_inputs: Vec::new(),
+            cargo_metadata: None,
             project_root: root.path().to_path_buf(),
             source_roots: vec![root.path().join("src").to_string_lossy().to_string()],
             output_dir: root.path().join("target/analysis"),
@@ -1120,6 +1122,8 @@ mod tests {
         fs::write(root.path().join("src/domain.rs"), "pub fn go() {}\n")?;
         let config = LensConfig {
             project_name: "semantic-fixture".to_string(),
+            fingerprint_inputs: Vec::new(),
+            cargo_metadata: None,
             project_root: root.path().to_path_buf(),
             source_roots: vec![root.path().join("src").to_string_lossy().to_string()],
             output_dir: root.path().join("target/analysis"),

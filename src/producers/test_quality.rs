@@ -4,16 +4,14 @@ use std::collections::BTreeSet;
 
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext, TestFact};
-use crate::measurement::source_confidence;
 
-pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
+pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Value> {
     let facts = merged_facts(context);
-    let paths = if context.correctness_paths.is_empty() {
-        &config.source_roots
+    let confidence = if context.correctness_paths.is_empty() {
+        context.source_confidence()
     } else {
-        &context.correctness_paths
+        context.correctness_confidence()
     };
-    let confidence = source_confidence(paths, &facts);
     let mut seen = BTreeSet::new();
     let tests = facts
         .iter()

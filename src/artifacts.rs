@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, ModuleGraph, ModuleInfo};
-use crate::measurement::{module_for_path, source_confidence};
+use crate::measurement::{module_for_path, source_confidence_from_inventory};
 use crate::risk_model::{
     ArchitectureRiskInputs, ArchitectureRiskScores, ChangeFacts, CorrectnessFacts,
     architecture_risk_scores,
@@ -39,9 +39,18 @@ pub(crate) struct MapEvidence {
 }
 
 impl MapEvidence {
-    pub(crate) fn load(config: &LensConfig, graph: &ModuleGraph) -> Self {
+    pub(crate) fn load(
+        config: &LensConfig,
+        graph: &ModuleGraph,
+        fingerprint: &Value,
+        output_dir: &std::path::Path,
+    ) -> Self {
+        let mut artifacts = MapArtifacts::load(config, fingerprint);
+        for read in &mut artifacts.reads {
+            read.path = output_dir.join(read.name);
+        }
         Self {
-            artifacts: MapArtifacts::load(config),
+            artifacts,
             git_history: git_history_facts(config, graph),
             cycle_modules: cycle_modules(&graph.dependencies),
             layer_violations: layer_violations(graph),
@@ -52,7 +61,7 @@ impl MapEvidence {
         self.artifacts.status_json(&self.git_history)
     }
 
-    pub(crate) fn measurement_confidence(&self, paths: &[String], facts: &[FileFacts]) -> Value {
+    pub(crate) fn measurement_confidence(&self, paths: &[PathBuf], facts: &[FileFacts]) -> Value {
         map_measurement_confidence(paths, facts, &self.artifacts, &self.git_history)
     }
 
@@ -150,13 +159,12 @@ pub(crate) struct MapArtifacts {
 }
 
 impl MapArtifacts {
-    pub(crate) fn load(config: &LensConfig) -> Self {
-        let fingerprint = config.input_fingerprint();
-        let hotspot_read = read_artifact(config, "hotspots.json", true, &fingerprint);
-        let correctness_read = read_artifact(config, "correctness_review.json", true, &fingerprint);
-        let locality_read = read_artifact(config, "locality_metrics.json", true, &fingerprint);
-        let leverage_read = read_artifact(config, "leverage_metrics.json", true, &fingerprint);
-        let coverage_read = read_artifact(config, "coverage.json", false, &fingerprint);
+    pub(crate) fn load(config: &LensConfig, fingerprint: &Value) -> Self {
+        let hotspot_read = read_artifact(config, "hotspots.json", true, fingerprint);
+        let correctness_read = read_artifact(config, "correctness_review.json", true, fingerprint);
+        let locality_read = read_artifact(config, "locality_metrics.json", true, fingerprint);
+        let leverage_read = read_artifact(config, "leverage_metrics.json", true, fingerprint);
+        let coverage_read = read_artifact(config, "coverage.json", false, fingerprint);
         let hotspots = hotspot_read.value.as_ref().map(indices::hotspot_index);
         let correctness = correctness_read
             .value
@@ -305,12 +313,12 @@ fn artifact_read(
 }
 
 pub(crate) fn map_measurement_confidence(
-    paths: &[String],
+    paths: &[PathBuf],
     facts: &[FileFacts],
     artifacts: &MapArtifacts,
     git_history: &GitHistoryIndex,
 ) -> Value {
-    let mut confidence = source_confidence(paths, facts);
+    let mut confidence = source_confidence_from_inventory(paths, facts);
     let Some(object) = confidence.as_object_mut() else {
         return confidence;
     };

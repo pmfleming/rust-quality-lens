@@ -57,7 +57,7 @@ fn covered_context_does_not_inflate_changed_line_coverage() -> Result<()> {
     let scope = diff::parse(
         "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,7 +1,7 @@\n one\n two\n three\n-old\n+new\n five\n six\n seven\n",
     )?;
-    let evidence = changed_line_coverage(&config, &scope.additions);
+    let evidence = changed_line_coverage(&config, &scope.additions, &config.input_fingerprint());
     assert_eq!(evidence["status"], "observed");
     assert_eq!(evidence["changed_executable_lines"], 1);
     assert_eq!(evidence["changed_covered_lines"], 0);

@@ -1,19 +1,13 @@
 use anyhow::{Result, bail, ensure};
-use serde::Deserialize;
 use serde_json::Value;
 
 use crate::measurement::MODEL_VERSION;
 use crate::tool::MeasureTool;
 
-#[derive(Deserialize)]
-struct Confidence {
-    complete: bool,
-    partial: bool,
-}
-
 // Consumers must validate before interpreting absent fields as empty findings.
 // Legacy, unversioned payloads are not accepted as current measurement evidence.
-pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<()> {
+pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<super::ArtifactHeader> {
+    let header: super::ArtifactHeader = serde_json::from_value(value.clone())?;
     let auxiliary = match file {
         "performance.json" => Some("performance"),
         "repository_outcomes.json" => Some("repository-outcomes"),
@@ -26,34 +20,23 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<()> {
     let expected_tool = auxiliary.or_else(|| tool.as_ref().map(MeasureTool::name));
     ensure!(expected_tool.is_some(), "unknown artifact {file}");
     ensure!(
-        value["schema_version"].as_u64() == Some(if auxiliary.is_some() { 1 } else { 3 }),
+        header.schema_version == if auxiliary.is_some() { 1 } else { 3 },
         "unsupported or missing artifact schema version"
     );
     ensure!(
-        value["tool"].as_str() == expected_tool
-            || (file == "correctness_review.json" && value["tool"] == "correctness"),
+        Some(header.tool.as_str()) == expected_tool
+            || (file == "correctness_review.json" && header.tool == "correctness"),
         "artifact tool does not match {file}"
     );
     if auxiliary.is_none() {
         ensure!(
-            value["risk_model_version"].as_u64() == Some(MODEL_VERSION),
+            header.risk_model_version == Some(MODEL_VERSION),
             "artifact uses a different or missing risk model version"
         );
     }
-    let confidence: Confidence = serde_json::from_value(value["measurement_confidence"].clone())?;
     ensure!(
-        confidence.complete != confidence.partial,
-        "inconsistent measurement confidence"
-    );
-    ensure!(
-        value["input_fingerprint"]["digest"]
-            .as_str()
-            .is_some_and(|digest| !digest.is_empty()),
+        !header.input_fingerprint.digest.is_empty(),
         "missing input fingerprint digest"
-    );
-    ensure!(
-        value["input_fingerprint"]["complete"].is_boolean(),
-        "missing fingerprint completeness"
     );
     let array_payload = matches!(
         tool,
@@ -83,10 +66,14 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<()> {
         },
         "missing or invalid {key} payload"
     );
-    if file == "coverage.json" && confidence.complete {
+    if file == "coverage.json" && header.measurement_confidence.is_complete() {
         super::coverage_percent(value)?;
     }
-    validate_policy_payload(file, payload)
+    if file == "performance.json" {
+        super::benchmark_records(&payload["records"])?;
+    }
+    validate_policy_payload(file, payload)?;
+    Ok(header)
 }
 
 fn validate_policy_payload(file: &str, payload: &Value) -> Result<()> {
@@ -159,10 +146,7 @@ fn validate_policy_payload(file: &str, payload: &Value) -> Result<()> {
                 );
             }
         }
-        "performance.json" => {
-            super::benchmark_estimates(array(&payload["records"])?)?;
-        }
-        "repository_outcomes.json" => {
+        "performance.json" | "repository_outcomes.json" => {
             array(&payload["records"])?;
         }
         _ => {}

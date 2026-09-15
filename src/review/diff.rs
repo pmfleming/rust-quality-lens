@@ -39,19 +39,35 @@ fn parse_line(
         && !active.finished()
     {
         let added = active.consume(line)?;
-        if added && let Some(path) = new_path.as_ref() {
-            let ranges = scope.additions.entry(path.clone()).or_default();
-            let number = active.new_line - 1;
-            if let Some(last) = ranges.last_mut()
-                && last[1].checked_add(1) == Some(number)
-            {
-                last[1] = number;
-            } else {
-                ranges.push([number, number]);
-            }
+        if added {
+            record_addition(scope, new_path.as_deref(), active.new_line - 1);
         }
         return Ok(());
     }
+    parse_header(line, scope, old_path, new_path, hunk)
+}
+
+fn record_addition(scope: &mut DiffScope, path: Option<&str>, number: u64) {
+    let Some(path) = path else {
+        return;
+    };
+    let ranges = scope.additions.entry(path.to_string()).or_default();
+    if let Some(last) = ranges.last_mut()
+        && last[1].checked_add(1) == Some(number)
+    {
+        last[1] = number;
+    } else {
+        ranges.push([number, number]);
+    }
+}
+
+fn parse_header(
+    line: &str,
+    scope: &mut DiffScope,
+    old_path: &mut Option<String>,
+    new_path: &mut Option<String>,
+    hunk: &mut Option<Hunk>,
+) -> Result<()> {
     if line.starts_with("diff --git ") {
         *old_path = None;
         *new_path = None;

@@ -10,8 +10,13 @@ use crate::util::normalize_slashes;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let graph = context.module_graph();
-    let evidence = MapEvidence::load(config, &graph);
-    let architecture_evaluation = config.architecture.evaluate(&graph);
+    let evidence = MapEvidence::load(
+        config,
+        graph,
+        &context.snapshot.fingerprint,
+        &context.snapshot.output_dir,
+    );
+    let architecture_evaluation = config.architecture.evaluate(graph);
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut unknown_metric_counts = BTreeMap::new();
@@ -19,13 +24,13 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
 
     for module in graph.modules.values() {
         let node = MapNodeInputs {
-            graph: &graph,
+            graph,
             module,
             evidence: &evidence,
         }
         .build(&mut unknown_metric_counts, &mut unknown_module_count);
         nodes.push(node);
-        edges.extend(module_edges(&graph, module, &evidence));
+        edges.extend(module_edges(graph, module, &evidence));
     }
 
     let summary = json!({
@@ -41,7 +46,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         },
     });
     let mut measurement_confidence =
-        evidence.measurement_confidence(&config.source_roots, &graph.facts);
+        evidence.measurement_confidence(&context.source_files, &graph.facts);
     if let Some(object) = measurement_confidence.as_object_mut() {
         object.insert(
             "semantic_identity".to_string(),

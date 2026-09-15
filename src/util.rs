@@ -164,16 +164,31 @@ pub(crate) fn stable_hash(value: &str) -> String {
     format!("{:016x}", fnv1a(1469598103934665603, value.as_bytes()))
 }
 
-pub(crate) fn project_input_fingerprint(project_root: &Path, source_roots: &[String]) -> Value {
+#[cfg(test)]
+fn project_input_fingerprint(project_root: &Path, source_roots: &[String]) -> Value {
+    quality_input_fingerprint(project_root, source_roots, &[], &[])
+}
+
+pub(crate) fn quality_input_fingerprint(
+    project_root: &Path,
+    source_roots: &[String],
+    extra_inputs: &[String],
+    excluded: &[PathBuf],
+) -> Value {
     let mut files = BTreeSet::new();
     let mut read_errors = Vec::new();
-    for root in std::iter::once(project_root).chain(source_roots.iter().map(Path::new)) {
-        for entry in WalkDir::new(root)
-            .into_iter()
-            .filter_entry(|entry| !ignored_input_directory(entry.path(), root))
-        {
+    for (root, explicit) in std::iter::once((project_root, false))
+        .chain(source_roots.iter().map(|root| (Path::new(root), false)))
+        .chain(extra_inputs.iter().map(|root| (Path::new(root), true)))
+    {
+        for entry in WalkDir::new(root).into_iter().filter_entry(|entry| {
+            !ignored_input_directory(entry.path(), root)
+                && (explicit || !excluded.iter().any(|path| entry.path().starts_with(path)))
+        }) {
             match entry {
-                Ok(entry) if entry.path().is_file() && is_quality_input(entry.path()) => {
+                Ok(entry)
+                    if entry.path().is_file() && (explicit || is_quality_input(entry.path())) =>
+                {
                     files.insert(absolutize(entry.path()));
                 }
                 Ok(_) => {}

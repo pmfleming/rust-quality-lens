@@ -3,26 +3,31 @@ use serde_json::{Value, json};
 
 use crate::config::LensConfig;
 use crate::facts::RunContext;
-use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
+use crate::measurement::{MODEL_ID, MODEL_VERSION};
 use crate::tool::MeasureTool;
 
-mod baseline;
-pub(crate) use baseline::{
-    benchmark_estimates, coverage_percent, read_baseline, validate_comparison_evidence,
+mod evidence;
+pub(crate) use evidence::{
+    ArtifactHeader, BenchmarkRecord, CoveragePayload, InputState, InputStatus,
+    MeasurementConfidence, benchmark_index, benchmark_records,
 };
+mod baseline;
+pub(crate) use baseline::{coverage_percent, read_baseline, validate_comparison_evidence};
 mod validation;
 pub(crate) use validation::validate_artifact;
 
 pub(crate) fn artifact_document(
     tool: &MeasureTool,
-    config: &LensConfig,
+    _config: &LensConfig,
     context: &RunContext,
     payload: Value,
-) -> Value {
-    let mut confidence = payload
-        .get("measurement_confidence")
-        .cloned()
-        .unwrap_or_else(|| source_confidence(&config.source_roots, &context.source_facts));
+) -> anyhow::Result<Value> {
+    let mut confidence: MeasurementConfidence = serde_json::from_value(
+        payload
+            .get("measurement_confidence")
+            .cloned()
+            .unwrap_or_else(|| context.source_confidence()),
+    )?;
     if matches!(
         tool,
         MeasureTool::ArchitectureRules
@@ -30,27 +35,19 @@ pub(crate) fn artifact_document(
             | MeasureTool::Leverage
             | MeasureTool::ModuleCohesion
             | MeasureTool::Map
-    ) && let Some(object) = confidence.as_object_mut()
-    {
-        object.insert(
-            "semantic_identity".to_string(),
-            context.identity_resolution.to_json(),
-        );
+    ) {
+        confidence.insert("semantic_identity", context.identity_resolution.to_json());
     }
-    let input_fingerprint = config.input_fingerprint();
+    let input_fingerprint = &context.snapshot.fingerprint;
     if input_fingerprint["complete"] != true {
-        confidence["complete"] = json!(false);
-        confidence["partial"] = json!(true);
-        if let Some(missing) = confidence["missing_input"].as_array_mut() {
-            missing.push(json!("quality input fingerprint is incomplete"));
-        }
+        confidence.mark_partial("quality input fingerprint is incomplete");
     }
     let mut document = json!({
         "schema_version": 3,
         "generated_from": "rqlens",
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "generator_version": env!("CARGO_PKG_VERSION"),
-        "toolchain": crate::toolchain::as_json(&context.toolchain),
+        "toolchain": crate::toolchain::as_json(&context.snapshot.toolchain),
         "input_fingerprint": input_fingerprint,
         "tool": tool.name(),
         "risk_model_id": MODEL_ID,
@@ -69,7 +66,8 @@ pub(crate) fn artifact_document(
             payload,
         );
     }
-    document
+    validate_artifact(tool.output_file(), &document)?;
+    Ok(document)
 }
 
 fn artifact_summary(tool: &MeasureTool, context: &RunContext, payload: &Value) -> Value {
@@ -129,6 +127,7 @@ fn clone_summary(records: &[Value], context: &RunContext) -> Value {
 pub(crate) struct ReviewOutput {
     pub(crate) version: u64,
     pub(crate) generated_from: &'static str,
+    pub(crate) input_fingerprint: Value,
     pub(crate) scope: ReviewScope,
     pub(crate) change_evidence: Value,
     pub(crate) measurements: Vec<ReviewMeasurement>,

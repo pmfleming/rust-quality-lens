@@ -1,13 +1,11 @@
 use serde_json::{Value, json};
 
 use crate::facts::FileFacts;
-use crate::util::iter_rust_files;
 
 pub(crate) fn source_scan_confidence_with_errors(
-    paths: &[String],
+    files: &[std::path::PathBuf],
     read_errors: Vec<String>,
 ) -> Value {
-    let files = iter_rust_files(paths);
     let missing = missing_source_files(files.is_empty());
     let complete = missing.is_empty() && read_errors.is_empty();
     json!({
@@ -24,8 +22,10 @@ pub(crate) fn source_scan_confidence_with_errors(
     })
 }
 
-pub(crate) fn source_confidence(paths: &[String], facts: &[FileFacts]) -> Value {
-    let files = iter_rust_files(paths);
+pub(crate) fn source_confidence_from_inventory(
+    files: &[std::path::PathBuf],
+    facts: &[FileFacts],
+) -> Value {
     let mut missing = missing_source_files(files.is_empty());
     if !files.is_empty() && facts.is_empty() {
         missing.push("Rust syntax fact extraction returned no files");

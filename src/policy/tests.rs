@@ -121,8 +121,8 @@ fn operational_policy_rechecks_observation_age() -> anyhow::Result<()> {
     assert!(run_check(&config, None, &[FailPolicy::OperationalFailure], 600.0, 0.0).is_err());
     let inputs = super::inputs::Inputs::load(&config);
     assert_eq!(
-        inputs.status["operational_evidence.json"]["status"],
-        "stale"
+        inputs.status["operational_evidence.json"].status,
+        InputStatus::Stale
     );
     Ok(())
 }

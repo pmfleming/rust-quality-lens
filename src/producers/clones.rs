@@ -5,12 +5,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 
 use crate::config::LensConfig;
-use crate::facts::{AstCloneFact, FileFacts, RunContext, ast_clone_facts_for_paths};
+use crate::facts::{AstCloneFact, FileFacts, RunContext, ast_clone_facts_for_files};
 use crate::measurement::{
-    MODEL_ID, MODEL_VERSION, project_relative_path, source_confidence,
-    source_scan_confidence_with_errors,
+    MODEL_ID, MODEL_VERSION, project_relative_path, source_scan_confidence_with_errors,
 };
-use crate::util::{iter_rust_files, normalize_slashes, round2, stable_hash};
+use crate::util::{normalize_slashes, round2, stable_hash};
 
 struct CloneInstance {
     file_path: String,
@@ -24,10 +23,11 @@ const MIN_CLONE_LINE_SPAN: usize = 5;
 const MIN_RESPONSIBILITY_LINES: usize = 8;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
-    let mut rows = token_clone_rows(config, &context.source_facts)?;
-    let all_ast_facts = ast_clone_facts_for_paths(config, &context.correctness_paths)?;
-    let source_files = iter_rust_files(&config.source_roots)
-        .into_iter()
+    let mut rows = token_clone_rows(&context.source_files, &context.source_facts)?;
+    let all_ast_facts = ast_clone_facts_for_files(config, &context.correctness_files)?;
+    let source_files = context
+        .source_files
+        .iter()
         .map(normalize_slashes)
         .collect::<HashSet<_>>();
     let source_ast_facts = all_ast_facts
@@ -35,7 +35,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         .filter(|fact| source_files.contains(&normalize_slashes(&fact.file)))
         .cloned()
         .collect::<Vec<_>>();
-    let source_fact_confidence = source_confidence(&config.source_roots, &context.source_facts);
+    let source_fact_confidence = context.source_confidence();
     rows.extend(ast_clone_rows(
         config,
         &source_ast_facts,
@@ -49,7 +49,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         config,
         &context.correctness_facts,
         &all_ast_facts,
-        source_confidence(&context.correctness_paths, &context.correctness_facts),
+        context.correctness_confidence(),
     ));
     rows.sort_by(|a, b| {
         crate::artifacts::json_f64(b, "score").total_cmp(&crate::artifacts::json_f64(a, "score"))
@@ -57,13 +57,13 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
     Ok(Value::Array(rows))
 }
 
-fn token_clone_rows(config: &LensConfig, facts: &[FileFacts]) -> Result<Vec<Value>> {
+fn token_clone_rows(files: &[std::path::PathBuf], facts: &[FileFacts]) -> Result<Vec<Value>> {
     let token_re = Regex::new(
         r"[A-Za-z_][A-Za-z0-9_]*|\d+|::|->|=>|==|!=|<=|>=|&&|\|\||[{}\(\)\[\];,.:+\-*/%&|^!<>=?]",
     )?;
     let function_ranges = function_ranges_by_path(facts);
-    let (windows, read_errors) = collect_clone_windows(config, &token_re, &function_ranges);
-    let confidence = source_scan_confidence_with_errors(&config.source_roots, read_errors);
+    let (windows, read_errors) = collect_clone_windows(files, &token_re, &function_ranges);
+    let confidence = source_scan_confidence_with_errors(files, read_errors);
     Ok(coalesce_clone_groups(windows)
         .into_iter()
         .filter_map(|(key, instances)| token_clone_row(&key, instances, &confidence))
@@ -87,18 +87,18 @@ fn function_ranges_by_path(facts: &[FileFacts]) -> HashMap<String, Vec<(usize, u
 }
 
 fn collect_clone_windows(
-    config: &LensConfig,
+    files: &[std::path::PathBuf],
     token_re: &Regex,
     function_ranges: &HashMap<String, Vec<(usize, usize)>>,
 ) -> (HashMap<String, Vec<CloneInstance>>, Vec<String>) {
     let mut windows = HashMap::new();
     let mut read_errors = Vec::new();
-    for path in iter_rust_files(&config.source_roots) {
-        let normalized_path = normalize_slashes(&path);
-        match fs::read_to_string(&path) {
+    for path in files {
+        let normalized_path = normalize_slashes(path);
+        match fs::read_to_string(path) {
             Ok(text) => add_file_windows(
                 &mut windows,
-                &path,
+                path,
                 &text,
                 token_re,
                 function_ranges

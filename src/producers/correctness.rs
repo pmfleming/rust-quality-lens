@@ -7,13 +7,12 @@ use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext, TestFact, TestStatus, resolve_dependency, run_tests};
 use crate::measurement::{
     RULESET_ID, RULESET_VERSION, classify_path, module_for_path, project_relative_path,
-    source_confidence, test_kind_for_path, title_from_name,
+    test_kind_for_path, title_from_name,
 };
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> Result<Value> {
-    let paths = &context.correctness_paths;
     let facts = &context.correctness_facts;
-    let mut confidence = source_confidence(paths, facts);
+    let mut confidence = context.correctness_confidence();
     let statuses = if run {
         run_tests(config)?
     } else {
@@ -26,7 +25,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> R
         .map(|fact| fact.module_key.clone())
         .collect::<BTreeSet<_>>();
     let statuses_ref = &statuses;
-    let coverage = coverage_evidence(config);
+    let coverage = coverage_evidence(config, &context.snapshot.fingerprint);
     if coverage.stale {
         mark_stale_coverage(&mut confidence);
     }
@@ -120,7 +119,7 @@ struct CoverageEvidence {
     stale: bool,
 }
 
-fn coverage_evidence(config: &LensConfig) -> CoverageEvidence {
+fn coverage_evidence(config: &LensConfig, fingerprint: &Value) -> CoverageEvidence {
     let path = config.output_dir.join("coverage.json");
     let Ok(text) = fs::read_to_string(path) else {
         return CoverageEvidence::default();
@@ -131,7 +130,7 @@ fn coverage_evidence(config: &LensConfig) -> CoverageEvidence {
     if crate::contracts::validate_artifact("coverage.json", &document).is_err() {
         return CoverageEvidence::default();
     }
-    coverage_from_document(&document, &config.input_fingerprint())
+    coverage_from_document(&document, fingerprint)
 }
 
 fn coverage_from_document(document: &Value, current: &Value) -> CoverageEvidence {

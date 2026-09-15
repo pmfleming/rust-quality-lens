@@ -276,6 +276,8 @@ mod tests {
             project_name: "demo".to_string(),
             project_root: PathBuf::from("/project"),
             source_roots: vec!["/project/src".to_string()],
+            fingerprint_inputs: Vec::new(),
+            cargo_metadata: None,
             output_dir: PathBuf::from("/project/target/analysis"),
             helper_manifest: PathBuf::from("unused"),
             identity_resolution: SemanticIdentityMode::Disabled,

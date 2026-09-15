@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::LensConfig;
+use crate::contracts::InputStatus;
 use crate::tool::MeasureTool;
 use crate::util::write_json;
 
@@ -38,7 +39,7 @@ pub(crate) fn run_check(
     let stale_artifacts = inputs
         .status
         .iter()
-        .filter(|(_, status)| status["status"] == "stale")
+        .filter(|(_, state)| state.status == InputStatus::Stale)
         .map(|(name, _)| name.clone())
         .collect::<Vec<_>>();
     let documents = &inputs.documents;
@@ -81,7 +82,7 @@ pub(crate) fn run_check(
     let threshold_violations = current_map
         .map(|map| threshold_violations(map, max_total_score))
         .unwrap_or_default();
-    let regression = if inputs.status["map.json"]["status"] == "available" {
+    let regression = if inputs.status["map.json"].status == InputStatus::Available {
         match regression_evidence(
             config,
             documents,
@@ -515,14 +516,10 @@ fn performance_regressions(
     };
     let old = crate::contracts::read_baseline(&path, "performance.json")?;
     crate::contracts::validate_comparison_evidence("performance.json", current)?;
-    let current_records = current["data"]["records"]
-        .as_array()
-        .context("missing current benchmark records")?;
-    let old_records = old["data"]["records"]
-        .as_array()
-        .context("missing baseline benchmark records")?;
+    let current_records = crate::contracts::benchmark_records(&current["data"]["records"])?;
+    let old_records = crate::contracts::benchmark_records(&old["data"]["records"])?;
     Ok(
-        crate::performance::comparisons(current_records, old_records)?
+        crate::performance::comparisons(&current_records, &old_records)?
             .into_iter()
             .map(|comparison| {
                 let increase = comparison["delta_percent"].as_f64();

@@ -15,6 +15,7 @@ struct RawConfig {
     project_name: Option<String>,
     project_root: Option<PathBuf>,
     source_roots: Option<Vec<String>>,
+    fingerprint_inputs: Option<Vec<String>>,
     output_dir: Option<PathBuf>,
     rust: Option<RawRustConfig>,
     verification: Option<RawVerificationConfig>,
@@ -439,6 +440,9 @@ pub(crate) struct LensConfig {
     pub(crate) project_name: String,
     pub(crate) project_root: PathBuf,
     pub(crate) source_roots: Vec<String>,
+    pub(crate) fingerprint_inputs: Vec<String>,
+    #[serde(skip)]
+    pub(crate) cargo_metadata: Option<Value>,
     #[serde(skip)]
     pub(crate) output_dir: PathBuf,
     pub(crate) helper_manifest: PathBuf,
@@ -454,6 +458,23 @@ pub(crate) struct LensConfig {
 impl LensConfig {
     pub(crate) fn input_fingerprint(&self) -> Value {
         crate::fingerprint::project(self)
+    }
+
+    pub(crate) fn source_fingerprint(&self) -> Value {
+        crate::util::quality_input_fingerprint(
+            &self.project_root,
+            &self.source_roots,
+            &self.fingerprint_inputs,
+            &[self.output_dir.clone(), self.target_directory()],
+        )
+    }
+
+    pub(crate) fn target_directory(&self) -> PathBuf {
+        self.cargo_metadata
+            .as_ref()
+            .and_then(|metadata| metadata["target_directory"].as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.project_root.join("target"))
     }
 
     pub(crate) fn load(path: Option<PathBuf>) -> Result<Self> {
@@ -472,6 +493,7 @@ impl LensConfig {
                 project_name: None,
                 project_root: None,
                 source_roots: None,
+                fingerprint_inputs: None,
                 output_dir: None,
                 rust: None,
                 verification: None,
@@ -487,8 +509,14 @@ impl LensConfig {
             .as_ref()
             .and_then(|rust| rust.identity_offline)
             .unwrap_or(true);
+        let verification = VerificationConfig::from(raw.verification);
+        // Resolve Cargo inputs once, before any measurement snapshot. Full
+        // metadata may initialize Cargo.lock; the no-deps fallback stays useful
+        // when optional dependencies are unavailable offline.
+        let cargo_metadata = cargo_metadata(&project_root, identity_offline, false, &verification)
+            .or_else(|| cargo_metadata(&project_root, identity_offline, true, &verification));
         let source_roots = raw.source_roots.map_or_else(
-            || discover_rust_source_roots(&project_root, identity_offline),
+            || discover_rust_source_roots(&project_root, cargo_metadata.as_ref()),
             |roots| {
                 roots
                     .into_iter()
@@ -500,6 +528,20 @@ impl LensConfig {
                     .collect()
             },
         );
+        let fingerprint_inputs = raw
+            .fingerprint_inputs
+            .unwrap_or_default()
+            .into_iter()
+            .map(|path| {
+                anyhow::ensure!(
+                    !path.trim().is_empty(),
+                    "fingerprint_inputs must not contain empty paths"
+                );
+                Ok(resolve_project_path(PathBuf::from(path), &project_root)
+                    .to_string_lossy()
+                    .into_owned())
+            })
+            .collect::<Result<Vec<_>>>()?;
         let output_dir = resolve_project_path(
             raw.output_dir.unwrap_or_else(|| "target/analysis".into()),
             &project_root,
@@ -524,7 +566,6 @@ impl LensConfig {
             .and_then(|rust| rust.identity_timeout_seconds)
             .unwrap_or(60)
             .max(1);
-        let verification = VerificationConfig::from(raw.verification);
         validate_sanitizers(&verification.sanitizers)?;
         validate_unused_dependency_backend(&verification.unused_dependency_backend)?;
         let architecture = raw.architecture.unwrap_or_default();
@@ -542,6 +583,8 @@ impl LensConfig {
             project_name,
             project_root,
             source_roots,
+            fingerprint_inputs,
+            cargo_metadata,
             output_dir,
             helper_manifest,
             identity_resolution,
@@ -555,10 +598,9 @@ impl LensConfig {
     }
 }
 
-fn discover_rust_source_roots(project_root: &Path, offline: bool) -> Vec<String> {
-    let roots = cargo_metadata(project_root, offline, false)
-        .or_else(|| cargo_metadata(project_root, offline, true))
-        .map(|metadata| metadata_source_roots(project_root, &metadata))
+fn discover_rust_source_roots(project_root: &Path, metadata: Option<&Value>) -> Vec<String> {
+    let roots = metadata
+        .map(|metadata| metadata_source_roots(project_root, metadata))
         .unwrap_or_default();
     if roots.is_empty() {
         vec![project_root.join("src").to_string_lossy().to_string()]
@@ -570,7 +612,12 @@ fn discover_rust_source_roots(project_root: &Path, offline: bool) -> Vec<String>
     }
 }
 
-fn cargo_metadata(project_root: &Path, offline: bool, no_dependencies: bool) -> Option<Value> {
+pub(crate) fn cargo_metadata(
+    project_root: &Path,
+    offline: bool,
+    no_dependencies: bool,
+    verification: &VerificationConfig,
+) -> Option<Value> {
     let mut command = Command::new("cargo");
     command
         .args(["metadata", "--format-version", "1"])
@@ -581,6 +628,10 @@ fn cargo_metadata(project_root: &Path, offline: bool, no_dependencies: bool) -> 
     if no_dependencies {
         command.arg("--no-deps");
     }
+    if verification.locked {
+        command.arg("--locked");
+    }
+    command.args(verification.cargo_feature_arguments());
     crate::command_runner::checked_output(&mut command, std::time::Duration::from_secs(30))
         .ok()
         .and_then(|output| serde_json::from_str(&output.stdout).ok())
@@ -675,6 +726,8 @@ pub(crate) fn write_default_config(path: Option<PathBuf>, force: bool) -> Result
             r#"project_name = "{project_name}"
 project_root = "."
 # source_roots is optional; Cargo workspace and local path packages are discovered automatically.
+# Include non-Rust build/test inputs (files or directories); missing paths make evidence partial.
+fingerprint_inputs = []
 output_dir = "target/analysis"
 
 [rust]
@@ -750,6 +803,7 @@ pub(crate) fn config_schema() -> Value {
                 "items": {"type": "string"},
                 "description": "Optional explicit roots. When omitted, local Cargo package roots are discovered automatically."
             },
+            "fingerprint_inputs": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": [], "description": "Additional project-relative files or directories hashed by content, including non-Rust build/test assets. Missing inputs make evidence partial."},
             "output_dir": {"type": "string", "default": "target/analysis"},
             "rust": {
                 "type": "object",

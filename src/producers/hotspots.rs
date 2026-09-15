@@ -4,15 +4,15 @@ use serde_json::{Value, json};
 use crate::artifacts::json_f64;
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, FunctionFact, RunContext};
-use crate::measurement::{MODEL_ID, MODEL_VERSION, source_confidence};
+use crate::measurement::{MODEL_ID, MODEL_VERSION};
 use crate::util::{normalize_slashes, round2};
 
 const COMPLEXITY_METRIC_MODEL_ID: &str = "rqlens.rust_standard_complexity";
 const COMPLEXITY_METRIC_MODEL_VERSION: u64 = 2;
 
-pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
+pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Value> {
     let facts = &context.source_facts;
-    let confidence = source_confidence(&config.source_roots, facts);
+    let confidence = context.source_confidence();
     let mut rows = facts
         .iter()
         .flat_map(|fact| hotspot_rows(fact, &confidence))

@@ -3,16 +3,23 @@ use std::time::Duration;
 
 use crate::command_runner::{CommandRequest, CommandStatus, run};
 use crate::config::LensConfig;
-use crate::util::{project_input_fingerprint, stable_hash};
+use crate::util::stable_hash;
 
 pub(crate) fn project(config: &LensConfig) -> Value {
-    let source = project_input_fingerprint(&config.project_root, &config.source_roots);
+    let toolchain = crate::toolchain::snapshot(&config.project_root);
+    project_with_toolchain(config, &toolchain)
+}
+
+pub(crate) fn project_with_toolchain(
+    config: &LensConfig,
+    toolchain: &crate::toolchain::ToolchainSnapshot,
+) -> Value {
+    let source = config.source_fingerprint();
     let mut errors = source["read_errors"]
         .as_array()
         .cloned()
         .unwrap_or_default();
     let git = git_state(config, &mut errors);
-    let toolchain = crate::toolchain::snapshot(&config.project_root);
     if toolchain.rustc_version.is_none() || toolchain.cargo_version.is_none() {
         errors.push(json!("active Rust toolchain version is unavailable"));
     }

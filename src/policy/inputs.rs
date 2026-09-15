@@ -4,13 +4,13 @@ use std::fs;
 
 use super::FailPolicy;
 use crate::config::{LensConfig, PolicyRuleLevel};
-use crate::contracts::validate_artifact;
+use crate::contracts::{InputState, InputStatus, validate_artifact};
 use crate::tool::MeasureTool;
 
 #[derive(Default)]
 pub(super) struct Inputs {
     pub(super) documents: BTreeMap<String, Value>,
-    pub(super) status: BTreeMap<String, Value>,
+    pub(super) status: BTreeMap<String, InputState>,
 }
 
 impl Inputs {
@@ -30,13 +30,13 @@ impl Inputs {
                 Ok(text) => text,
                 Err(error) => {
                     let status = if error.kind() == std::io::ErrorKind::NotFound {
-                        "missing"
+                        InputStatus::Missing
                     } else {
-                        "unreadable"
+                        InputStatus::Unreadable
                     };
                     inputs.status.insert(
                         file.to_string(),
-                        json!({"status": status, "reason": error.to_string()}),
+                        InputState::new(status, Some(error.to_string())),
                     );
                     continue;
                 }
@@ -46,42 +46,45 @@ impl Inputs {
                 Err(error) => {
                     inputs.status.insert(
                         file.to_string(),
-                        json!({"status": "unreadable", "reason": error.to_string()}),
+                        InputState::new(InputStatus::Unreadable, Some(error.to_string())),
                     );
                     continue;
                 }
             };
-            if let Err(error) = validate_artifact(file, &document) {
-                inputs.status.insert(
-                    file.to_string(),
-                    json!({"status": "incompatible", "reason": error.to_string()}),
-                );
-                continue;
-            }
+            let header = match validate_artifact(file, &document) {
+                Ok(header) => header,
+                Err(error) => {
+                    inputs.status.insert(
+                        file.to_string(),
+                        InputState::new(InputStatus::Incompatible, Some(error.to_string())),
+                    );
+                    continue;
+                }
+            };
             if file == "operational_evidence.json"
                 && let Err(error) =
                     crate::telemetry::validate_freshness(&document, chrono::Utc::now())
             {
                 inputs.status.insert(
                     file.to_string(),
-                    json!({"status": "stale", "reason": error.to_string()}),
+                    InputState::new(InputStatus::Stale, Some(error.to_string())),
                 );
                 inputs.documents.insert(file.to_string(), document);
                 continue;
             }
             let status = match crate::fingerprint::freshness(&document, &current) {
-                crate::fingerprint::Freshness::Stale => "stale",
-                crate::fingerprint::Freshness::Incomplete => "partial",
+                crate::fingerprint::Freshness::Stale => InputStatus::Stale,
+                crate::fingerprint::Freshness::Incomplete => InputStatus::Partial,
                 crate::fingerprint::Freshness::Current
-                    if document["measurement_confidence"]["complete"] != true =>
+                    if !header.measurement_confidence.is_complete() =>
                 {
-                    "partial"
+                    InputStatus::Partial
                 }
-                crate::fingerprint::Freshness::Current => "available",
+                crate::fingerprint::Freshness::Current => InputStatus::Available,
             };
             inputs
                 .status
-                .insert(file.to_string(), json!({"status": status}));
+                .insert(file.to_string(), InputState::new(status, None));
             inputs.documents.insert(file.to_string(), document);
         }
         inputs
@@ -127,7 +130,7 @@ impl Inputs {
                                 .join(file)
                         }
                     });
-                    if self.status[file]["status"] != "missing"
+                    if self.status[file].status != InputStatus::Missing
                         || baseline_file.is_some_and(|path| path.exists())
                     {
                         self.require(policy.as_str(), file, &mut failures);
@@ -184,8 +187,8 @@ impl Inputs {
 
     fn require(&self, policy: &str, file: &str, failures: &mut Vec<Value>) {
         let status = &self.status[file];
-        if status["status"] != "available" {
-            failures.push(json!({"policy": policy, "artifact": file, "status": status["status"], "reason": status["reason"]}));
+        if status.status != InputStatus::Available {
+            failures.push(json!({"policy": policy, "artifact": file, "status": status.status, "reason": status.reason}));
         }
     }
 }

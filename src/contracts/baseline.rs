@@ -2,7 +2,6 @@
 //! source fingerprint. Freshness and comparability are separate checks.
 use anyhow::{Context, Result, ensure};
 use serde_json::Value;
-use std::collections::BTreeMap;
 use std::path::Path;
 
 pub(crate) fn read_baseline(path: &Path, file: &str) -> Result<Value> {
@@ -22,15 +21,16 @@ pub(crate) fn read_baseline(path: &Path, file: &str) -> Result<Value> {
 }
 
 pub(crate) fn validate_comparison_evidence(file: &str, value: &Value) -> Result<()> {
-    super::validate_artifact(file, value)?;
+    let header = super::validate_artifact(file, value)?;
     ensure!(
-        value["measurement_confidence"]["complete"] == true
-            && value["input_fingerprint"]["complete"] == true,
+        header.measurement_confidence.is_complete() && header.input_fingerprint.complete,
         "{file} contains incomplete evidence"
     );
     ensure!(
-        value["input_fingerprint"]["algorithm"]
-            .as_str()
+        header
+            .input_fingerprint
+            .algorithm
+            .as_deref()
             .is_some_and(|s| !s.is_empty()),
         "{file} is missing its fingerprint algorithm"
     );
@@ -54,7 +54,7 @@ pub(crate) fn validate_comparison_evidence(file: &str, value: &Value) -> Result<
                 !records.is_empty(),
                 "no benchmarks are available for comparison"
             );
-            benchmark_estimates(records)?;
+            super::benchmark_records(&value["data"]["records"])?;
         }
         _ => anyhow::bail!("unsupported comparison evidence {file}"),
     }
@@ -62,29 +62,9 @@ pub(crate) fn validate_comparison_evidence(file: &str, value: &Value) -> Result<
 }
 
 pub(crate) fn coverage_percent(value: &Value) -> Result<f64> {
-    value["data"]["summary"]["lines"]["percent"]
-        .as_f64()
-        .filter(|percent| percent.is_finite() && (0.0..=100.0).contains(percent))
-        .context("missing or invalid line coverage percentage")
-}
-
-pub(crate) fn benchmark_estimates(records: &[Value]) -> Result<BTreeMap<String, f64>> {
-    let mut estimates = BTreeMap::new();
-    for row in records {
-        let id = row["id"]
-            .as_str()
-            .filter(|id| !id.trim().is_empty())
-            .context("benchmark requires a nonempty ID")?;
-        let estimate = row["estimate_nanoseconds"]
-            .as_f64()
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .context("benchmark estimate must be a positive finite number")?;
-        ensure!(
-            estimates.insert(id.to_string(), estimate).is_none(),
-            "duplicate benchmark ID {id}"
-        );
-    }
-    Ok(estimates)
+    let coverage: super::CoveragePayload = serde_json::from_value(value["data"].clone())
+        .context("missing or invalid line coverage percentage")?;
+    coverage.line_percent()
 }
 
 #[cfg(test)]
@@ -155,7 +135,7 @@ mod tests {
             vec![json!({"id": "parse", "estimate_nanoseconds": "100"})],
             vec![json!({"id": "parse", "estimate_nanoseconds": 100}); 2],
         ] {
-            assert!(benchmark_estimates(&records).is_err());
+            assert!(super::super::benchmark_records(&json!(records)).is_err());
         }
     }
 }

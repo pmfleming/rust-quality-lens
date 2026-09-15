@@ -174,6 +174,9 @@ fn calibration_config(
     }
     Ok(LensConfig {
         project_name: name.to_string(),
+        fingerprint_inputs: Vec::new(),
+        cargo_metadata: crate::config::cargo_metadata(&root, true, false, &Default::default())
+            .or_else(|| crate::config::cargo_metadata(&root, true, true, &Default::default())),
         project_root: root,
         source_roots: source_roots
             .into_iter()
@@ -196,15 +199,18 @@ fn calibration_payloads(
     context: &RunContext,
 ) -> Result<BTreeMap<&'static str, Value>> {
     fs::create_dir_all(&config.output_dir)?;
+    let _lock = crate::util::lock_file(&config.output_dir.join("rqlens"))?;
+    let mut batch = crate::measurement::ArtifactBatch::new(config)?;
     let mut payloads = BTreeMap::new();
     for tool in &CALIBRATION_TOOLS {
-        let payload = producers::produce_measurement(tool, config, context)?;
-        write_json(
-            &config.output_dir.join(tool.output_file()),
-            &artifact_document(tool, config, context, payload.clone()),
+        let payload = producers::produce_measurement(tool, &batch.config, context)?;
+        batch.write(
+            tool.output_file(),
+            &artifact_document(tool, config, context, payload.clone())?,
         )?;
         payloads.insert(tool.name(), payload);
     }
+    batch.publish(&context.snapshot, config)?;
     Ok(payloads)
 }
 

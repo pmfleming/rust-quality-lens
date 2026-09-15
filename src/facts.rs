@@ -14,11 +14,13 @@ use std::path::PathBuf;
 mod graph;
 mod helpers;
 mod test_runner;
+#[cfg(test)]
+mod tests;
 
 #[cfg(test)]
 pub(crate) use graph::module_graph;
 pub(crate) use graph::{ModuleGraph, ModuleInfo, resolve_dependency};
-pub(crate) use helpers::ast_clone_facts_for_paths;
+pub(crate) use helpers::ast_clone_facts_for_files;
 pub(crate) use test_runner::{TestStatus, correctness_paths, run_tests};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -252,7 +254,10 @@ pub(crate) struct AstCloneFact {
 }
 
 pub(crate) struct RunContext {
-    pub(crate) toolchain: crate::toolchain::ToolchainSnapshot,
+    pub(crate) snapshot: crate::measurement::InputSnapshot,
+    pub(crate) source_files: Vec<PathBuf>,
+    pub(crate) correctness_files: Vec<PathBuf>,
+    graph: OnceLock<ModuleGraph>,
     pub(crate) source_facts: Vec<FileFacts>,
     pub(crate) correctness_facts: Vec<FileFacts>,
     pub(crate) correctness_paths: Vec<String>,
@@ -260,43 +265,59 @@ pub(crate) struct RunContext {
 }
 
 impl RunContext {
-    pub(crate) fn module_graph(&self) -> ModuleGraph {
-        graph::module_graph(&self.source_facts)
+    pub(crate) fn module_graph(&self) -> &ModuleGraph {
+        self.graph
+            .get_or_init(|| graph::module_graph(&self.source_facts))
+    }
+
+    pub(crate) fn source_confidence(&self) -> serde_json::Value {
+        crate::measurement::source_confidence_from_inventory(&self.source_files, &self.source_facts)
+    }
+
+    pub(crate) fn correctness_confidence(&self) -> serde_json::Value {
+        crate::measurement::source_confidence_from_inventory(
+            &self.correctness_files,
+            &self.correctness_facts,
+        )
     }
 
     pub(crate) fn new(config: &LensConfig, tools: &[MeasureTool]) -> Result<Self> {
-        let toolchain = crate::toolchain::snapshot(&config.project_root);
+        // Configuration loading prepares Cargo metadata (and Cargo.lock) before
+        // snapshots. Reuse the target identities and inventories for both scans.
+        let targets = helpers::cargo_targets(config);
+        let snapshot = crate::measurement::InputSnapshot::capture(config);
+        let source_files = crate::util::iter_rust_files(&config.source_roots);
         let needs_source_facts = tools.iter().any(MeasureTool::requires_source_facts);
         let needs_correctness_facts = tools.iter().any(MeasureTool::requires_correctness_facts);
-        let mut source_facts = load_source_facts(config, needs_source_facts)?;
+        let mut source_facts = if needs_source_facts {
+            helpers::rust_facts_for_files(config, &source_files, &targets)?
+        } else {
+            Vec::new()
+        };
         let identity_resolution = resolve_identities(config, tools, &mut source_facts)?;
         let correctness_paths = if needs_correctness_facts {
             correctness_paths(config, &source_facts)
         } else {
             Vec::new()
         };
-        let correctness_facts = load_correctness_facts(
-            config,
-            &source_facts,
-            &correctness_paths,
-            needs_source_facts,
-            needs_correctness_facts,
-        )?;
+        let correctness_files = crate::util::iter_rust_files(&correctness_paths);
+        let correctness_facts = if !needs_correctness_facts {
+            Vec::new()
+        } else if correctness_files == source_files && needs_source_facts {
+            source_facts.clone()
+        } else {
+            helpers::rust_facts_for_files(config, &correctness_files, &targets)?
+        };
         Ok(Self {
-            toolchain,
+            snapshot,
+            source_files,
+            correctness_files,
+            graph: OnceLock::new(),
             source_facts,
             correctness_facts,
             correctness_paths,
             identity_resolution,
         })
-    }
-}
-
-fn load_source_facts(config: &LensConfig, required: bool) -> Result<Vec<FileFacts>> {
-    if required {
-        helpers::rust_facts_for_paths(config, &config.source_roots)
-    } else {
-        Ok(Vec::new())
     }
 }
 
@@ -316,21 +337,4 @@ fn resolve_identities(
         config.identity_resolution,
         reference_count,
     ))
-}
-
-fn load_correctness_facts(
-    config: &LensConfig,
-    source_facts: &[FileFacts],
-    paths: &[String],
-    source_facts_loaded: bool,
-    required: bool,
-) -> Result<Vec<FileFacts>> {
-    if !required {
-        return Ok(Vec::new());
-    }
-    if paths == config.source_roots && source_facts_loaded {
-        Ok(source_facts.to_vec())
-    } else {
-        helpers::rust_facts_for_paths(config, paths)
-    }
 }

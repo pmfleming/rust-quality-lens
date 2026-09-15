@@ -10,7 +10,7 @@ pub(super) fn locality(context: &RunContext) -> Result<Value> {
         graph
             .modules
             .values()
-            .map(|module| locality_record(&graph, module))
+            .map(|module| locality_record(graph, module))
             .collect(),
     ))
 }
@@ -52,7 +52,7 @@ pub(super) fn leverage(context: &RunContext) -> Result<Value> {
         graph
             .modules
             .values()
-            .map(|module| leverage_record(&graph, module))
+            .map(|module| leverage_record(graph, module))
             .collect(),
     ))
 }
