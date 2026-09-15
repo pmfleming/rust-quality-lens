@@ -126,16 +126,7 @@ pub(crate) fn run_check(
     if !architecture.errors.is_empty() {
         failed_policies.push("architecture-rules".to_string());
     }
-    let mut enabled_policies = fail_on
-        .iter()
-        .map(|policy| policy.as_str().to_string())
-        .collect::<Vec<_>>();
-    if !config.policy.rules.is_empty() {
-        enabled_policies.push("configured-rules".to_string());
-    }
-    if !config.architecture.rules.is_empty() {
-        enabled_policies.push("architecture-rules".to_string());
-    }
+    let enabled_policies = enabled_policies(config, fail_on);
     failed_policies.sort();
     failed_policies.dedup();
     let report = json!({
@@ -178,6 +169,20 @@ pub(crate) fn run_check(
         );
     }
     Ok(())
+}
+
+fn enabled_policies(config: &LensConfig, fail_on: &[FailPolicy]) -> Vec<String> {
+    let mut policies = fail_on
+        .iter()
+        .map(|policy| policy.as_str().to_string())
+        .collect::<Vec<_>>();
+    if !config.policy.rules.is_empty() {
+        policies.push("configured-rules".to_string());
+    }
+    if !config.architecture.rules.is_empty() {
+        policies.push("architecture-rules".to_string());
+    }
+    policies
 }
 
 #[derive(Default)]

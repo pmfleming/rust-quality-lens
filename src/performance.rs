@@ -68,7 +68,6 @@ pub(crate) fn run_benchmarks(
             "command": command,
         }
     });
-    fs::create_dir_all(&config.output_dir)?;
     let output = config.output_dir.join("performance.json");
     snapshot.ensure_unchanged(config)?;
     write_json(&output, &document)?;

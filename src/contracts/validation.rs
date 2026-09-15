@@ -51,6 +51,18 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<super::Arti
                 | MeasureTool::Leverage
         )
     );
+    let payload = checked_payload(value, array_payload)?;
+    if file == "coverage.json" && header.measurement_confidence.is_complete() {
+        super::coverage_percent(value)?;
+    }
+    if file == "performance.json" {
+        super::benchmark_records(&payload["records"])?;
+    }
+    validate_policy_payload(file, payload)?;
+    Ok(header)
+}
+
+fn checked_payload(value: &Value, array_payload: bool) -> Result<&Value> {
     let (key, other) = if array_payload {
         ("records", "data")
     } else {
@@ -66,14 +78,7 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<super::Arti
         },
         "missing or invalid {key} payload"
     );
-    if file == "coverage.json" && header.measurement_confidence.is_complete() {
-        super::coverage_percent(value)?;
-    }
-    if file == "performance.json" {
-        super::benchmark_records(&payload["records"])?;
-    }
-    validate_policy_payload(file, payload)?;
-    Ok(header)
+    Ok(payload)
 }
 
 fn validate_policy_payload(file: &str, payload: &Value) -> Result<()> {

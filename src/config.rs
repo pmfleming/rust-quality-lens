@@ -23,7 +23,7 @@ struct RawConfig {
     policy: Option<PolicyConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawRustConfig {
     helper_manifest: Option<PathBuf>,
@@ -475,11 +475,8 @@ impl LensConfig {
         let project_root =
             resolve_config_path(raw.project_root.unwrap_or_else(|| ".".into()), &config_dir);
         let project_root = fs::canonicalize(&project_root).unwrap_or(project_root);
-        let rust = raw.rust;
-        let identity_offline = rust
-            .as_ref()
-            .and_then(|rust| rust.identity_offline)
-            .unwrap_or(true);
+        let rust = raw.rust.unwrap_or_default();
+        let identity_offline = rust.identity_offline.unwrap_or(true);
         let verification = raw.verification.unwrap_or_default().normalized();
         // Resolve Cargo inputs once, before any measurement snapshot. Full
         // metadata may initialize Cargo.lock; the no-deps fallback stays useful
@@ -503,15 +500,7 @@ impl LensConfig {
             .fingerprint_inputs
             .unwrap_or_default()
             .into_iter()
-            .map(|path| {
-                anyhow::ensure!(
-                    !path.trim().is_empty(),
-                    "fingerprint_inputs must not contain empty paths"
-                );
-                Ok(resolve_project_path(PathBuf::from(path), &project_root)
-                    .to_string_lossy()
-                    .into_owned())
-            })
+            .map(|path| resolve_fingerprint_input(path, &project_root))
             .collect::<Result<Vec<_>>>()?;
         let output_dir = resolve_project_path(
             raw.output_dir.unwrap_or_else(|| "target/analysis".into()),
@@ -519,24 +508,14 @@ impl LensConfig {
         );
         let default_helper_manifest = bundled_helper_manifest()?;
         let helper_manifest = resolve_project_path(
-            rust.as_ref()
-                .and_then(|rust| rust.helper_manifest.clone())
-                .unwrap_or(default_helper_manifest),
+            rust.helper_manifest.unwrap_or(default_helper_manifest),
             &project_root,
         );
-        let identity_resolution = rust
-            .as_ref()
-            .and_then(|rust| rust.identity_resolution)
-            .unwrap_or_default();
+        let identity_resolution = rust.identity_resolution.unwrap_or_default();
         let rust_analyzer = rust
-            .as_ref()
-            .and_then(|rust| rust.rust_analyzer.clone())
+            .rust_analyzer
             .unwrap_or_else(|| PathBuf::from("rust-analyzer"));
-        let identity_timeout_seconds = rust
-            .as_ref()
-            .and_then(|rust| rust.identity_timeout_seconds)
-            .unwrap_or(60)
-            .max(1);
+        let identity_timeout_seconds = rust.identity_timeout_seconds.unwrap_or(60).max(1);
         validate_sanitizers(&verification.sanitizers)?;
         validate_unused_dependency_backend(&verification.unused_dependency_backend)?;
         let architecture = raw.architecture.unwrap_or_default();
@@ -567,6 +546,16 @@ impl LensConfig {
             policy,
         })
     }
+}
+
+fn resolve_fingerprint_input(path: String, project_root: &Path) -> Result<String> {
+    anyhow::ensure!(
+        !path.trim().is_empty(),
+        "fingerprint_inputs must not contain empty paths"
+    );
+    Ok(resolve_project_path(PathBuf::from(path), project_root)
+        .to_string_lossy()
+        .into_owned())
 }
 
 fn local_workspace_inputs(roots: &BTreeSet<String>) -> BTreeSet<String> {

@@ -20,7 +20,8 @@ fn fixture() -> anyhow::Result<(tempfile::TempDir, LensConfig)> {
 
 fn document(config: &LensConfig, tool: &str, data: Value) -> Value {
     json!({
-        "schema_version": 3, "risk_model_version": MODEL_VERSION, "tool": tool,
+        "schema_version": if matches!(tool, "performance" | "operational-evidence" | "repository-outcomes") { 1 } else { 3 },
+        "risk_model_version": MODEL_VERSION, "tool": tool,
         "measurement_confidence": {"complete": true, "partial": false},
         "input_fingerprint": config.input_fingerprint(),
         "data": data,
@@ -140,7 +141,6 @@ fn operational_policy_rechecks_observation_age() -> anyhow::Result<()> {
         "operational-evidence",
         json!({"records": [{"status": "healthy"}]}),
     );
-    evidence["schema_version"] = json!(1);
     evidence["telemetry_input"] = json!({
         "window": {"end": (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339()},
         "max_age_hours": 24
@@ -174,10 +174,7 @@ fn auxiliary_baseline_errors_are_reported_instead_of_skipping_comparisons() -> a
             json!({"records": [{"id": "parse", "estimate_nanoseconds": 100.0}]}),
         ),
     ] {
-        let mut current = document(&config, tool, data);
-        if tool == "performance" {
-            current["schema_version"] = json!(1);
-        }
+        let current = document(&config, tool, data);
         write_json(&config.output_dir.join(file), &current)?;
         for invalid in [
             None,
@@ -219,7 +216,6 @@ fn disappearing_benchmarks_are_incomparable_not_empty_comparisons() -> anyhow::R
         "performance",
         json!({"records": [{"id": "parse", "estimate_nanoseconds": 100.0}]}),
     );
-    current["schema_version"] = json!(1);
     write_json(&baseline.join("performance.json"), &current)?;
     let performance = config.output_dir.join("performance.json");
     current["data"]["records"][0]["id"] = json!("new-benchmark");
