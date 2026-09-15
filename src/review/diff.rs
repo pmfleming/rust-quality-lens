@@ -68,33 +68,38 @@ fn parse_header(
     new_path: &mut Option<String>,
     hunk: &mut Option<Hunk>,
 ) -> Result<()> {
-    if line.starts_with("diff --git ") {
-        *old_path = None;
-        *new_path = None;
-        *hunk = None;
-    } else if line.starts_with("diff --cc ") || line.starts_with("diff --combined ") {
-        bail!("combined diffs are unsupported; supply a unified diff against one parent");
-    } else if let Some(raw) = line.strip_prefix("--- ") {
-        *old_path = header_path(raw, "a/")?;
-        *new_path = None;
-    } else if let Some(raw) = line.strip_prefix("+++ ") {
-        *new_path = header_path(raw, "b/")?;
-        if let Some(path) = new_path.as_ref().or(old_path.as_ref()) {
-            scope.paths.insert(path.clone());
+    match line.split_once(' ') {
+        Some(("diff", raw)) if raw.starts_with("--git ") => {
+            *old_path = None;
+            *new_path = None;
+            *hunk = None;
         }
-    } else if let Some(raw) = line
-        .strip_prefix("rename to ")
-        .or_else(|| line.strip_prefix("copy to "))
-    {
-        let path = checked_path(decode_path(raw)?)?;
-        scope.paths.insert(path.clone());
-        *new_path = Some(path);
-    } else if line.starts_with("@@") {
-        ensure!(
-            old_path.is_some() || new_path.is_some(),
-            "hunk has no file header"
-        );
-        *hunk = Some(Hunk::parse(line)?);
+        Some(("diff", raw)) if raw.starts_with("--cc ") || raw.starts_with("--combined ") => {
+            bail!("combined diffs are unsupported; supply a unified diff against one parent");
+        }
+        Some(("---", raw)) => {
+            *old_path = header_path(raw, "a/")?;
+            *new_path = None;
+        }
+        Some(("+++", raw)) => {
+            *new_path = header_path(raw, "b/")?;
+            if let Some(path) = new_path.as_ref().or(old_path.as_ref()) {
+                scope.paths.insert(path.clone());
+            }
+        }
+        Some(("rename" | "copy", raw)) if raw.starts_with("to ") => {
+            let path = checked_path(decode_path(&raw[3..])?)?;
+            scope.paths.insert(path.clone());
+            *new_path = Some(path);
+        }
+        _ if line.starts_with("@@") => {
+            ensure!(
+                old_path.is_some() || new_path.is_some(),
+                "hunk has no file header"
+            );
+            *hunk = Some(Hunk::parse(line)?);
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -198,31 +203,7 @@ fn decode_path(raw: &str) -> Result<String> {
                     .context("non-UTF-8 diff filenames are unsupported");
             }
             b'\\' => {
-                let escaped = bytes.next().context("unfinished filename escape")?;
-                decoded.push(match escaped {
-                    b'0'..=b'7' => {
-                        let mut value = u16::from(escaped - b'0');
-                        for _ in 0..2 {
-                            let digit = bytes.next().context("unfinished octal filename escape")?;
-                            ensure!(
-                                (b'0'..=b'7').contains(&digit),
-                                "invalid octal filename escape"
-                            );
-                            value = value * 8 + u16::from(digit - b'0');
-                        }
-                        u8::try_from(value).context("octal filename escape exceeds one byte")?
-                    }
-                    b'a' => 7,
-                    b'b' => 8,
-                    b't' => b'\t',
-                    b'n' => b'\n',
-                    b'v' => 11,
-                    b'f' => 12,
-                    b'r' => b'\r',
-                    b'\\' => b'\\',
-                    b'"' => b'"',
-                    _ => bail!("invalid filename escape"),
-                });
+                decoded.push(decode_escape(&mut bytes)?);
             }
             byte => decoded.push(byte),
         }
@@ -230,9 +211,61 @@ fn decode_path(raw: &str) -> Result<String> {
     bail!("unterminated quoted filename")
 }
 
+fn decode_escape(bytes: &mut impl Iterator<Item = u8>) -> Result<u8> {
+    let escaped = bytes.next().context("unfinished filename escape")?;
+    match escaped {
+        b'0'..=b'7' => {
+            let mut value = u16::from(escaped - b'0');
+            for _ in 0..2 {
+                let digit = bytes.next().context("unfinished octal filename escape")?;
+                ensure!(
+                    (b'0'..=b'7').contains(&digit),
+                    "invalid octal filename escape"
+                );
+                value = value * 8 + u16::from(digit - b'0');
+            }
+            u8::try_from(value).context("octal filename escape exceeds one byte")
+        }
+        b'a' => Ok(7),
+        b'b' => Ok(8),
+        b't' => Ok(b'\t'),
+        b'n' => Ok(b'\n'),
+        b'v' => Ok(11),
+        b'f' => Ok(12),
+        b'r' => Ok(b'\r'),
+        b'\\' => Ok(b'\\'),
+        b'"' => Ok(b'"'),
+        _ => bail!("invalid filename escape"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quoted_octal_bytes_preserve_utf8_validation() -> Result<()> {
+        for byte in 0..=u8::MAX {
+            let quoted = format!("\"a\\{byte:03o}\"");
+            assert_eq!(
+                decode_path(&quoted).ok(),
+                String::from_utf8(vec![b'a', byte]).ok()
+            );
+        }
+        for invalid in [
+            "\"\\400\"",
+            "\"\\777\"",
+            "\"\\08a\"",
+            "\"\\12",
+            "\"\\",
+            "\"\\q\"",
+        ] {
+            assert!(decode_path(invalid).is_err(), "{invalid}");
+        }
+        let ignored = parse("---\n+++\nrename to\ncopy to\ndiff --git\n")?;
+        assert!(ignored.paths.is_empty());
+        Ok(())
+    }
 
     #[test]
     fn context_is_not_counted_as_changed_lines() -> Result<()> {

@@ -78,79 +78,80 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<super::Arti
 
 fn validate_policy_payload(file: &str, payload: &Value) -> Result<()> {
     match file {
-        "correctness_review.json" => {
-            let summary = &payload["summary"];
-            ensure!(
-                summary["failed"].as_u64().is_some(),
-                "missing or invalid failed test count"
-            );
-            ensure!(
-                summary["run_failed"].is_boolean() && summary["compile_failed"].is_boolean(),
-                "missing test execution status"
-            );
-            array(&payload["tests"])?;
-        }
-        "rust_practices.json" => {
-            for check in array(&payload["checks"])? {
-                finding(check)?;
-                ensure!(
-                    matches!(
-                        check["status"].as_str(),
-                        Some("passed" | "failed" | "unavailable" | "timed-out" | "skipped")
-                    ),
-                    "invalid practice check status"
-                );
-            }
-        }
-        "reliability_findings.json" => {
-            for row in array(payload)? {
-                finding(row)?;
-                ensure!(
-                    matches!(row["scope"].as_str(), Some("production" | "test")),
-                    "invalid reliability scope"
-                );
-            }
-        }
-        "architecture_rules.json" | "test_quality.json" => {
-            let key = if file == "architecture_rules.json" {
-                "violations"
-            } else {
-                "findings"
-            };
-            for row in array(&payload[key])? {
-                finding(row)?;
-            }
-        }
-        "map.json" => {
-            for node in array(&payload["graph"]["nodes"])? {
-                ensure!(
-                    node["data"]["id"].is_string(),
-                    "map node is missing its identity"
-                );
-                ensure!(
-                    node["data"]
-                        .get("total_score")
-                        .is_some_and(|score| score.is_null() || score.is_number()),
-                    "map node is missing its score"
-                );
-            }
-        }
-        "operational_evidence.json" => {
-            for row in array(&payload["records"])? {
-                ensure!(
-                    matches!(
-                        row["status"].as_str(),
-                        Some("healthy" | "breached" | "unknown")
-                    ),
-                    "invalid operational status"
-                );
-            }
-        }
-        "performance.json" | "repository_outcomes.json" => {
-            array(&payload["records"])?;
-        }
-        _ => {}
+        "correctness_review.json" => test_summary(payload),
+        "rust_practices.json" => each(&payload["checks"], practice),
+        "reliability_findings.json" => each(payload, reliability),
+        "architecture_rules.json" => each(&payload["violations"], finding),
+        "test_quality.json" => each(&payload["findings"], finding),
+        "map.json" => each(&payload["graph"]["nodes"], map_node),
+        "operational_evidence.json" => each(&payload["records"], operational),
+        "performance.json" | "repository_outcomes.json" => array(&payload["records"]).map(|_| ()),
+        _ => Ok(()),
     }
+}
+
+fn each(value: &Value, validate: fn(&Value) -> Result<()>) -> Result<()> {
+    array(value)?.iter().try_for_each(validate)
+}
+
+fn test_summary(payload: &Value) -> Result<()> {
+    let summary = &payload["summary"];
+    ensure!(
+        summary["failed"].as_u64().is_some(),
+        "missing or invalid failed test count"
+    );
+    ensure!(
+        summary["run_failed"].is_boolean() && summary["compile_failed"].is_boolean(),
+        "missing test execution status"
+    );
+    array(&payload["tests"]).map(|_| ())
+}
+
+fn practice(value: &Value) -> Result<()> {
+    finding(value)?;
+    one_of(
+        &value["status"],
+        &["passed", "failed", "unavailable", "timed-out", "skipped"],
+        "invalid practice check status",
+    )
+}
+
+fn reliability(value: &Value) -> Result<()> {
+    finding(value)?;
+    one_of(
+        &value["scope"],
+        &["production", "test"],
+        "invalid reliability scope",
+    )
+}
+
+fn operational(value: &Value) -> Result<()> {
+    one_of(
+        &value["status"],
+        &["healthy", "breached", "unknown"],
+        "invalid operational status",
+    )
+}
+
+fn one_of(value: &Value, allowed: &[&str], message: &str) -> Result<()> {
+    ensure!(
+        value.as_str().is_some_and(|text| allowed.contains(&text)),
+        "{message}"
+    );
+    Ok(())
+}
+
+fn map_node(node: &Value) -> Result<()> {
+    ensure!(
+        node["data"]["id"].is_string(),
+        "map node is missing its identity"
+    );
+    ensure!(
+        node["data"]
+            .get("total_score")
+            .is_some_and(|score| score.is_null() || score.is_number()),
+        "map node is missing its score"
+    );
     Ok(())
 }
 
@@ -176,6 +177,52 @@ fn finding(value: &Value) -> Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn finding_status_domains_remain_distinct() {
+        type Validator = fn(&Value) -> Result<()>;
+        for (validate, field, allowed) in [
+            (
+                practice as Validator,
+                "status",
+                &["passed", "failed", "unavailable", "timed-out", "skipped"][..],
+            ),
+            (
+                reliability as Validator,
+                "scope",
+                &["production", "test"][..],
+            ),
+            (
+                operational as Validator,
+                "status",
+                &["healthy", "breached", "unknown"][..],
+            ),
+        ] {
+            let mut row = json!({"rule_id": "test", "severity": "warning"});
+            for value in allowed {
+                row[field] = json!(value);
+                assert!(validate(&row).is_ok(), "{value}");
+            }
+            for value in [Value::Null, json!(1), json!("unrecognized")] {
+                row[field] = value;
+                assert!(validate(&row).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn map_validation_requires_identity_and_an_explicit_nullable_score() {
+        for score in [Value::Null, json!(0), json!(1.5)] {
+            assert!(map_node(&json!({"data": {"id": "module", "total_score": score}})).is_ok());
+        }
+        for node in [
+            json!({"data": {"id": "module"}}),
+            json!({"data": {"total_score": 0}}),
+            json!({"data": {"id": "module", "total_score": "unknown"}}),
+        ] {
+            assert!(map_node(&node).is_err());
+        }
+    }
 
     #[test]
     fn static_correctness_is_valid_evidence_but_not_a_test_execution() {
