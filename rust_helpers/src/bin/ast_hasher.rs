@@ -1,6 +1,7 @@
 use quote::ToTokens;
 use rust_quality_lens_helpers::{exit_on_error, qualify, read_paths_file, stable_hash};
 use serde::Serialize;
+use std::borrow::Cow;
 use std::env;
 use std::error::Error;
 use std::fs;
@@ -100,13 +101,14 @@ impl<'ast> Visit<'ast> for AstNormalizer {
     }
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
-        self.tag(match stmt {
-            Stmt::Local(_) => "stmt:local",
-            Stmt::Item(_) => "stmt:item",
-            Stmt::Expr(_, Some(_)) => "stmt:expr-semi",
-            Stmt::Expr(_, None) => "stmt:expr",
-            Stmt::Macro(_) => "stmt:macro",
-        });
+        let tag: Cow<'_, str> = match stmt {
+            Stmt::Local(_) => "stmt:local".into(),
+            Stmt::Item(_) => "stmt:item".into(),
+            Stmt::Expr(_, Some(_)) => "stmt:expr-semi".into(),
+            Stmt::Expr(_, None) => "stmt:expr".into(),
+            Stmt::Macro(mac) => format!("stmt:macro:{}", Self::path_tail(&mac.mac.path)).into(),
+        };
+        self.tag(tag);
         visit::visit_stmt(self, stmt);
     }
 
@@ -247,6 +249,22 @@ mod tests {
         };
         collector.visit_file(&file);
         Ok(collector.functions)
+    }
+
+    #[test]
+    fn statement_macros_keep_their_identity_without_inflating_node_counts() -> syn::Result<()> {
+        let facts = collect(
+            r#"
+fn equal() { let value = parse("one")?; assert_eq!(value.len(), 1); assert_eq!(value[0], 1); Ok(()) }
+fn boolean() { let value = parse("two")?; assert!(value.len() == 1); assert!(value[0] == 1); Ok(()) }
+fn renamed() { let other = parse("three")?; assert_eq!(other.len(), 1); assert_eq!(other[0], 1); Ok(()) }
+"#,
+        )?;
+        assert_eq!(facts.len(), 3);
+        assert_ne!(facts[0].ast_hash, facts[1].ast_hash);
+        assert_eq!(facts[0].ast_hash, facts[2].ast_hash);
+        assert_eq!(facts[0].node_count, facts[1].node_count);
+        Ok(())
     }
 
     #[test]
