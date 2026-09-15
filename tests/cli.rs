@@ -27,10 +27,18 @@ fn run(args: &[&str]) -> std::process::Output {
     output
 }
 
+// All CLI fixtures use the same analysis layout; keep invocation and lookup together.
+fn measure_fixture(tool: &str, config: &str) -> PathBuf {
+    run(&["measure", tool, "--config", config]);
+    repo_root()
+        .join(config)
+        .parent()
+        .expect("fixture config has a parent")
+        .join("target/analysis")
+}
+
 fn read_json(path: impl AsRef<Path>) -> Value {
-    let value: Value =
-        serde_json::from_str(&fs::read_to_string(path).expect("json file should exist"))
-            .expect("json should parse");
+    let value = read_document(path);
     value
         .get("records")
         .or_else(|| value.get("data"))
@@ -243,13 +251,7 @@ output_dir = "target/analysis"
 }
 
 fn wrap_fixture_artifacts(root: &Path) {
-    run(&[
-        "measure",
-        "api-health",
-        "--config",
-        root.join("rqlens.toml").to_str().unwrap(),
-    ]);
-    let analysis = root.join("target/analysis");
+    let analysis = measure_fixture("api-health", root.join("rqlens.toml").to_str().unwrap());
     let template = read_document(analysis.join("api_health.json"));
     for (file, tool) in [
         ("hotspots.json", "hotspots"),
@@ -603,13 +605,7 @@ fn review_uses_diff_file_scope() {
 
 #[test]
 fn generated_artifacts_keep_expected_top_level_shapes() {
-    run(&[
-        "measure",
-        "all",
-        "--config",
-        "tests/fixtures/mini_rust_project/rqlens.toml",
-    ]);
-    let analysis = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
+    let analysis = measure_fixture("all", "tests/fixtures/mini_rust_project/rqlens.toml");
     let hotspots = read_json(analysis.join("hotspots.json"));
     assert!(hotspots.as_array().unwrap().iter().all(|row| {
         row.get("module_key").is_some()
@@ -652,15 +648,9 @@ fn generated_artifacts_keep_expected_top_level_shapes() {
 
 #[test]
 fn generated_artifacts_match_envelope_conformance_snapshot() {
-    run(&[
-        "measure",
-        "all",
-        "--config",
-        "tests/fixtures/mini_rust_project/rqlens.toml",
-    ]);
+    let analysis = measure_fixture("all", "tests/fixtures/mini_rust_project/rqlens.toml");
     let expected: Value = serde_json::from_str(include_str!("snapshots/artifact_envelopes.json"))
         .expect("snapshot should parse");
-    let analysis = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
     for (file, expected_keys) in expected.as_object().unwrap() {
         let document = read_document(analysis.join(file));
         let mut actual = document
@@ -715,15 +705,11 @@ fn normalized_measurements_match_golden_snapshot() {
 
 #[test]
 fn type_health_keeps_same_named_types_separate() {
-    run(&[
-        "measure",
+    let analysis = measure_fixture(
         "type-health",
-        "--config",
         "tests/fixtures/golden_rust_project/rqlens.toml",
-    ]);
-    let payload = read_json(
-        repo_root().join("tests/fixtures/golden_rust_project/target/analysis/type_health.json"),
     );
+    let payload = read_json(analysis.join("type_health.json"));
     let rows = payload.as_array().unwrap();
     let alpha = rows
         .iter()
@@ -753,14 +739,8 @@ fn type_health_keeps_same_named_types_separate() {
 
 #[test]
 fn map_captures_direct_module_path_dependency() {
-    run(&[
-        "measure",
-        "map",
-        "--config",
-        "tests/fixtures/mini_rust_project/rqlens.toml",
-    ]);
-    let payload =
-        read_json(repo_root().join("tests/fixtures/mini_rust_project/target/analysis/map.json"));
+    let analysis = measure_fixture("map", "tests/fixtures/mini_rust_project/rqlens.toml");
+    let payload = read_json(analysis.join("map.json"));
     assert_eq!(payload["meta"]["project_name"], "mini-rust-project");
     assert_eq!(payload["meta"]["risk_model_id"], "rqlens.architecture_risk");
     assert_eq!(
@@ -916,13 +896,10 @@ fn entrypoints_are_visible_and_discounted_in_outputs() {
 
 #[test]
 fn correctness_writes_review_and_test_catalog() {
-    run(&[
-        "measure",
+    let root = measure_fixture(
         "correctness",
-        "--config",
         "tests/fixtures/mini_rust_project/rqlens.toml",
-    ]);
-    let root = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
+    );
     let review = read_json(root.join("correctness_review.json"));
     let catalog = read_json(root.join("test_catalog.json"));
     assert_eq!(review["summary"]["test_count"], 0);
@@ -931,16 +908,11 @@ fn correctness_writes_review_and_test_catalog() {
 
 #[test]
 fn correctness_attributes_inline_tests_to_production_modules() {
-    run(&[
-        "measure",
+    let analysis = measure_fixture(
         "correctness",
-        "--config",
         "tests/fixtures/golden_rust_project/rqlens.toml",
-    ]);
-    let review = read_json(
-        repo_root()
-            .join("tests/fixtures/golden_rust_project/target/analysis/correctness_review.json"),
     );
+    let review = read_json(analysis.join("correctness_review.json"));
     let domain_test = review["tests"]
         .as_array()
         .unwrap()
@@ -1096,15 +1068,8 @@ fn performance_command_writes_explicit_missing_evidence() {
 
 #[test]
 fn hotspots_report_syntax_fact_confidence() {
-    run(&[
-        "measure",
-        "hotspots",
-        "--config",
-        "tests/fixtures/mini_rust_project/rqlens.toml",
-    ]);
-    let payload = read_json(
-        repo_root().join("tests/fixtures/mini_rust_project/target/analysis/hotspots.json"),
-    );
+    let analysis = measure_fixture("hotspots", "tests/fixtures/mini_rust_project/rqlens.toml");
+    let payload = read_json(analysis.join("hotspots.json"));
     let rows = payload.as_array().unwrap();
     assert!(!rows.is_empty());
     let confidence = &rows[0]["measurement_confidence"];
