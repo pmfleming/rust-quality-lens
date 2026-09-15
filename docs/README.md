@@ -33,7 +33,7 @@ Risk scores from different model versions are not directly comparable. Artifacts
 
 ## Project notes
 
-- [Daemon campaign checkpoint](daemon-campaign.md): comparable measurements, local refactors, validation, and remaining work
+- [Daemon and RQLens campaign checkpoints](daemon-campaign.md): comparable measurements, local refactors, self-metric progress, and remaining gates
 - [Fallow comparison opportunities](fallow-comparison-opportunities.md): historical architecture review and implementation status
 - [Contributing](../CONTRIBUTING.md): development gates and pull-request expectations
 - [Code of Conduct](../CODE_OF_CONDUCT.md): community behavior

@@ -1,24 +1,24 @@
-# Daemon campaign: first validated checkpoint
+# Daemon and RQLens campaign checkpoints
 
-This is a first pass, **not completion of the complexity/LOC/architecture campaign**.
+These are intermediate checkpoints, **not completion of the complexity/LOC/architecture campaign**.
 All changes are local Git commits; nothing was pushed remotely.
 
-## Reproducible evidence
+## Original daemon checkpoint (v4)
 
-Authoritative captures are under `target/daemon-campaign/<daemon>/`:
+The original daemon captures are retained under `target/daemon-campaign/<daemon>/`:
 
 - `v4-baseline/` and `v4-final/`, except clip's baseline is `v4-baseline-retry/`.
 - `v4-comparison.json` contains comparisons, confidence warnings, and verification results.
 - Captures retain the executable, generated TOML policy, raw analysis, command logs,
   Git provenance, and derived summaries. These large artifacts are Git-ignored.
 
-All ten authoritative captures used the same executable SHA-256:
+All ten v4 captures used the same executable SHA-256:
 
 ```text
 a3fbf4aadd55d92266c7e350fa51ca2aa3d760fdd48148f5c30ebe0ea2974b48
 ```
 
-Every authoritative artifact uses `fnv1a64-quality-inputs-v4`, including mutable
+Every artifact in that checkpoint uses `fnv1a64-quality-inputs-v4`, including mutable
 path dependencies in its fingerprint. Framework revision `47d5a65` was unchanged.
 App's vendored framework is covered by its own repository revision.
 Baselines ran in detached worktrees with sibling dependency paths preserved;
@@ -33,7 +33,11 @@ fix. Both sides of every comparison were subsequently recaptured with v4, not
 compared across tool versions. The failed first clip v4 baseline lacked its
 configured sibling helper-manifest path; the retry restored that layout.
 
-## Results
+These are historical v4 results, not comparisons against the newer helper-aware
+v5 instrument described below. The current campaign checker requires v5 evidence;
+remeasure both revisions before extending these comparisons.
+
+## Original daemon results
 
 Complexity below covers `src/` functions excluding `tests` and `*_tests` module/file
 names. This is a naming heuristic, **not cfg-aware production classification**.
@@ -84,7 +88,7 @@ No whole-program dead-code reduction or calibrated effort improvement is claimed
 LOC increased overall, largely for regression coverage and the app correctness
 fix. This pass therefore does **not** meet the LOC-reduction goal.
 
-## Validation and remaining gates
+## Original checkpoint validation
 
 All five final repositories passed formatting, locked workspace tests, and
 Clippy with warnings denied in their native development environments:
@@ -132,18 +136,94 @@ Example for subsequent checkpoints:
 ```sh
 python scripts/daemon-campaign.py capture ../bt-daemon target/daemon-campaign/bt/next
 python scripts/daemon-campaign.py compare \
-  target/daemon-campaign/bt/v4-final target/daemon-campaign/bt/next
+  target/daemon-campaign/bt/same-tool-baseline target/daemon-campaign/bt/next
 ```
 
-If the lens executable changes, remeasure both source revisions with that same
-executable. Do not compare an old capture with the newly built tool by assumption.
+Create `same-tool-baseline` from the desired baseline worktree with the same tool
+and helper inputs. If either changes, remeasure both source revisions. Do not
+compare an old capture with the newly built tool by assumption.
+
+## Follow-up: dependency policy and RQLens self-hotspots
+
+The wildcard path-dependency failures are resolved separately from refactoring:
+
+- Framework `4a10b4c` versions its internal core dependency.
+- Bar `0745b36` versions its path dependencies.
+- Framework and bar formatting, locked tests, strict Clippy, and rustdoc passed.
+  Bar's dependency bans, sources, and advisories passed. The license allowlist
+  was **not** expanded: CDLA-Permissive-2.0 remains the outstanding bar blocker.
+- The earlier `version-policy` daemon captures predate v5. They are not evidence
+  for comparisons with the newly rebuilt instrument.
+
+RQLens refactors separate policy input loading and report stages, diff dispatch
+and escape decoding, command waiting/cleanup/output finalization, configuration
+ownership/defaults, and benchmark execution/evaluation. Test fixtures share setup
+without dropping assertions; eleven test modules use explicit imports rather than
+wildcards. Checkpoints include `e780740`, `a811298`, `3550c23`, `97d99d1`, `cbd921f`,
+`f05763b`, `ce0dfb7`, `b7f29ee`, `2ae04a7`, and `855cff1`.
+
+### Instrument corrections and comparable self-evidence
+
+`617fd12` fixes an AST normalization inconsistency: statement macros discarded their
+names while expression macros retained them. A regression test distinguishes
+`assert!` from `assert_eq!` while preserving identifier normalization and node
+counts. The previous self AST clone was a false positive, **not duplicated domain
+logic removed by refactoring**.
+
+Further reruns exposed shared Cargo executable-path contamination. `8ae5815`
+isolates campaign tool builds; `c9cc4c3` isolates helper builds by canonical manifest
+under the helper cache, uses locked helper builds, and fingerprints helper sources,
+workspace/dependency inputs, and lockfiles. Helper dependencies are resolved before
+measurement snapshots. V5 also records a separate `helper_digest`; campaign
+comparisons reject changed helper inputs even if the frozen main executable matches.
+Tests cover same-named helpers, preserved-timestamp helper edits, missing helper
+metadata, and comparison rejection.
+
+The authoritative self comparison is **`6eb86d9` → `c9cc4c3`**:
+
+- `target/self-campaign/v5-baseline/`, `v5-final/`, and `v5-comparison.json`.
+- Same executable SHA-256:
+  `9ee102534f8958c46aefac05a17374b1b1140bcc0c8575c0a6c9d587f429921d`.
+- Complete `fnv1a64-quality-inputs-v5` fingerprints; identical helper digest
+  `7eca41baf7275cbe`; stable source inputs and no comparison warnings.
+- Both revisions were remeasured after the corrections. Earlier self captures,
+  including `corrected-*` and `validated-*`, are superseded; hotspot previews are
+  diagnostic only. An abandoned baseline capture detected changing inputs and
+  did not publish its measurement batch.
+
+Unlike the daemon table, this table covers **all configured self source roots and
+functions**, including tests: `src`, `rust_helpers/src`, and `tests/cli.rs`.
+
+| Metric | Baseline → final | Unchanged budget |
+|---|---:|---:|
+| Maximum function hotspot | 226.24 → **69.61** | ≤70 |
+| Maximum cognitive complexity | 34 → **11** | ≤11 |
+| Maximum cyclomatic complexity | 26 → **20** | ≤20 |
+| Syntax escape records | 11 → **0** | 0 |
+| AST clone records, corrected detector | 0 → **0** | 0 |
+| Token clone records | 131 → **112** | ≤216 |
+| Duplicated-line percentage | 9.59 → **8.35%** | ≤16.14% |
+| Map locality / leverage | 97 / 50 → **97 / 50** | ≥97 / ≥50 |
+| Nonblank source lines | 19,915 → **20,003** | **≤17,289: failing** |
+
+Cognitive complexity sum fell 1,266 → 1,212; cyclomatic sum increased
+2,795 → 2,829. Source LOC increased by 88, including new provenance regression
+coverage. Lower maxima and fewer token clones therefore do **not** establish net
+LOC, total cyclomatic, locality, leverage, or calibrated effort improvement.
+
+Validation passed: **152 Rust tests**, **10 campaign Python tests**, formatting,
+strict Clippy, rustdoc, bundled-helper consistency, and isolated package smoke tests.
+Both self captures are verification-conformant (17 passed, 11 skipped); skipped
+checks are not passes. Running the unchanged self-metric script against the final
+capture stops at `source nonblank line count exceeds 17289`, not the former hotspot
+failure. No gate, license policy, or baseline threshold was relaxed.
 
 ## Next pass
 
-1. Resolve bar's dependency-policy issues explicitly, including a license decision;
-   coordinate any shared-framework manifest changes across dependent daemons.
-2. Add cfg-aware function-scope evidence to RQLens instead of relying on names.
-3. Address RQLens's existing self-hotspots without relaxing budgets.
-4. Target genuine repeated domain workflows and measured module coupling, seeking
-   net production LOC reductions and locality/leverage improvements while keeping
-   the new regression tests. Do not merge unrelated AST lookalikes.
+1. Resolve bar's remaining license-policy decision explicitly.
+2. Add cfg-aware function scope and address nm's `include!` evidence gaps.
+3. Reduce RQLens source LOC while retaining the now-passing complexity limits and
+   regression coverage; its existing LOC budget is still exceeded by 2,714 lines.
+4. Target genuine repeated domain workflows and measured module coupling across
+   the daemons, seeking net production LOC and locality/leverage improvements.
+   Do not merge unrelated AST lookalikes or treat partial evidence as complete.

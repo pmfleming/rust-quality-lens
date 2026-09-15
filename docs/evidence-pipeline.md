@@ -2,7 +2,7 @@
 
 ## Input preparation and snapshot
 
-Configuration loading resolves Cargo metadata once, respecting configured
+Configuration loading resolves the project's Cargo metadata once, respecting configured
 features, `locked`, and semantic offline mode. Full metadata can initialize
 `Cargo.lock` before a measurement begins; a no-dependencies fallback supports
 incomplete/offline projects. Source-root discovery, target identity, and
@@ -18,6 +18,16 @@ Local path dependencies (including sibling repositories) are fingerprinted by
 content without being added to the measured source scope. Their nearest workspace
 manifest, lockfile and toolchain/Cargo configuration are included for inherited
 settings. An unresolved local dependency graph makes the fingerprint partial.
+
+V5 fingerprints also cover the configured helper sources, manifests, lockfiles,
+and local workspace/dependency inputs. Helper metadata is resolved before the
+snapshot, including initial lockfile preparation; missing helper metadata cannot
+produce complete evidence. A separate `helper_digest` lets campaign comparisons
+reject helper changes independently of intentional measured-source changes.
+Helper executables use locked builds in per-manifest cache targets, not ordinary
+project Cargo output. This prevents same-named executables from another checkout
+from being selected merely because a shared output path exists. Campaign tool
+builds likewise use a dedicated target, and captures freeze the main executable.
 
 Automatic fingerprint inputs include Rust sources, Cargo manifests and lockfiles,
 Cargo configuration, Rust toolchain files, rustfmt/Clippy configuration, and the
