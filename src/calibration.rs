@@ -189,6 +189,7 @@ fn calibration_config(
         rust_analyzer: PathBuf::from("rust-analyzer"),
         identity_timeout_seconds: 90,
         identity_offline: true,
+        identity_build_macros: false,
         verification: Default::default(),
         architecture: Default::default(),
         policy: Default::default(),

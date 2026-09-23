@@ -8,7 +8,7 @@ This directory contains the design and interpretation notes for rust-quality-len
 - [Quality model](quality-model.md): evidence classes, authoritative sources, confidence, and policy interpretation
 - [Measurement design and upgrades](measurement-upgrades.md): artifact, extraction, confidence, and scoring design
 - [Validation corpus](validation-corpus.md): calibration limits and the outcome-validation protocol
-- [Evidence pipeline](evidence-pipeline.md): typed contracts, shared snapshots, staged publication, and regression tests
+- [Evidence pipeline](evidence-pipeline.md): typed contracts, shared snapshots, staged publication, trusted generated-symbol resolution, and regression tests
 
 The CLI is the source of truth for machine-readable interfaces:
 

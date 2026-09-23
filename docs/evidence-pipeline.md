@@ -61,6 +61,22 @@ input fingerprint, and writers share the output lock.
 Review and benchmark commands also validate their snapshot before writing their
 final output. Calibration uses the same batch mechanism.
 
+## Generated semantic identities
+
+`rust.identity_build_macros` defaults to `false`. A trusted-project opt-in enables
+both rust-analyzer build scripts and proc macros; it is not safe for arbitrary
+untrusted source. Semantic cache version 13 includes this option, and normal
+content fingerprints cover declared `fingerprint_inputs` such as protocol XML.
+Feature selection is supplied once (`cargo.features = "all"`), not duplicated in
+Cargo extra arguments where it would prevent build-script loading.
+
+Definition responses retain all locations. A measured local origin takes priority
+over an external generator; the referenced symbol is associated with its local
+module rather than the generator's token. Real external file definitions remain
+external, while unsupported virtual URIs are explicit unresolved evidence. Glob
+imports navigate at their module identifier, independently of the star location
+retained for escape-hatch evidence.
+
 ## Typed boundaries
 
 - `MeasurementConfidence` represents either complete or partial evidence. Its
@@ -94,4 +110,11 @@ Run:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+# Requires rust-analyzer, sysroot sources, and its proc-macro server:
+cargo test --locked semantic::macro_tests -- --ignored
 ```
+
+The live local build-script/proc-macro fixture tests trust opt-in, generated and
+glob imports, and cache reuse without registry dependencies. Unit tests cover
+location ordering, external/virtual definitions, XML edits with preserved mtimes,
+and default-safe analyzer configuration. Linux CI also runs the live fixture.

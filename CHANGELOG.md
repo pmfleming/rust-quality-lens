@@ -6,6 +6,8 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Added
 
+- Explicit trusted-project `rust.identity_build_macros` opt-in for compiler-assisted generated-symbol resolution, with cache invalidation and a live offline regression fixture.
+
 - Rust 1.95 toolchain provenance and compatibility evidence, structured compiler diagnostics, and SARIF locations for compiler and Clippy findings.
 - Rust 1.95 match-guard complexity, explicit `cfg_select!` confidence reporting, and unscored evidence for newer raw-memory and pointer-provenance APIs.
 - Cross-process locks for measurement output, helper materialization, and semantic identity caches.
@@ -55,6 +57,9 @@ All notable changes to this project will be documented here. The format follows 
 - Token clone windows are scoped to extracted function spans, keeping repeated data declarations out of executable-code duplication evidence; source and test AST clone extraction now share one helper pass.
 
 ### Fixed
+
+- Generated definitions now prefer their measured local macro origin over an external generator; virtual definitions remain unresolved. Glob navigation uses the module token while preserving star escape evidence.
+- Removed duplicate analyzer feature arguments that prevented Cargo build-script loading.
 
 - Cargo custom-build and dependency build failures are classified as correctness compilation failures rather than failed test executions.
 - Trivial six- and seven-node test wrappers no longer qualify as structural AST clones.

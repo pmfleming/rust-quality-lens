@@ -31,6 +31,7 @@ struct RawRustConfig {
     rust_analyzer: Option<PathBuf>,
     identity_timeout_seconds: Option<u64>,
     identity_offline: Option<bool>,
+    identity_build_macros: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -393,6 +394,7 @@ pub(crate) struct LensConfig {
     pub(crate) rust_analyzer: PathBuf,
     pub(crate) identity_timeout_seconds: u64,
     pub(crate) identity_offline: bool,
+    pub(crate) identity_build_macros: bool,
     pub(crate) verification: VerificationConfig,
     pub(crate) architecture: ArchitectureConfig,
     pub(crate) policy: PolicyConfig,
@@ -552,6 +554,7 @@ impl LensConfig {
             rust_analyzer,
             identity_timeout_seconds,
             identity_offline,
+            identity_build_macros: rust.identity_build_macros.unwrap_or(false),
             verification,
             architecture,
             policy,
@@ -759,6 +762,8 @@ identity_resolution = "auto"
 rust_analyzer = "rust-analyzer"
 identity_timeout_seconds = 60
 identity_offline = true
+# Trusted projects only: execute build scripts and procedural macros for identity.
+identity_build_macros = false
 
 [verification]
 timeout_seconds = 600
@@ -837,7 +842,9 @@ pub(crate) fn config_schema() -> Value {
                     "identity_resolution": {"type": "string", "enum": ["auto", "required", "disabled"], "default": "auto"},
                     "rust_analyzer": {"type": "string", "default": "rust-analyzer"},
                     "identity_timeout_seconds": {"type": "integer", "minimum": 1, "default": 60},
-                    "identity_offline": {"type": "boolean", "default": true}
+                    "identity_offline": {"type": "boolean", "default": true},
+                    "identity_build_macros": {"type": "boolean", "default": false,
+                        "description": "Trusted projects only: allow rust-analyzer to execute build scripts and procedural macros"}
                 }
             },
             "verification": {

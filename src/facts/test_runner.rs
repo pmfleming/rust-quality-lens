@@ -272,6 +272,7 @@ path = "tests/integration.rs"
             rust_analyzer: PathBuf::from("rust-analyzer"),
             identity_timeout_seconds: 1,
             identity_offline: true,
+            identity_build_macros: false,
             verification: Default::default(),
             architecture: Default::default(),
             policy: Default::default(),

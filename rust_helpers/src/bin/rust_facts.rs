@@ -1124,7 +1124,7 @@ impl FactVisitor {
         self.scan_attrs(&item.attrs);
         self.record_public_api(&item.vis, &item.attrs);
         collect_use_tree(
-            "",
+            ("", None),
             &item.tree,
             &mut self.dependencies,
             &mut self.dependency_references,
@@ -1525,20 +1525,21 @@ fn entrypoint_kind_for_path(path: &str) -> Option<&'static str> {
 }
 
 fn collect_use_tree(
-    prefix: &str,
+    prefix: (&str, Option<Span>),
     tree: &UseTree,
     dependencies: &mut Vec<String>,
     dependency_references: &mut Vec<DependencyReferenceFact>,
     escape_counts: &mut BTreeMap<String, usize>,
     escape_locations: &mut Vec<LocationFact>,
 ) {
+    let (prefix, prefix_span) = prefix;
     match tree {
         UseTree::Path(path) => {
             let next = join_path(prefix, &path.ident.to_string());
             dependencies.push(next.clone());
             push_dependency_reference(dependency_references, next.clone(), path.ident.span());
             collect_use_tree(
-                &next,
+                (&next, Some(path.ident.span())),
                 &path.tree,
                 dependencies,
                 dependency_references,
@@ -1561,7 +1562,7 @@ fn collect_use_tree(
             push_dependency_reference(
                 dependency_references,
                 format!("{prefix}::*"),
-                glob.star_token.span,
+                prefix_span.unwrap_or(glob.star_token.span),
             );
             *escape_counts.entry("glob_import".to_string()).or_insert(0) += 1;
             escape_locations.push(LocationFact {
@@ -1572,7 +1573,7 @@ fn collect_use_tree(
         UseTree::Group(group) => {
             for child in &group.items {
                 collect_use_tree(
-                    prefix,
+                    (prefix, prefix_span),
                     child,
                     dependencies,
                     dependency_references,
@@ -1862,6 +1863,35 @@ fn local() {
                 .iter()
                 .any(|dependency| dependency == "service")
         );
+    }
+
+    #[test]
+    fn glob_navigation_points_to_the_module_but_escape_evidence_points_to_the_star() {
+        let source = "use self::__interfaces::*;\nuse crate::protocol::{\n    *, nested::{*}\n};\n";
+        let facts = facts(source);
+        let globs = facts
+            .dependency_references
+            .iter()
+            .filter(|reference| reference.raw_path.ends_with("::*"))
+            .collect::<Vec<_>>();
+        assert_eq!(globs.len(), 3);
+        for (reference, token) in globs.iter().zip(["protocol", "nested", "__interfaces"]) {
+            let Some(line) = source.lines().nth(reference.line - 1) else {
+                panic!("glob reference must point into the fixture");
+            };
+            assert!(
+                line[reference.column..].starts_with(token),
+                "{}",
+                reference.raw_path
+            );
+        }
+        let lines = facts
+            .escape_locations
+            .iter()
+            .filter(|location| location.kind == "glob_import")
+            .map(|location| location.line)
+            .collect::<Vec<_>>();
+        assert_eq!(lines, [1, 3, 3]); // every glob retains its own escape evidence
     }
 
     #[test]

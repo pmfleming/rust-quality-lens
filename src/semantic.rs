@@ -13,7 +13,7 @@ use crate::config::{LensConfig, SemanticIdentityMode};
 use crate::facts::{DependencyReferenceFact, FileFacts, ResolvedDependencyFact};
 use crate::util::{lock_file, normalize_slashes, write_json};
 
-const CACHE_VERSION: u64 = 9;
+const CACHE_VERSION: u64 = 13;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct IdentityResolutionSummary {
@@ -266,26 +266,48 @@ fn resolve_reference(
         reference.column,
         deadline,
     ) {
-        Ok(Some(location)) => resolved_definition(reference, location, path_index),
-        Ok(None) => unresolved(reference, "unresolved"),
+        Ok(locations) => resolved_definitions(reference, locations, path_index),
         Err(error) => unresolved(reference, &format!("error: {error}")),
     }
 }
 
-fn resolved_definition(
+fn resolved_definitions(
     reference: &DependencyReferenceFact,
-    location: DefinitionLocation,
+    locations: Vec<DefinitionLocation>,
     path_index: &BTreeMap<String, (String, String)>,
 ) -> ResolvedDependencyFact {
-    let target_path = uri_path(&location.uri);
+    // Proc-macro navigation can return the external generator first and the
+    // local expansion origin second. The generated item belongs to the latter.
+    let multiple = locations.len() > 1;
+    let location = locations
+        .into_iter()
+        .min_by_key(|location| match uri_path(&location.uri) {
+            Some(path) if path_index.contains_key(&canonical_key(&path)) => 0,
+            None => 1, // Without a local origin, do not mistake a generator for the item.
+            Some(_) => 2,
+        });
+    let Some(location) = location else {
+        return unresolved(reference, "unresolved");
+    };
+    let Some(target_path) = uri_path(&location.uri) else {
+        // A virtual expansion URI is not evidence of an external dependency.
+        // Keep it unresolved unless the analyzer supplies a source location.
+        return unresolved(reference, "unmapped_generated_definition");
+    };
+    let target_path = Some(target_path);
     let target = target_path
         .as_ref()
         .map(canonical_key)
         .and_then(|key| path_index.get(&key));
-    let symbol = target_path
-        .as_ref()
-        .and_then(|path| identifier_at(path, location.line, location.character))
-        .unwrap_or_else(|| reference_symbol(&reference.raw_path));
+    let symbol = if multiple && target.is_some() {
+        // The origin's token names the generator, not the generated item.
+        reference_symbol(&reference.raw_path)
+    } else {
+        target_path
+            .as_ref()
+            .and_then(|path| identifier_at(path, location.line, location.character))
+            .unwrap_or_else(|| reference_symbol(&reference.raw_path))
+    };
     let (status, target_module_id, target_module_key, symbol_identity) = match target {
         Some((module_id, module_key)) => (
             "resolved_local",
@@ -441,6 +463,7 @@ fn canonical_key(path: impl AsRef<Path>) -> String {
 
 fn reference_symbol(raw: &str) -> String {
     raw.trim_end_matches("::*")
+        .trim_end_matches("::self")
         .rsplit("::")
         .next()
         .unwrap_or(raw)
@@ -551,18 +574,18 @@ fn lsp_transport(config: &LensConfig) -> Result<LspTransport> {
 
 fn analyzer_configuration(config: &LensConfig, linked_project: Option<&Path>) -> Value {
     let extra_args = if config.identity_offline {
-        json!(["--offline", "--all-features"])
+        json!(["--offline"])
     } else {
-        json!(["--all-features"])
+        json!([])
     };
     let mut configuration = json!({
         "cargo": {
-            "buildScripts": {"enable": false},
+            "buildScripts": {"enable": config.identity_build_macros},
             "extraArgs": extra_args,
             "features": "all",
             "allTargets": true
         },
-        "procMacro": {"enable": false},
+        "procMacro": {"enable": config.identity_build_macros},
         "checkOnSave": false
     });
     if let Some(project) = linked_project {
@@ -617,7 +640,7 @@ impl LspClient {
         line: usize,
         character: usize,
         deadline: Instant,
-    ) -> Result<Option<DefinitionLocation>> {
+    ) -> Result<Vec<DefinitionLocation>> {
         let result = self.request(
             "textDocument/definition",
             json!({
@@ -626,7 +649,13 @@ impl LspClient {
             }),
             deadline,
         )?;
-        Ok(definition_location(&result))
+        Ok(result
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or(std::slice::from_ref(&result))
+            .iter()
+            .filter_map(definition_location)
+            .collect())
     }
 
     fn request(&mut self, method: &str, params: Value, deadline: Instant) -> Result<Value> {
@@ -971,6 +1000,10 @@ fn feature_cfgs(config: &LensConfig, source_path: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[path = "semantic_macro_tests.rs"]
+mod macro_tests;
+
+#[cfg(test)]
 mod tests {
     use super::{
         definition_location, file_uri, is_semantic_candidate, percent_decode, percent_encode,
@@ -1004,6 +1037,23 @@ mod tests {
             );
         }
         let before = super::fingerprint(&config, &[], Some("analyzer-v1"));
+        config.identity_build_macros = true;
+        assert_ne!(
+            before,
+            super::fingerprint(&config, &[], Some("analyzer-v1"))
+        );
+        let protocol = root.path().join("protocol.xml");
+        fs::write(&protocol, "<protocol name='before' />")?;
+        config
+            .fingerprint_inputs
+            .push(protocol.to_string_lossy().into_owned());
+        let before = super::fingerprint(&config, &[], Some("analyzer-v1"));
+        crate::util::write_preserving_mtime(&protocol, "<protocol name='after_' />")?;
+        assert_ne!(
+            before,
+            super::fingerprint(&config, &[], Some("analyzer-v1"))
+        );
+        let before = super::fingerprint(&config, &[], Some("analyzer-v1"));
         config.verification.all_features = true;
         assert_ne!(
             before,
@@ -1013,6 +1063,131 @@ mod tests {
             .source_roots
             .push(root.path().join("missing").to_string_lossy().into_owned());
         assert!(super::fingerprint(&config, &[], Some("analyzer-v1")).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn macro_execution_requires_explicit_trust_and_does_not_repeat_feature_flags()
+    -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let mut config = required_config(root.path(), "trust-fixture")?;
+        for enabled in [false, true] {
+            config.identity_build_macros = enabled;
+            for offline in [false, true] {
+                config.identity_offline = offline;
+                let settings = super::analyzer_configuration(&config, None);
+                assert_eq!(settings["procMacro"]["enable"], enabled);
+                assert_eq!(settings["cargo"]["buildScripts"]["enable"], enabled);
+                assert_eq!(settings["cargo"]["features"], "all");
+                assert_eq!(
+                    settings["cargo"]["extraArgs"],
+                    if offline {
+                        json!(["--offline"])
+                    } else {
+                        json!([])
+                    }
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unmapped_virtual_origin_is_not_disguised_by_an_external_generator() {
+        let reference = DependencyReferenceFact {
+            raw_path: "crate::generated::Message".into(),
+            line: 1,
+            column: 0,
+        };
+        for virtual_first in [false, true] {
+            let mut uris = [
+                "file:///registry/generator.rs",
+                "rust-analyzer://macro/generated.rs",
+            ];
+            if virtual_first {
+                uris.reverse();
+            }
+            let locations = uris
+                .into_iter()
+                .map(|uri| super::DefinitionLocation {
+                    uri: uri.into(),
+                    line: 0,
+                    character: 0,
+                })
+                .collect();
+            let resolved = super::resolved_definitions(&reference, locations, &Default::default());
+            assert_eq!(resolved.status, "unmapped_generated_definition");
+        }
+    }
+
+    #[test]
+    fn generated_navigation_prefers_local_origin_over_external_generator() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("lib.rs");
+        fs::write(&path, "scanner::generate_code!();\n")?;
+        let index = [(
+            super::canonical_key(&path),
+            ("fixture::lib::protocol".into(), "protocol".into()),
+        )]
+        .into();
+        let reference = DependencyReferenceFact {
+            raw_path: "crate::protocol::generated::Message".into(),
+            line: 2,
+            column: 0,
+        };
+        for local_first in [false, true] {
+            let mut locations = vec![
+                super::DefinitionLocation {
+                    uri: "file:///registry/scanner/src/lib.rs".into(),
+                    line: 10,
+                    character: 7,
+                },
+                super::DefinitionLocation {
+                    uri: file_uri(&path),
+                    line: 0,
+                    character: 0,
+                },
+            ];
+            if local_first {
+                locations.reverse();
+            }
+            let resolved = super::resolved_definitions(&reference, locations, &index);
+            assert_eq!(resolved.status, "resolved_local");
+            assert_eq!(
+                resolved.target_module_id.as_deref(),
+                Some("fixture::lib::protocol")
+            );
+            assert_eq!(
+                resolved.symbol_identity.as_deref(),
+                Some("fixture::lib::protocol::Message")
+            );
+        }
+        let virtual_location = super::DefinitionLocation {
+            uri: "rust-analyzer://macro-expansion/generated.rs".into(),
+            line: 0,
+            character: 0,
+        };
+        let unresolved = super::resolved_definitions(&reference, vec![virtual_location], &index);
+        assert_eq!(unresolved.status, "unmapped_generated_definition");
+        assert!(unresolved.target_module_id.is_none());
+        let external = super::resolved_definitions(
+            &reference,
+            vec![super::DefinitionLocation {
+                uri: "file:///registry/external/lib.rs".into(),
+                line: 0,
+                character: 0,
+            }],
+            &index,
+        );
+        assert_eq!(external.status, "resolved_external");
+        assert_eq!(
+            super::reference_symbol("crate::protocol::generated::self"),
+            "generated"
+        );
+        assert_eq!(
+            super::reference_symbol("crate::protocol::generated::*"),
+            "generated"
+        );
         Ok(())
     }
 

@@ -39,6 +39,9 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      - name: Generated-symbol identity (trusted local macro fixture)
+        run: cargo test --locked semantic::macro_tests -- --ignored
+
       - name: Documentation
         env:
           RUSTDOCFLAGS: -D warnings

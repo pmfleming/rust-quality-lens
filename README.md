@@ -95,6 +95,28 @@ configuration, and the repository-policy files checked by `verify` are included
 automatically; Cargo's target directory and the analysis output are excluded
 unless explicitly listed.
 
+### Generated-symbol identity in trusted projects
+
+Rust-analyzer build scripts and procedural macros are disabled by default during
+identity resolution. To resolve generated protocol bindings, explicitly opt in:
+
+```toml
+fingerprint_inputs = ["protocols"] # XML and other non-Rust generator inputs
+
+[rust]
+identity_build_macros = true
+identity_timeout_seconds = 180
+```
+
+**Only enable this for a trusted checkout and dependencies:** build scripts and
+procedural macros execute their code. The setting participates in the semantic
+cache fingerprint; declare generator inputs so their content changes invalidate
+cached identities too. Macro definitions with a local invocation origin are
+mapped to that measured module, even when the analyzer reports the external
+generator first. Unmapped virtual definitions remain unresolved/partial rather
+than being counted as external dependencies. Glob navigation targets the module,
+while escape-hatch evidence still targets `*`.
+
 ### Measure a project
 
 ```bash
