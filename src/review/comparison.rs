@@ -75,7 +75,8 @@ fn compare(current: &Value, base: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::compare;
+    use serde_json::json;
     #[test]
     fn snapshots_compare_semantic_occurrences_not_changed_hunks() {
         let snapshot = |ids| json!({"version":1,"complete":true,"analysis_identity":"profile","finding_ids":ids});

@@ -111,18 +111,7 @@ enum Body {
         #[serde(deserialize_with = "required_nullable")]
         suppression: Option<Suppression>,
     },
-    Measurement {
-        name: Text,
-        #[serde(deserialize_with = "required_nullable")]
-        value: Option<f64>,
-        unit: Text,
-        scope: Text,
-        model: Text,
-        run_id: Text,
-        #[serde(deserialize_with = "required_nullable")]
-        uncertainty: Option<Interval>,
-        limitations: Vec<Text>,
-    },
+    Measurement(Measurement),
     Comparison {
         status: Compatibility,
         current_run: Text,
@@ -131,6 +120,32 @@ enum Body {
         reasons: Vec<Text>,
     },
 }
+#[derive(Serialize, Deserialize)]
+struct Measurement {
+    name: Text,
+    #[serde(deserialize_with = "required_nullable")]
+    value: Option<f64>,
+    unit: Text,
+    scope: Text,
+    model: Text,
+    run_id: Text,
+    #[serde(deserialize_with = "required_nullable")]
+    uncertainty: Option<Interval>,
+    limitations: Vec<Text>,
+}
+impl Measurement {
+    fn valid(&self) -> bool {
+        let observed = self.value.is_some_and(f64::is_finite);
+        (observed || (self.value.is_none() && !self.limitations.is_empty()))
+            && self.uncertainty.as_ref().is_none_or(|range| {
+                observed
+                    && range.lower.is_finite()
+                    && range.upper.is_finite()
+                    && range.lower <= range.upper
+            })
+    }
+}
+
 impl Evidence {
     fn valid(&self) -> bool {
         if self.schema_version != 1.0 {
@@ -148,21 +163,7 @@ impl Evidence {
                             && item.line.fract() == 0.0
                     })
             }
-            Body::Measurement {
-                value,
-                uncertainty,
-                limitations,
-                ..
-            } => {
-                let observed = value.is_some_and(f64::is_finite);
-                (observed || (value.is_none() && !limitations.is_empty()))
-                    && uncertainty.as_ref().is_none_or(|range| {
-                        observed
-                            && range.lower.is_finite()
-                            && range.upper.is_finite()
-                            && range.lower <= range.upper
-                    })
-            }
+            Body::Measurement(measurement) => measurement.valid(),
             Body::Comparison {
                 status,
                 baseline_run,
@@ -190,7 +191,9 @@ pub(crate) fn validate_extension(value: Option<&Value>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::validate_extension;
+    use anyhow::Result;
+    use serde_json::Value;
     #[test]
     fn shared_wire_contract_cases() -> Result<()> {
         let cases: Vec<Value> = serde_json::from_str(include_str!("../contracts/wire-cases.json"))?;

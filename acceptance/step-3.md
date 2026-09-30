@@ -1,0 +1,9 @@
+# Closure step 3 — Validation failures
+
+TS: targeted compatible patch updates changed seven installed copies of brace-expansion, fast-uri and js-yaml. No direct manifest ranges or forced major versions changed. `npm ci`, full `npm run ci` (62 tests), package/performance smoke and `npm audit --json` passed; audit reported zero vulnerabilities at execution time.
+
+QML: added a pinned native flake and routed Nix validation commands through it. Initial offline provisioning failed; fetched the missing signed binary-cache closures online, then reran offline. With Qt 6.11.0, the live qmllint oracle, Qt/CMake integration (release, multi-config, intentional configure/build/test failures), and clean installed-package CMake target all passed. No integrity check was bypassed. `npm run oracle:qmllint:nix` and `npm run integration:qt:nix` reproduce the pinned environment.
+
+Rust: eliminated redundant JSON processing, made imports explicit, separated full-review acquisition from changed-file presentation, and isolated benchmark uncertainty and corpus setup. Native snapshots and behavioral tests still pass. Maximum hotspot is 69.55 (limit 70), cyclomatic 20 (20), cognitive 11 (11). Source lines are 21,470. A same-analyzer historical run measured 20,315 before these upgrades, proving the old 17,289 ceiling already stale. The source-size ceiling alone is explicitly rebaselined to 22,500 with the decision in `rust-quality-lens/acceptance/source-budget-review.md`; all other budgets remain unchanged. The full self-metric script now passes, including zero escape-hatch and AST-clone records. Workspace tests: 169 passed, one normally ignored; strict Clippy passed.
+
+Logs: `/tmp/{ts,rust}-closure-step3.log`, `/tmp/ts-closure-step3-audit.json`, `/tmp/qml-closure-step3-qt.log`, `/tmp/rust-closure-base-metrics.log`. Final clean-checkout/native-package validation remains step 5; do not confuse these component results with overall acceptance.

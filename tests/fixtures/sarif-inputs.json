@@ -1,0 +1,4 @@
+{
+  "reliability_findings.json": {"tool":"reliability","records":[{"rule_id":"rust.safety.undocumented-unsafe","severity":"error","scope":"production","message":"missing rationale","source":"https://example.invalid/rule","path":"src/lib.rs","line":4}]},
+  "rust_practices.json": {"tool":"practices","data":{"checks":[{"rule_id":"rust.official.clippy","title":"Clippy","message":"Clippy failed","severity":"error","status":"failed","source":"https://doc.rust-lang.org/clippy/","diagnostics":[{"rule_id":"rust.compiler.dangling-pointers-from-locals","severity":"warning","message":"a dangling pointer is produced","path":"src/raw.rs","line":8,"column":4}]}]}}
+}

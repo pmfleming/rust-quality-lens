@@ -56,9 +56,6 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<super::Arti
     if file == "coverage.json" && header.measurement_confidence.is_complete() {
         super::coverage_percent(value)?;
     }
-    if file == "performance.json" {
-        super::benchmark_records(&payload["records"])?;
-    }
     validate_policy_payload(file, payload)?;
     Ok(header)
 }
@@ -91,7 +88,8 @@ fn validate_policy_payload(file: &str, payload: &Value) -> Result<()> {
         "test_quality.json" => each(&payload["findings"], finding),
         "map.json" => each(&payload["graph"]["nodes"], map_node),
         "operational_evidence.json" => each(&payload["records"], operational),
-        "performance.json" | "repository_outcomes.json" => array(&payload["records"]).map(|_| ()),
+        "performance.json" => super::benchmark_records(&payload["records"]).map(|_| ()),
+        "repository_outcomes.json" => array(&payload["records"]).map(|_| ()),
         _ => Ok(()),
     }
 }

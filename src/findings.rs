@@ -90,7 +90,10 @@ fn visit(config: &LensConfig, value: &mut Value, occurrences: &mut BTreeMap<Stri
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::normalize;
+    use crate::config::LensConfig;
+    use serde_json::json;
+    use std::fs;
     #[test]
     fn identity_survives_line_shifts_and_distinguishes_occurrences() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;

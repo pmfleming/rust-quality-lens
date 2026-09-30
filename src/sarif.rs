@@ -300,83 +300,37 @@ fn payload(document: &Value) -> &Value {
 #[cfg(test)]
 mod tests {
     use super::write;
-    use crate::config::{LensConfig, SemanticIdentityMode};
-    use serde_json::json;
-    use std::path::PathBuf;
+    use crate::config::LensConfig;
+    use anyhow::Context;
+    use serde_json::{Map, Value, json};
 
     #[test]
     fn emits_findings_and_failed_gates_as_sarif() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
         let analysis = root.path().join("analysis");
         std::fs::create_dir_all(&analysis)?;
+        std::fs::create_dir(root.path().join("src"))?;
+        let source = root.path().join("src/lib.rs");
+        std::fs::write(&source, "pub fn example() {}\n")?;
+        let config_file = root.path().join("rqlens.toml");
         std::fs::write(
-            analysis.join("reliability_findings.json"),
-            serde_json::to_vec(&json!({"records": [{
-                "rule_id": "rust.safety.undocumented-unsafe",
-                "severity": "error",
-                "scope": "production",
-                "message": "missing rationale",
-                "source": "https://example.invalid/rule",
-                "path": "src/lib.rs",
-                "line": 4
-            }]}))?,
+            &config_file,
+            "source_roots = ['src']\noutput_dir = 'analysis'\n[rust]\nidentity_resolution = 'disabled'\n",
         )?;
-        std::fs::write(
-            analysis.join("rust_practices.json"),
-            serde_json::to_vec(&json!({"data": {"checks": [{
-                "rule_id": "rust.official.clippy",
-                "title": "Clippy",
-                "message": "Clippy failed",
-                "severity": "error",
-                "status": "failed",
-                "source": "https://doc.rust-lang.org/clippy/",
-                "diagnostics": [{
-                    "rule_id": "rust.compiler.dangling-pointers-from-locals",
-                    "severity": "warning",
-                    "message": "a dangling pointer is produced",
-                    "path": "src/raw.rs",
-                    "line": 8,
-                    "column": 4
-                }]
-            }]}}))?,
-        )?;
-        let config = LensConfig {
-            project_name: "sarif-test".to_string(),
-            project_root: root.path().to_path_buf(),
-            source_roots: vec![],
-            fingerprint_inputs: Vec::new(),
-            cargo_metadata: None,
-            helper_metadata: Some(json!({"packages": []})),
-            output_dir: analysis,
-            helper_manifest: root.path().join("helper/Cargo.toml"),
-            identity_resolution: SemanticIdentityMode::Disabled,
-            rust_analyzer: PathBuf::from("rust-analyzer"),
-            identity_timeout_seconds: 1,
-            identity_offline: true,
-            identity_build_macros: false,
-            verification: Default::default(),
-            architecture: Default::default(),
-            policy: Default::default(),
-        };
-        std::fs::create_dir_all(root.path().join("helper"))?;
-        std::fs::write(
-            &config.helper_manifest,
-            "[package]\nname = 'helper'\nversion = '0.1.0'\n",
-        )?;
-        let fingerprint = config.input_fingerprint();
-        for (file, tool) in [
-            ("reliability_findings.json", "reliability"),
-            ("rust_practices.json", "practices"),
-        ] {
-            let path = config.output_dir.join(file);
-            let mut value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-            let header = json!({"schema_version": 3, "tool": tool, "risk_model_version": crate::measurement::MODEL_VERSION,
-                "input_fingerprint": fingerprint, "measurement_confidence": {"complete": true, "partial": false}});
-            value
+        let config = LensConfig::load(Some(config_file))?;
+        let inputs: Map<String, Value> =
+            serde_json::from_str(include_str!("../tests/fixtures/sarif-inputs.json"))?;
+        for (file, payload) in inputs {
+            let mut document = json!({"schema_version": 3, "risk_model_version": crate::measurement::MODEL_VERSION,
+                "input_fingerprint": config.input_fingerprint(), "measurement_confidence": {"complete": true, "partial": false}});
+            let Value::Object(fields) = payload else {
+                anyhow::bail!("fixture must be an object");
+            };
+            document
                 .as_object_mut()
-                .ok_or_else(|| anyhow::anyhow!("expected object"))?
-                .extend(header.as_object().cloned().unwrap_or_default());
-            std::fs::write(path, serde_json::to_vec(&value)?)?;
+                .context("header object")?
+                .extend(fields);
+            crate::util::write_json(&analysis.join(file), &document)?;
         }
         let output = write(&config, None)?;
         let document: serde_json::Value = serde_json::from_slice(&std::fs::read(output)?)?;
@@ -397,7 +351,7 @@ mod tests {
             diagnostic["locations"][0]["physicalLocation"]["region"]["startLine"],
             8
         );
-        std::fs::write(&config.helper_manifest, "changed")?;
+        std::fs::write(source, "pub fn changed() {}\n")?;
         assert!(
             write(&config, None).is_err(),
             "stale evidence must not be exported"

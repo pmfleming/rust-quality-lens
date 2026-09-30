@@ -50,24 +50,17 @@ pub(crate) fn run_check(
     let operational_failures = operational_failures(documents);
     let (external_findings, external_reasons) = crate::external::current_findings(config);
     let external = classify_findings(config, external_findings);
-    if config.policy.rules.iter().any(|(rule, policy)| {
-        rule.starts_with("external.") && policy.level != crate::config::PolicyRuleLevel::Off
-    }) {
-        for reason in &external_reasons {
-            input_failures.push(
-                json!({"policy": "external-evidence", "status": "incomplete", "reason": reason}),
-            );
-        }
-    }
+    input_failures.extend(external_input_failures(config, &external_reasons));
+    let classified = [
+        &practices,
+        &reliability,
+        &architecture,
+        &test_quality,
+        &external,
+    ];
     let policy_rule_evaluations = evaluate_policy_rules(
         &config.policy,
-        practices
-            .active
-            .iter()
-            .chain(&reliability.active)
-            .chain(&architecture.active)
-            .chain(&test_quality.active)
-            .chain(&external.active),
+        classified.iter().flat_map(|group| group.active.iter()),
     );
     let policy_rule_violations = policy_rule_evaluations
         .iter()
@@ -83,12 +76,7 @@ pub(crate) fn run_check(
     waived_findings.extend(architecture.waived);
     waived_findings.extend(test_quality.waived);
     waived_findings.extend(external.waived);
-    let expired_waivers = config
-        .policy
-        .expired_waivers()
-        .into_iter()
-        .map(|waiver| serde_json::to_value(waiver).unwrap_or_else(|_| json!({})))
-        .collect::<Vec<_>>();
+    let expired_waivers = config.policy.expired_waivers();
     let current_map = documents.get("map.json").map(artifact_payload);
     let threshold_violations = current_map
         .map(|map| threshold_violations(map, max_total_score))
@@ -184,6 +172,16 @@ pub(crate) fn run_check(
         );
     }
     Ok(())
+}
+
+fn external_input_failures(config: &LensConfig, reasons: &[String]) -> Vec<Value> {
+    let required = config.policy.rules.iter().any(|(rule, policy)| {
+        rule.starts_with("external.") && policy.level != crate::config::PolicyRuleLevel::Off
+    });
+    if !required {
+        return Vec::new();
+    }
+    reasons.iter().map(|reason| json!({"policy": "external-evidence", "status": "incomplete", "reason": reason})).collect()
 }
 
 fn enabled_policies(config: &LensConfig, fail_on: &[FailPolicy]) -> Vec<String> {

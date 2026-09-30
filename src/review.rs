@@ -51,49 +51,19 @@ pub(crate) fn run_review(
         .cloned()
         .collect::<Vec<_>>();
 
-    let tools = REVIEW_TOOLS.to_vec();
-    let context = RunContext::new(&config, &tools)?;
-    let full_measurements = tools
-        .iter()
-        .map(|tool| {
-            let mut payload = produce_measurement(tool, &config, &context)?;
-            crate::findings::normalize(&config, &mut payload);
-            Ok(payload)
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let finding_snapshot = comparison::snapshot(
-        &config,
-        &full_measurements,
-        context.source_confidence()["complete"] == true
-            && context.correctness_confidence()["complete"] == true
-            && context.identity_resolution.complete
-            && context.snapshot.fingerprint["complete"] == true,
-    );
+    let context = RunContext::new(&config, REVIEW_TOOLS)?;
+    let (full_measurements, finding_snapshot) = measure_snapshot(&config, &context)?;
     let baseline_comparison =
         comparison::compare_file(&finding_snapshot, baseline_review.as_deref());
-    let (measurements, entrypoints) = if measured_files.is_empty() {
-        (Vec::new(), Vec::new())
-    } else {
-        let measured_file_keys: HashSet<String> = measured_files.iter().map(path_key).collect();
-        let measurements = tools
-            .iter()
-            .zip(full_measurements)
-            .map(|(tool, payload)| ReviewMeasurement {
-                tool: tool.name().to_string(),
-                output_file: tool.output_file().to_string(),
-                payload: filter_payload(&config.project_root, payload, &measured_file_keys),
-            })
-            .collect();
-        (
-            measurements,
-            review_entrypoints(
-                &config.project_root,
-                &context.source_facts,
-                &context.correctness_facts,
-                &measured_file_keys,
-            ),
-        )
-    };
+    let measured_file_keys = measured_files.iter().map(path_key).collect();
+    let measurements =
+        scoped_measurements(&config.project_root, full_measurements, &measured_file_keys);
+    let entrypoints = review_entrypoints(
+        &config.project_root,
+        &context.source_facts,
+        &context.correctness_facts,
+        &measured_file_keys,
+    );
 
     let change_evidence =
         changed_line_coverage(&config, &changed_lines, &context.snapshot.fingerprint);
@@ -118,6 +88,48 @@ pub(crate) fn run_review(
     context.snapshot.ensure_unchanged(&config)?;
     write_json(&output_path, &serde_json::to_value(output)?)?;
     Ok(output_path)
+}
+
+fn measure_snapshot(
+    config: &LensConfig,
+    context: &RunContext,
+) -> Result<(Vec<serde_json::Value>, serde_json::Value)> {
+    let measurements = REVIEW_TOOLS
+        .iter()
+        .map(|tool| {
+            let mut payload = produce_measurement(tool, config, context)?;
+            crate::findings::normalize(config, &mut payload);
+            Ok(payload)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let snapshot = comparison::snapshot(
+        config,
+        &measurements,
+        context.source_confidence()["complete"] == true
+            && context.correctness_confidence()["complete"] == true
+            && context.identity_resolution.complete
+            && context.snapshot.fingerprint["complete"] == true,
+    );
+    Ok((measurements, snapshot))
+}
+
+fn scoped_measurements(
+    project_root: &Path,
+    measurements: Vec<serde_json::Value>,
+    files: &HashSet<String>,
+) -> Vec<ReviewMeasurement> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+    REVIEW_TOOLS
+        .iter()
+        .zip(measurements)
+        .map(|(tool, payload)| ReviewMeasurement {
+            tool: tool.name().to_string(),
+            output_file: tool.output_file().to_string(),
+            payload: filter_payload(project_root, payload, files),
+        })
+        .collect()
 }
 
 fn review_entrypoints(

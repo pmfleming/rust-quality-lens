@@ -73,12 +73,10 @@ pub(crate) fn current_findings(config: &LensConfig) -> (Vec<Value>, Vec<String>)
         reasons.push("No imported external reports are available".into());
     }
     for (rule, policy) in &config.policy.rules {
-        if policy.level == crate::config::PolicyRuleLevel::Off {
-            continue;
-        }
-        if let Some(adapter) = rule
-            .strip_prefix("external.")
-            .and_then(|rule| rule.split('.').next())
+        if policy.level != crate::config::PolicyRuleLevel::Off
+            && let Some(adapter) = rule
+                .strip_prefix("external.")
+                .and_then(|rule| rule.split('.').next())
             && !config
                 .output_dir
                 .join(format!("external_{}.json", safe_name(adapter)))

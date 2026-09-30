@@ -21,7 +21,7 @@ pub(crate) fn run_benchmarks(
     let target = cargo_target_directory(config)?;
     let snapshot = crate::measurement::InputSnapshot::capture(config);
     let (criterion_root, command) = execute_benchmarks(config, &target, no_run)?;
-    let (mut records, mut read_errors) = criterion_records(&criterion_root);
+    let (mut records, read_errors) = criterion_records(&criterion_root);
     let environment = json!({"os": std::env::consts::OS, "arch": std::env::consts::ARCH,
         "host": hostname::get().ok().map(|host| host.to_string_lossy().into_owned()),
         "toolchain": crate::toolchain::as_json(&snapshot.toolchain)});
@@ -35,27 +35,13 @@ pub(crate) fn run_benchmarks(
         .map(|baseline| comparisons(&records, baseline))
         .transpose()?
         .unwrap_or_default();
-    let incomparable = comparisons
-        .iter()
-        .any(|row| row["direction"] == "incomparable");
-    let command_passed = command
-        .as_ref()
-        .is_none_or(|outcome| outcome.status == CommandStatus::Passed);
-    if !command_passed {
-        read_errors.push("cargo bench did not complete successfully".to_string());
-    }
-    let complete =
-        !no_run && command_passed && !records.is_empty() && !incomparable && read_errors.is_empty();
-    let confidence = json!({
-        "complete": complete,
-        "partial": !complete,
-        "confidence_scope": "criterion_benchmark_execution",
-        "required_inputs": ["cargo_bench", "criterion_estimates"],
-        "observed_inputs": {"benchmark_count": records.len(), "command_executed": !no_run},
-        "missing_input": if records.is_empty() { vec!["no Criterion estimates were found"] } else if incomparable { vec!["current and baseline benchmark IDs do not match"] } else { Vec::<&str>::new() },
-        "stale_input": if no_run { vec!["benchmark execution time is unknown because --no-run reused existing estimates"] } else { Vec::<&str>::new() },
-        "unsupported_pattern": read_errors,
-    });
+    let confidence = benchmark_confidence(
+        no_run,
+        command.as_ref(),
+        records.len(),
+        &comparisons,
+        read_errors,
+    );
     let document = json!({
         "schema_version": 1,
         "generated_from": "rqlens",
@@ -80,6 +66,40 @@ pub(crate) fn run_benchmarks(
     snapshot.ensure_unchanged(config)?;
     write_json(&output, &document)?;
     Ok(output)
+}
+
+fn benchmark_confidence(
+    no_run: bool,
+    command: Option<&CommandOutcome>,
+    count: usize,
+    comparisons: &[Value],
+    mut errors: Vec<String>,
+) -> Value {
+    let command_passed = command.is_some_and(|outcome| outcome.status == CommandStatus::Passed);
+    if !no_run && !command_passed {
+        errors.push("cargo bench did not complete successfully".into());
+    }
+    let mut missing = comparisons
+        .iter()
+        .filter(|row| row["direction"] == "incomparable")
+        .map(|row| {
+            row["reason"]
+                .as_str()
+                .unwrap_or("comparison evidence is incompatible")
+        })
+        .collect::<Vec<_>>();
+    if count == 0 {
+        missing.push("no Criterion estimates were found");
+    }
+    let complete = !no_run && command_passed && missing.is_empty() && errors.is_empty();
+    json!({
+        "complete": complete, "partial": !complete, "confidence_scope": "criterion_benchmark_execution",
+        "required_inputs": ["cargo_bench", "criterion_estimates"],
+        "observed_inputs": {"benchmark_count": count, "command_executed": !no_run},
+        "missing_input": missing,
+        "stale_input": if no_run { vec!["benchmark execution time is unknown because --no-run reused existing estimates"] } else { Vec::<&str>::new() },
+        "unsupported_pattern": errors,
+    })
 }
 
 fn execute_benchmarks(
@@ -243,8 +263,29 @@ fn interval(record: &BenchmarkRecord) -> Option<(f64, f64, f64)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{comparisons, run_benchmarks};
+    use super::{benchmark_confidence, comparisons, run_benchmarks};
     use serde_json::json;
+
+    #[test]
+    fn comparison_confidence_keeps_the_actual_incompatibility_reason() {
+        let confidence = benchmark_confidence(
+            false,
+            None,
+            1,
+            &[json!({"direction":"incomparable","reason":"environment differs"})],
+            Vec::new(),
+        );
+        assert_eq!(confidence["complete"], false);
+        assert_eq!(confidence["missing_input"], json!(["environment differs"]));
+        assert_eq!(
+            benchmark_confidence(true, None, 1, &[], Vec::new())["complete"],
+            false
+        );
+        assert_eq!(
+            benchmark_confidence(false, None, 0, &[], Vec::new())["complete"],
+            false
+        );
+    }
 
     fn benchmark_project(
         manifest: &str,

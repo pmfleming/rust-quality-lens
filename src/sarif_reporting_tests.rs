@@ -1,5 +1,8 @@
-use super::*;
-use crate::config::PolicyWaiver;
+use super::{add_source_findings, annotate_result};
+use crate::config::{LensConfig, PolicyWaiver};
+use anyhow::{Context, Result};
+use serde_json::{Value, json};
+use std::{collections::BTreeMap, fs};
 
 #[test]
 fn common_report_cases_preserve_disposition_and_waivers() -> Result<()> {
