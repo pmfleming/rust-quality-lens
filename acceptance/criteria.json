@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "scope": "Original review phases 0–4; closure steps 1–5. Documentation alone never discharges a required criterion.",
+  "criteria": [
+    {"id":"T1","phase":0,"criterion":"Reproduced trust defects have targeted positive and negative regressions","status":"open","evidence":[]},
+    {"id":"T2","phase":0,"criterion":"Repeated analysis is deterministic modulo declared timestamps and run identity","status":"open","evidence":[]},
+    {"id":"T3","phase":0,"criterion":"Unresolved semantics cannot report fully evaluated evidence","status":"open","evidence":[]},
+    {"id":"T4","phase":0,"criterion":"Complete native CI and declared integration profiles pass","status":"open","evidence":[]},
+    {"id":"E1","phase":1,"criterion":"Run, capability, finding, measurement and comparison wire vocabulary has conformance fixtures and native validation","status":"open","evidence":[]},
+    {"id":"E2","phase":1,"criterion":"Every blocking rule has prerequisites, applicability, scope, rationale, limitations and positive/negative/unavailable cases","status":"open","evidence":[]},
+    {"id":"E3","phase":1,"criterion":"Missing tools, corrupt reports, stale inputs, unsupported syntax and disabled checks never look verified clean","status":"open","evidence":[]},
+    {"id":"E4","phase":1,"criterion":"CLI, JSON, SARIF and policy agree on finding identity, evidence and disposition","status":"open","evidence":[]},
+    {"id":"E5","phase":1,"criterion":"Required verification failure cannot be suppressed as an ordinary finding","status":"open","evidence":[]},
+    {"id":"E6","phase":1,"criterion":"Overlapping engines preserve corroboration, disagreement and exclusion scope","status":"open","evidence":[]},
+    {"id":"P1","phase":2,"criterion":"Behavior, unnecessary surface, duplication, escape hatches, locality and leverage have native evidence and limitations","status":"open","evidence":[]},
+    {"id":"P2","phase":2,"criterion":"Declared module/dynamic/public boundary support matrix is tested; unsupported scope is explicit","status":"open","evidence":[]},
+    {"id":"P3","phase":2,"criterion":"Runtime and comparison evidence validates source, producer, environment, scope and uncertainty","status":"open","evidence":[]},
+    {"id":"P4","phase":2,"criterion":"Change review compares compatible finding snapshots, not only changed hunks","status":"open","evidence":[]},
+    {"id":"C1","phase":3,"criterion":"Held-out independently reviewed labels demonstrate useful heuristic ranking under thresholds fixed before tuning","status":"blocked","reason":"Independent labels and review have not been supplied; agent-authored regression partitions are not independent validation.","evidence":[]},
+    {"id":"C2","phase":3,"criterion":"Anti-gaming examples exercise their target rules, including needed complexity and removal of required behavior","status":"open","evidence":[]},
+    {"id":"C3","phase":3,"criterion":"Before/after refactor pairs have executed behavior-preservation evidence and human-reviewed intent","status":"blocked","reason":"Human intent review remains required; executable pairs can be prepared without asserting that review occurred.","evidence":[]},
+    {"id":"C4","phase":3,"criterion":"Per-rule accuracy, applicability, abstention, runtime, memory and mutation stability are reported without labeling unlabeled findings","status":"open","evidence":[]},
+    {"id":"O1","phase":4,"criterion":"No redundant parsing for the same capability in one unchanged run","status":"open","evidence":[]},
+    {"id":"O2","phase":4,"criterion":"Unrequested expensive capabilities remain unevaluated and do not launch tools","status":"open","evidence":[]},
+    {"id":"O3","phase":4,"criterion":"Repeated representative cold/warm resource budgets pass and imposed limits appear in completeness evidence","status":"open","evidence":[]},
+    {"id":"O4","phase":4,"criterion":"Adapters contain no independent analysis policy; critical JSON is validated at typed boundaries","status":"open","evidence":[]},
+    {"id":"O5","phase":4,"criterion":"Analysis permissions distinguish executing tests, builds, macros and other project commands","status":"open","evidence":[]},
+    {"id":"O6","phase":4,"criterion":"Publication fault injection proves readers reject mixed generations and retain a usable prior generation","status":"open","evidence":[]},
+    {"id":"O7","phase":4,"criterion":"Timeout and cancellation terminate subprocess trees and publish incomplete rather than clean evidence","status":"open","evidence":[]}
+  ]
+}
