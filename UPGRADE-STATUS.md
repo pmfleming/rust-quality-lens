@@ -1,6 +1,6 @@
 # Cross-lens upgrade execution
 
-The review's phases 0–4 are executed as phases 1–5. Each phase has its own commit.
+The review's phases 0–4 are executed as phases 1–5. Each phase has its own commit. These are implementation iterations; full plan acceptance remains open (see `contracts/upgrade-validation.md`).
 
 ## Phase 1 — Trust repairs
 - Type/implementation aggregation is qualified by package and target; ambiguous names are not joined.
@@ -25,3 +25,11 @@ The review's phases 0–4 are executed as phases 1–5. Each phase has its own c
 - Isolated modules no longer claim observed reuse; public surface and implementation size are explicit. Legacy architecture pressure remains separate and advisory.
 - Workspace suite: 166 passed, one ignored.
 - Independent real-world calibration and behavior-reviewed refactor pairs are still required before claiming calibrated ranking; `contracts/calibration-design.md` specifies this boundary.
+
+## Phase 5 — Simplification and delivery validation
+- Type-health production uses borrowed typed records and typed score inputs, serialized once at the boundary. Removed JSON-key sorting, summary/file cloning and duplicate pressure calculation while retaining the flat wire format.
+- External report validation/normalization has explicit boundaries and no redundant whole-row-vector clone. Cohesion exposes its syntactic/advisory basis.
+- 166 workspace tests passed, plus the normally ignored live rust-analyzer macro test; strict Clippy, formatting, docs, bundled-helper parity and package smoke passed.
+- Source-only first/repeat CLI/memory benchmark: 499/505 ms for 100 generated files, with prebuilt helpers and no project-code execution.
+- **Self-metric gate still fails:** hotspot 98.95 > 70, cognitive complexity 12 > 11, source lines 21192 > 17289. Existing thresholds were not raised to hide growth. The old isolated-module leverage floor was replaced by an observed-reuse invariant, not a new arbitrary score floor.
+- Full Rust CI and broad plan acceptance are not certified; details and remaining work are in `contracts/upgrade-validation.md`.

@@ -1,8 +1,8 @@
 use anyhow::Result;
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::artifacts::json_f64;
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, ImplFact, RunContext, TypeFact};
 use crate::measurement::{provenance, tool_score_metadata, type_risk};
@@ -12,7 +12,7 @@ use crate::util::round2;
 #[path = "type_health_tests.rs"]
 mod tests;
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct ImplSummary {
     method_count: usize,
     block_count: usize,
@@ -37,17 +37,17 @@ pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Valu
         .collect::<Vec<_>>();
 
     rows.sort_by(|a, b| {
-        json_f64(b, "structural_risk")
-            .total_cmp(&json_f64(a, "structural_risk"))
-            .then_with(|| b["method_count"].as_u64().cmp(&a["method_count"].as_u64()))
-            .then_with(|| b["field_count"].as_u64().cmp(&a["field_count"].as_u64()))
+        b.structural_risk
+            .total_cmp(&a.structural_risk)
+            .then_with(|| b.method_count.cmp(&a.method_count))
+            .then_with(|| b.declaration.field_count.cmp(&a.declaration.field_count))
             .then_with(|| {
-                a["qualified_name"]
-                    .as_str()
-                    .cmp(&b["qualified_name"].as_str())
+                a.declaration
+                    .qualified_name
+                    .cmp(&b.declaration.qualified_name)
             })
     });
-    Ok(Value::Array(rows))
+    Ok(serde_json::to_value(rows)?)
 }
 
 type TypeIdentity = (String, String, String);
@@ -135,56 +135,66 @@ fn resolve_super_type(raw: &str, module: &str) -> String {
         .join("::")
 }
 
-fn type_row(
-    fact: &FileFacts,
-    ty: &TypeFact,
-    impls: &BTreeMap<TypeIdentity, ImplSummary>,
-    metadata: &crate::measurement::ToolScoreMetadata,
-    provenance: &crate::measurement::Provenance,
-    confidence: &Value,
-) -> Value {
-    let summary = impls
-        .get(&type_identity(fact, &ty.qualified_name))
-        .cloned()
-        .unwrap_or_default();
-    let impl_files_vec = summary.files.into_iter().collect::<Vec<_>>();
-    let (risk, signals, score_components) = type_risk(
-        ty,
-        summary.method_count,
-        summary.block_count,
-        impl_files_vec.len(),
-    );
-    super::with_fact_identity(
-        fact,
-        json!({
-            "type_name": ty.type_name,
-            "qualified_name": ty.qualified_name,
-            "module_key": ty.module_key,
-            "path": ty.path,
-            "line": ty.line,
-            "kind": ty.kind,
-            "shape": ty.shape,
-            "field_count": ty.field_count,
-            "variant_count": ty.variant_count,
-            "variant_field_count": ty.variant_field_count,
-            "declaration_span": ty.declaration_span,
-            "method_count": summary.method_count,
-            "impl_block_count": summary.block_count,
-            "impl_file_count": impl_files_vec.len(),
-            "impl_files": impl_files_vec,
-            "structural_risk": risk,
-            "structural_score": round2(100.0 - risk),
-            "signals": signals,
-            "score_components": score_components,
-            "measured_at": provenance.measured_at,
-            "command": provenance.command,
-            "host": provenance.host,
-            "measurement_confidence": confidence,
-            "risk_model_id": metadata.risk_model_id,
-            "risk_model_version": metadata.risk_model_version,
-            "risk_calibration": metadata.risk_calibration,
-            "source": "static_type_health",
-            "mock": false,
-        }),
-    )
+#[derive(Serialize)]
+struct TypeHealthRecord<'a> {
+    #[serde(flatten)]
+    declaration: &'a TypeFact,
+    module_id: &'a str,
+    package_name: &'a str,
+    target_name: &'a str,
+    identity_backend: &'a str,
+    method_count: usize,
+    impl_block_count: usize,
+    impl_file_count: usize,
+    impl_files: Vec<&'a str>,
+    structural_risk: f64,
+    structural_score: f64,
+    signals: Vec<String>,
+    score_components: Vec<crate::measurement::TypeScoreComponent>,
+    #[serde(flatten)]
+    provenance: &'a crate::measurement::Provenance,
+    #[serde(flatten)]
+    metadata: &'a crate::measurement::ToolScoreMetadata,
+    measurement_confidence: &'a Value,
+    source: &'static str,
+    mock: bool,
+}
+
+fn type_row<'a>(
+    fact: &'a FileFacts,
+    ty: &'a TypeFact,
+    impls: &'a BTreeMap<TypeIdentity, ImplSummary>,
+    metadata: &'a crate::measurement::ToolScoreMetadata,
+    provenance: &'a crate::measurement::Provenance,
+    confidence: &'a Value,
+) -> TypeHealthRecord<'a> {
+    let summary = impls.get(&type_identity(fact, &ty.qualified_name));
+    let method_count = summary.map_or(0, |item| item.method_count);
+    let impl_block_count = summary.map_or(0, |item| item.block_count);
+    let impl_files = summary
+        .into_iter()
+        .flat_map(|item| item.files.iter().map(String::as_str))
+        .collect::<Vec<_>>();
+    let (risk, signals, score_components) =
+        type_risk(ty, method_count, impl_block_count, impl_files.len());
+    TypeHealthRecord {
+        declaration: ty,
+        module_id: &fact.module_id,
+        package_name: &fact.package_name,
+        target_name: &fact.target_name,
+        identity_backend: &fact.identity_backend,
+        method_count,
+        impl_block_count,
+        impl_file_count: impl_files.len(),
+        impl_files,
+        structural_risk: risk,
+        structural_score: round2(100.0 - risk),
+        signals,
+        score_components,
+        provenance,
+        metadata,
+        measurement_confidence: confidence,
+        source: "static_type_health",
+        mock: false,
+    }
 }

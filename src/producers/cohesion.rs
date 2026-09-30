@@ -38,6 +38,8 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
                 "module_key": fact.module_key,
                 "module_id": fact.module_id,
                 "path": path,
+                "dimension_basis": "syntactic declaration categories, not inferred responsibilities",
+                "calibration": "uncalibrated-advisory",
                 "responsibility_dimension_count": dimensions,
                 "responsibility_focus": round2((1.0 - dimensions.saturating_sub(1) as f64 / 3.0).max(0.0) * 100.0),
                 "outbound_dependencies": outbound,

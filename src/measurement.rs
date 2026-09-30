@@ -15,7 +15,7 @@ pub(crate) use paths::{
     title_from_name,
 };
 pub(crate) use provenance::{Provenance, ToolScoreMetadata, provenance, tool_score_metadata};
-pub(crate) use scoring::{escape_labels, escape_weights, type_risk};
+pub(crate) use scoring::{TypeScoreComponent, escape_labels, escape_weights, type_risk};
 
 pub(crate) const MODEL_ID: &str = "rqlens.architecture_risk";
 pub(crate) const MODEL_VERSION: u64 = 4;

@@ -186,7 +186,7 @@ pub(crate) struct EscapeFacts {
     pub(crate) escape_locations: Vec<LocationFact>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct TypeFact {
     pub(crate) type_name: String,
     pub(crate) qualified_name: String,

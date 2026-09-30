@@ -21,7 +21,6 @@ max_ast_clones=$(metric max_ast_clone_records)
 max_clones=$(metric max_token_clone_records)
 max_duplication=$(metric max_duplication_percent)
 min_locality=$(metric min_map_locality_score)
-min_leverage=$(metric min_map_leverage_score)
 
 require "$analysis/hotspots.json" \
   "([.records[] | select(.kind == \"function\") | .score] | max // 0) <= $max_hotspot" \
@@ -50,7 +49,7 @@ require "$analysis/locality_metrics.json" \
   "[.records[] | select(.module_key == \"producers::map\") | .locality_score][0] >= $min_locality" \
   "map locality fell below $min_locality"
 require "$analysis/leverage_metrics.json" \
-  "[.records[] | select(.module_key == \"producers::map\") | .leverage_score][0] >= $min_leverage" \
-  "map leverage fell below $min_leverage"
+  '(.records | length) > 0 and all(.records[]; .leverage_model == "observed-reuse-v2" and .leverage_score == ([100, (.reach * 10)] | min))' \
+  'observed reuse must reflect recorded consumers, not a positive isolation baseline'
 
 echo "Self metrics passed."

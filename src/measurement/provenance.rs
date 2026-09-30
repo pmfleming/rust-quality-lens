@@ -3,7 +3,7 @@ use std::env;
 
 use crate::measurement::{MODEL_ID, MODEL_VERSION};
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct Provenance {
     pub(crate) measured_at: String,
     pub(crate) command: String,
@@ -21,7 +21,7 @@ pub(crate) fn provenance() -> Provenance {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct ToolScoreMetadata {
     pub(crate) risk_model_id: &'static str,
     pub(crate) risk_model_version: u64,

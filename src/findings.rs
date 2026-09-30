@@ -7,6 +7,13 @@ pub(crate) fn normalize(config: &LensConfig, value: &mut Value) {
     visit(config, value, &mut BTreeMap::new());
 }
 
+pub(crate) fn normalize_records(config: &LensConfig, records: &mut [Value]) {
+    let mut occurrences = BTreeMap::new();
+    for record in records {
+        visit(config, record, &mut occurrences);
+    }
+}
+
 fn visit(config: &LensConfig, value: &mut Value, occurrences: &mut BTreeMap<String, u64>) {
     match value {
         Value::Array(items) => {

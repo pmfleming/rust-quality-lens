@@ -4,18 +4,26 @@ use std::collections::BTreeMap;
 use crate::facts::TypeFact;
 use crate::util::{over_free, round2};
 
+#[derive(serde::Serialize)]
+pub(crate) struct TypeScoreComponent {
+    signal: &'static str,
+    raw: TypeScoreInput,
+    contribution: f64,
+}
+
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum TypeScoreInput {
+    Count(usize),
+    ImplSpread { files: usize, blocks: usize },
+}
+
 pub(crate) fn type_risk(
     ty: &TypeFact,
     method_count: usize,
     impl_block_count: usize,
     impl_file_count: usize,
-) -> (f64, Vec<String>, Value) {
-    let risk = round2(type_pressure(
-        ty,
-        method_count,
-        impl_block_count,
-        impl_file_count,
-    ));
+) -> (f64, Vec<String>, Vec<TypeScoreComponent>) {
     let field_pressure = over_free(ty.field_count as f64, 8.0, 2.5, 35.0);
     let variant_pressure = over_free(ty.variant_count as f64, 8.0, 1.8, 28.0);
     let payload_pressure = over_free(ty.variant_field_count as f64, 10.0, 1.4, 18.0);
@@ -24,36 +32,54 @@ pub(crate) fn type_risk(
         + (impl_block_count.saturating_sub(4) as f64 * 1.2))
         .min(24.0);
     let declaration_pressure = over_free(ty.declaration_span as f64, 30.0, 0.35, 12.0);
+    let risk = round2(
+        (field_pressure
+            + variant_pressure
+            + payload_pressure
+            + method_pressure
+            + impl_pressure
+            + declaration_pressure)
+            .clamp(0.0, 100.0),
+    );
     (
         risk,
         type_signals(ty, method_count, impl_block_count, impl_file_count),
-        json!([
-            {"signal": "fields_over_8", "raw": ty.field_count, "contribution": round2(field_pressure)},
-            {"signal": "variants_over_8", "raw": ty.variant_count, "contribution": round2(variant_pressure)},
-            {"signal": "variant_fields_over_10", "raw": ty.variant_field_count, "contribution": round2(payload_pressure)},
-            {"signal": "methods_over_12", "raw": method_count, "contribution": round2(method_pressure)},
-            {"signal": "impl_spread", "raw": {"files": impl_file_count, "blocks": impl_block_count}, "contribution": round2(impl_pressure)},
-            {"signal": "declaration_lines_over_30", "raw": ty.declaration_span, "contribution": round2(declaration_pressure)},
-        ]),
+        vec![
+            TypeScoreComponent {
+                signal: "fields_over_8",
+                raw: TypeScoreInput::Count(ty.field_count),
+                contribution: round2(field_pressure),
+            },
+            TypeScoreComponent {
+                signal: "variants_over_8",
+                raw: TypeScoreInput::Count(ty.variant_count),
+                contribution: round2(variant_pressure),
+            },
+            TypeScoreComponent {
+                signal: "variant_fields_over_10",
+                raw: TypeScoreInput::Count(ty.variant_field_count),
+                contribution: round2(payload_pressure),
+            },
+            TypeScoreComponent {
+                signal: "methods_over_12",
+                raw: TypeScoreInput::Count(method_count),
+                contribution: round2(method_pressure),
+            },
+            TypeScoreComponent {
+                signal: "impl_spread",
+                raw: TypeScoreInput::ImplSpread {
+                    files: impl_file_count,
+                    blocks: impl_block_count,
+                },
+                contribution: round2(impl_pressure),
+            },
+            TypeScoreComponent {
+                signal: "declaration_lines_over_30",
+                raw: TypeScoreInput::Count(ty.declaration_span),
+                contribution: round2(declaration_pressure),
+            },
+        ],
     )
-}
-
-fn type_pressure(
-    ty: &TypeFact,
-    method_count: usize,
-    impl_block_count: usize,
-    impl_file_count: usize,
-) -> f64 {
-    let impl_spread_pressure = ((impl_file_count.saturating_sub(2) as f64 * 4.5)
-        + (impl_block_count.saturating_sub(4) as f64 * 1.2))
-        .min(24.0);
-    (over_free(ty.field_count as f64, 8.0, 2.5, 35.0)
-        + over_free(ty.variant_count as f64, 8.0, 1.8, 28.0)
-        + over_free(ty.variant_field_count as f64, 10.0, 1.4, 18.0)
-        + over_free(method_count as f64, 12.0, 0.85, 32.0)
-        + impl_spread_pressure
-        + over_free(ty.declaration_span as f64, 30.0, 0.35, 12.0))
-    .clamp(0.0, 100.0)
 }
 
 fn type_signals(

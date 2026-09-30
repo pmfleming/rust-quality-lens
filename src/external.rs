@@ -91,49 +91,55 @@ pub(crate) fn current_findings(config: &LensConfig) -> (Vec<Value>, Vec<String>)
     }
     let current = config.input_fingerprint();
     for path in paths {
-        let result = (|| -> Result<Vec<Value>> {
-            let envelope: Value = serde_json::from_slice(&fs::read(&path)?)?;
-            let adapter = envelope["adapter"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("missing adapter"))?;
-            let document = &envelope["data"];
-            validate(adapter, document)?;
-            anyhow::ensure!(
-                document["status"] == "completed"
-                    && document["confidence"]["complete"] == true
-                    && crate::fingerprint::freshness(document, &current)
-                        == crate::fingerprint::Freshness::Current,
-                "external evidence is incomplete, stale or not source-linked"
-            );
-            let mut rows = Vec::new();
-            for raw in document["findings"].as_array().into_iter().flatten() {
-                let rule = raw["rule_id"]
-                    .as_str()
-                    .filter(|rule| !rule.is_empty())
-                    .ok_or_else(|| anyhow::anyhow!("missing rule ID"))?;
-                anyhow::ensure!(
-                    raw["message"].is_string()
-                        && matches!(
-                            raw["severity"].as_str(),
-                            Some("error" | "warning" | "advisory")
-                        ),
-                    "invalid external finding"
-                );
-                let mut finding = raw.clone();
-                finding["rule_id"] = json!(format!("external.{}.{}", safe_name(adapter), rule));
-                finding["producer"] = document["tool"].clone();
-                rows.push(finding);
-            }
-            let mut rows = Value::Array(rows);
-            crate::findings::normalize(config, &mut rows);
-            Ok(rows.as_array().cloned().unwrap_or_default())
-        })();
-        match result {
+        match current_report(config, &path, &current) {
             Ok(rows) => findings.extend(rows),
             Err(error) => reasons.push(format!("{}: {error}", path.display())),
         }
     }
     (findings, reasons)
+}
+
+fn current_report(config: &LensConfig, path: &Path, current: &Value) -> Result<Vec<Value>> {
+    let envelope: Value = serde_json::from_slice(&fs::read(path)?)?;
+    let adapter = envelope["adapter"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("missing adapter"))?;
+    let document = &envelope["data"];
+    validate(adapter, document)?;
+    anyhow::ensure!(
+        document["status"] == "completed"
+            && document["confidence"]["complete"] == true
+            && crate::fingerprint::freshness(document, current)
+                == crate::fingerprint::Freshness::Current,
+        "external evidence is incomplete, stale or not source-linked"
+    );
+    let mut rows = document["findings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|raw| external_finding(adapter, &document["tool"], raw))
+        .collect::<Result<Vec<_>>>()?;
+    crate::findings::normalize_records(config, &mut rows);
+    Ok(rows)
+}
+
+fn external_finding(adapter: &str, producer: &Value, raw: &Value) -> Result<Value> {
+    let rule = raw["rule_id"]
+        .as_str()
+        .filter(|rule| !rule.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("missing rule ID"))?;
+    anyhow::ensure!(
+        raw["message"].is_string()
+            && matches!(
+                raw["severity"].as_str(),
+                Some("error" | "warning" | "advisory")
+            ),
+        "invalid external finding"
+    );
+    let mut finding = raw.clone();
+    finding["rule_id"] = json!(format!("external.{}.{}", safe_name(adapter), rule));
+    finding["producer"] = producer.clone();
+    Ok(finding)
 }
 
 fn safe_name(value: &str) -> String {

@@ -3,7 +3,7 @@ use crate::facts::{FileFacts, ImplFact, TypeFact};
 use std::collections::BTreeSet;
 
 #[test]
-fn type_implementations_are_package_and_target_local() {
+fn type_implementations_are_package_and_target_local() -> anyhow::Result<()> {
     let mut facts = Vec::new();
     for (package, target, methods) in [("a", "lib", 1), ("b", "lib", 2), ("a", "bin", 4)] {
         let mut fact = FileFacts::test_fact("src/lib.rs", "lib");
@@ -36,7 +36,28 @@ fn type_implementations_are_package_and_target_local() {
         let summary = &index[&type_identity(fact, "lib::Widget")];
         assert_eq!(summary.method_count, methods);
         assert_eq!(summary.block_count, 1);
+        let metadata = crate::measurement::tool_score_metadata("type_health");
+        let provenance = crate::measurement::provenance();
+        let confidence = serde_json::json!({"complete": true});
+        let row = super::type_row(
+            fact,
+            &fact.items.types[0],
+            &index,
+            &metadata,
+            &provenance,
+            &confidence,
+        );
+        assert_eq!(row.method_count, methods);
+        let wire = serde_json::to_value(row)?;
+        assert_eq!(wire["package_name"], fact.package_name);
+        assert_eq!(wire["qualified_name"], "lib::Widget");
+        assert_eq!(wire["score_components"][4]["raw"]["files"], 1);
+        assert!(
+            wire.get("declaration").is_none(),
+            "typed fields preserve the flat wire format"
+        );
     }
+    Ok(())
 }
 
 #[test]
