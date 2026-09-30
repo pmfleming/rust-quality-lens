@@ -8,6 +8,10 @@ use crate::facts::{FileFacts, ImplFact, RunContext, TypeFact};
 use crate::measurement::{provenance, tool_score_metadata, type_risk};
 use crate::util::round2;
 
+#[cfg(test)]
+#[path = "type_health_tests.rs"]
+mod tests;
+
 #[derive(Clone, Default)]
 struct ImplSummary {
     method_count: usize,
@@ -46,21 +50,40 @@ pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Valu
     Ok(Value::Array(rows))
 }
 
-fn impl_index(facts: &[FileFacts]) -> BTreeMap<String, ImplSummary> {
-    let definitions = facts
-        .iter()
-        .flat_map(|fact| &fact.items.types)
-        .map(|ty| ty.qualified_name.clone())
-        .collect::<BTreeSet<_>>();
-    let mut impls = BTreeMap::<String, ImplSummary>::new();
-    for imp in facts.iter().flat_map(|fact| &fact.items.impls) {
-        let Some(identity) = impl_identity(imp, &definitions) else {
+type TypeIdentity = (String, String, String);
+
+fn type_identity(fact: &FileFacts, name: &str) -> TypeIdentity {
+    (
+        fact.package_name.clone(),
+        fact.target_name.clone(),
+        name.to_string(),
+    )
+}
+
+fn impl_index(facts: &[FileFacts]) -> BTreeMap<TypeIdentity, ImplSummary> {
+    let mut definitions = BTreeMap::<(&str, &str), BTreeSet<String>>::new();
+    for fact in facts {
+        definitions
+            .entry((&fact.package_name, &fact.target_name))
+            .or_default()
+            .extend(fact.items.types.iter().map(|ty| ty.qualified_name.clone()));
+    }
+    let mut impls = BTreeMap::<TypeIdentity, ImplSummary>::new();
+    for fact in facts {
+        let Some(definitions) =
+            definitions.get(&(fact.package_name.as_str(), fact.target_name.as_str()))
+        else {
             continue;
         };
-        let entry = impls.entry(identity).or_default();
-        entry.method_count += imp.method_count;
-        entry.block_count += 1;
-        entry.files.insert(imp.path.clone());
+        for imp in &fact.items.impls {
+            let Some(identity) = impl_identity(imp, definitions) else {
+                continue;
+            };
+            let entry = impls.entry(type_identity(fact, &identity)).or_default();
+            entry.method_count += imp.method_count;
+            entry.block_count += 1;
+            entry.files.insert(imp.path.clone());
+        }
     }
     impls
 }
@@ -115,12 +138,15 @@ fn resolve_super_type(raw: &str, module: &str) -> String {
 fn type_row(
     fact: &FileFacts,
     ty: &TypeFact,
-    impls: &BTreeMap<String, ImplSummary>,
+    impls: &BTreeMap<TypeIdentity, ImplSummary>,
     metadata: &crate::measurement::ToolScoreMetadata,
     provenance: &crate::measurement::Provenance,
     confidence: &Value,
 ) -> Value {
-    let summary = impls.get(&ty.qualified_name).cloned().unwrap_or_default();
+    let summary = impls
+        .get(&type_identity(fact, &ty.qualified_name))
+        .cloned()
+        .unwrap_or_default();
     let impl_files_vec = summary.files.into_iter().collect::<Vec<_>>();
     let (risk, signals, score_components) = type_risk(
         ty,

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -50,7 +50,7 @@ fn add_reliability_results(
     rules: &mut BTreeMap<String, Value>,
     results: &mut Vec<Value>,
 ) -> Result<()> {
-    let Some(document) = read_optional(config.output_dir.join("reliability_findings.json"))? else {
+    let Some(document) = read_optional(config, "reliability_findings.json")? else {
         return Ok(());
     };
     add_source_findings(
@@ -69,7 +69,7 @@ fn add_finding_document(
     rules: &mut BTreeMap<String, Value>,
     results: &mut Vec<Value>,
 ) -> Result<()> {
-    let Some(document) = read_optional(config.output_dir.join(file_name))? else {
+    let Some(document) = read_optional(config, file_name)? else {
         return Ok(());
     };
     add_source_findings(
@@ -140,7 +140,7 @@ fn add_practice_results(
     rules: &mut BTreeMap<String, Value>,
     results: &mut Vec<Value>,
 ) -> Result<()> {
-    let Some(document) = read_optional(config.output_dir.join("rust_practices.json"))? else {
+    let Some(document) = read_optional(config, "rust_practices.json")? else {
         return Ok(());
     };
     let mut seen_diagnostics = BTreeSet::new();
@@ -255,15 +255,23 @@ fn add_failed_practice(
     }));
 }
 
-fn read_optional(path: PathBuf) -> Result<Option<Value>> {
+fn read_optional(config: &LensConfig, file: &str) -> Result<Option<Value>> {
+    let path = config.output_dir.join(file);
     if !path.is_file() {
         return Ok(None);
     }
     let contents = fs::read_to_string(&path)
         .with_context(|| format!("reading SARIF input {}", path.display()))?;
-    serde_json::from_str(&contents)
-        .with_context(|| format!("parsing SARIF input {}", path.display()))
-        .map(Some)
+    let document: Value = serde_json::from_str(&contents)
+        .with_context(|| format!("parsing SARIF input {}", path.display()))?;
+    crate::contracts::validate_artifact(file, &document)
+        .with_context(|| format!("invalid SARIF input {file}"))?;
+    ensure!(
+        crate::fingerprint::freshness(&document, &config.input_fingerprint())
+            == crate::fingerprint::Freshness::Current,
+        "SARIF input {file} is stale or has incomplete provenance; rerun measurement"
+    );
+    Ok(Some(document))
 }
 
 fn payload(document: &Value) -> &Value {
@@ -298,6 +306,7 @@ mod tests {
             serde_json::to_vec(&json!({"records": [{
                 "rule_id": "rust.safety.undocumented-unsafe",
                 "severity": "error",
+                "scope": "production",
                 "message": "missing rationale",
                 "source": "https://example.invalid/rule",
                 "path": "src/lib.rs",
@@ -309,6 +318,7 @@ mod tests {
             serde_json::to_vec(&json!({"data": {"checks": [{
                 "rule_id": "rust.official.clippy",
                 "title": "Clippy",
+                "message": "Clippy failed",
                 "severity": "error",
                 "status": "failed",
                 "source": "https://doc.rust-lang.org/clippy/",
@@ -328,9 +338,9 @@ mod tests {
             source_roots: vec![],
             fingerprint_inputs: Vec::new(),
             cargo_metadata: None,
-            helper_metadata: None,
+            helper_metadata: Some(json!({"packages": []})),
             output_dir: analysis,
-            helper_manifest: PathBuf::from("unused"),
+            helper_manifest: root.path().join("helper/Cargo.toml"),
             identity_resolution: SemanticIdentityMode::Disabled,
             rust_analyzer: PathBuf::from("rust-analyzer"),
             identity_timeout_seconds: 1,
@@ -340,6 +350,26 @@ mod tests {
             architecture: Default::default(),
             policy: Default::default(),
         };
+        std::fs::create_dir_all(root.path().join("helper"))?;
+        std::fs::write(
+            &config.helper_manifest,
+            "[package]\nname = 'helper'\nversion = '0.1.0'\n",
+        )?;
+        let fingerprint = config.input_fingerprint();
+        for (file, tool) in [
+            ("reliability_findings.json", "reliability"),
+            ("rust_practices.json", "practices"),
+        ] {
+            let path = config.output_dir.join(file);
+            let mut value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+            let header = json!({"schema_version": 3, "tool": tool, "risk_model_version": crate::measurement::MODEL_VERSION,
+                "input_fingerprint": fingerprint, "measurement_confidence": {"complete": true, "partial": false}});
+            value
+                .as_object_mut()
+                .ok_or_else(|| anyhow::anyhow!("expected object"))?
+                .extend(header.as_object().cloned().unwrap_or_default());
+            std::fs::write(path, serde_json::to_vec(&value)?)?;
+        }
         let output = write(&config, None)?;
         let document: serde_json::Value = serde_json::from_slice(&std::fs::read(output)?)?;
         assert_eq!(document["version"], "2.1.0");
@@ -358,6 +388,11 @@ mod tests {
         assert_eq!(
             diagnostic["locations"][0]["physicalLocation"]["region"]["startLine"],
             8
+        );
+        std::fs::write(&config.helper_manifest, "changed")?;
+        assert!(
+            write(&config, None).is_err(),
+            "stale evidence must not be exported"
         );
         Ok(())
     }
