@@ -3,6 +3,27 @@ use crate::config::LensConfig;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs};
 
+/// Policy disposition is distinct from impact. Legacy records retain native severity.
+pub(crate) fn finding_level(finding: &Value) -> &'static str {
+    match finding["disposition"].as_str() {
+        Some("block") => "error",
+        Some("warn") => "warning",
+        Some("review" | "info") => "note",
+        _ => match finding["severity"].as_str() {
+            Some("error") => "error",
+            Some("warning") => "warning",
+            _ => "note",
+        },
+    }
+}
+
+pub(crate) fn is_waivable(finding: &Value) -> bool {
+    !matches!(
+        finding["status"].as_str(),
+        Some("unavailable" | "timed-out" | "failed_execution" | "incomplete")
+    )
+}
+
 pub(crate) fn normalize(config: &LensConfig, value: &mut Value) {
     visit(config, value, &mut BTreeMap::new());
 }

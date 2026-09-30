@@ -35,6 +35,7 @@ mod tool;
 mod toolchain;
 mod util;
 mod validation;
+mod wire_evidence;
 
 use cli::Cli;
 

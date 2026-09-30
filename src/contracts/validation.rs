@@ -7,6 +7,7 @@ use crate::tool::MeasureTool;
 // Consumers must validate before interpreting absent fields as empty findings.
 // Legacy, unversioned payloads are not accepted as current measurement evidence.
 pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<super::ArtifactHeader> {
+    crate::wire_evidence::validate_extension(value.get("evidence_contract"))?;
     let header: super::ArtifactHeader = serde_json::from_value(value.clone())?;
     let auxiliary = match file {
         "performance.json" => Some("performance"),

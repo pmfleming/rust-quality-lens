@@ -1,0 +1,1647 @@
+[
+  {
+    "id": "run-valid",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": true
+  },
+  {
+    "id": "run-missing-schema_version",
+    "value": {
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-missing-kind",
+    "value": {
+      "schema_version": 1,
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-blank-kind",
+    "value": {
+      "schema_version": 1,
+      "kind": " ",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-missing-id",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-blank-id",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": " ",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-missing-analyzer",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-missing-ruleset",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-blank-ruleset",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": " ",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-missing-config_fingerprint",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-blank-config_fingerprint",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": " ",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-missing-input_fingerprint",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-blank-input_fingerprint",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": " ",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-missing-language_profile",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-blank-language_profile",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": " ",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "run-missing-producers",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile"
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-valid",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": true
+  },
+  {
+    "id": "finding-missing-schema_version",
+    "value": {
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-kind",
+    "value": {
+      "schema_version": 1,
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-kind",
+    "value": {
+      "schema_version": 1,
+      "kind": " ",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-id",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-id",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": " ",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-rule_id",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-rule_id",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": " ",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-subject",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-subject",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": " ",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-run_id",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-run_id",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": " ",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-locations",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-evidence_kind",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-evidence_kind",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": " ",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-confidence",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-confidence",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": " ",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-severity",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-severity",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": " ",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-disposition",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-disposition",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": " ",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-message",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-blank-message",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": " ",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-missing-suppression",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect"
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-valid",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": true
+  },
+  {
+    "id": "measurement-missing-schema_version",
+    "value": {
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-missing-kind",
+    "value": {
+      "schema_version": 1,
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-blank-kind",
+    "value": {
+      "schema_version": 1,
+      "kind": " ",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-missing-name",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-blank-name",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": " ",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-missing-value",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-missing-unit",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-blank-unit",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": " ",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-missing-scope",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-blank-scope",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": " ",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-missing-model",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-blank-model",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": " ",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-missing-run_id",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-blank-run_id",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": " ",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-missing-uncertainty",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-missing-limitations",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 9,
+        "upper": 11
+      }
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-valid",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "compatible",
+      "current_run": "run:2",
+      "baseline_run": "run:1",
+      "reasons": []
+    },
+    "valid": true
+  },
+  {
+    "id": "comparison-missing-schema_version",
+    "value": {
+      "kind": "comparison",
+      "status": "compatible",
+      "current_run": "run:2",
+      "baseline_run": "run:1",
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-missing-kind",
+    "value": {
+      "schema_version": 1,
+      "status": "compatible",
+      "current_run": "run:2",
+      "baseline_run": "run:1",
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-blank-kind",
+    "value": {
+      "schema_version": 1,
+      "kind": " ",
+      "status": "compatible",
+      "current_run": "run:2",
+      "baseline_run": "run:1",
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-missing-status",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "current_run": "run:2",
+      "baseline_run": "run:1",
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-blank-status",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": " ",
+      "current_run": "run:2",
+      "baseline_run": "run:1",
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-missing-current_run",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "compatible",
+      "baseline_run": "run:1",
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-blank-current_run",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "compatible",
+      "current_run": " ",
+      "baseline_run": "run:1",
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-missing-baseline_run",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "compatible",
+      "current_run": "run:2",
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-blank-baseline_run",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "compatible",
+      "current_run": "run:2",
+      "baseline_run": " ",
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-missing-reasons",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "compatible",
+      "current_run": "run:2",
+      "baseline_run": "run:1"
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-unknown",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "unknown",
+      "current_run": "run:2",
+      "baseline_run": null,
+      "reasons": [
+        "baseline unavailable"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "id": "comparison-incompatible",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "incompatible",
+      "current_run": "run:2",
+      "baseline_run": "run:1",
+      "reasons": [
+        "ruleset differs"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "id": "comparison-false-compatible",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "compatible",
+      "current_run": "run:2",
+      "baseline_run": "run:1",
+      "reasons": [
+        "environment unknown"
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "comparison-no-baseline",
+    "value": {
+      "schema_version": 1,
+      "kind": "comparison",
+      "status": "compatible",
+      "current_run": "run:2",
+      "baseline_run": null,
+      "reasons": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-unavailable",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": null,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": null,
+      "limitations": [
+        "not collected"
+      ]
+    },
+    "valid": true
+  },
+  {
+    "id": "measurement-silent-missing",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": null,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": null,
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "measurement-reversed-interval",
+    "value": {
+      "schema_version": 1,
+      "kind": "measurement",
+      "name": "duration",
+      "value": 10,
+      "unit": "ms",
+      "scope": "scenario:1",
+      "model": "duration-v1",
+      "run_id": "run:1",
+      "uncertainty": {
+        "lower": 12,
+        "upper": 9
+      },
+      "limitations": []
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-waived",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": {
+        "reason": "reviewed exception"
+      }
+    },
+    "valid": true
+  },
+  {
+    "id": "finding-empty-waiver",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": {
+        "reason": " "
+      }
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-zero-line",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 0
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-fraction-line",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1.5
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-unknown-disposition",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "lens/rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "accepted",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "finding-no-namespace",
+    "value": {
+      "schema_version": 1,
+      "kind": "finding",
+      "id": "finding:1",
+      "rule_id": "rule",
+      "subject": "symbol:1",
+      "run_id": "run:1",
+      "locations": [
+        {
+          "file": "src/file",
+          "line": 1
+        }
+      ],
+      "evidence_kind": "diagnostic",
+      "confidence": "high",
+      "severity": "error",
+      "disposition": "block",
+      "message": "observed defect",
+      "suppression": null
+    },
+    "valid": false
+  },
+  {
+    "id": "run-unversioned-producer",
+    "value": {
+      "schema_version": 1,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler"
+        }
+      ]
+    },
+    "valid": false
+  },
+  {
+    "id": "future-version",
+    "value": {
+      "schema_version": 2,
+      "kind": "run",
+      "id": "run:1",
+      "analyzer": {
+        "name": "lens",
+        "version": "1"
+      },
+      "ruleset": "rules:1",
+      "config_fingerprint": "config-hash",
+      "input_fingerprint": "input-hash",
+      "language_profile": "declared-profile",
+      "producers": [
+        {
+          "name": "compiler",
+          "version": "1"
+        }
+      ]
+    },
+    "valid": false
+  }
+]

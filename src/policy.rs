@@ -403,7 +403,7 @@ fn classify_findings(config: &LensConfig, findings: Vec<Value>) -> FindingClassi
     let (errors, warnings) = active
         .iter()
         .cloned()
-        .partition(|finding| finding["severity"] == "error");
+        .partition(|finding| crate::findings::finding_level(finding) == "error");
     FindingClassification {
         active,
         errors,
@@ -421,7 +421,7 @@ fn apply_waivers(config: &LensConfig, findings: Vec<Value>) -> (Vec<Value>, Vec<
                 .policy
                 .active_waiver(rule_id, finding["path"].as_str())
         });
-        if let Some(waiver) = waiver {
+        if let Some(waiver) = waiver.filter(|_| crate::findings::is_waivable(&finding)) {
             waived.push(json!({"finding": finding, "waiver": waiver}));
         } else {
             active.push(finding);

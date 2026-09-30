@@ -1,0 +1,7 @@
+[
+  {"id":"block","disposition":"block","severity":"error","expected_level":"error","suppressed":false},
+  {"id":"warn","disposition":"warn","severity":"warning","expected_level":"warning","suppressed":false},
+  {"id":"review-impact","disposition":"review","severity":"error","expected_level":"note","suppressed":false},
+  {"id":"info","disposition":"info","severity":"note","expected_level":"note","suppressed":false},
+  {"id":"waived-block","disposition":"block","severity":"error","expected_level":"error","suppressed":true}
+]

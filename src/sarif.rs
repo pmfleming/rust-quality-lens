@@ -7,6 +7,10 @@ use std::path::PathBuf;
 use crate::config::LensConfig;
 use crate::util::write_json;
 
+#[cfg(test)]
+#[path = "sarif_reporting_tests.rs"]
+mod reporting_tests;
+
 pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<PathBuf> {
     let mut rules = BTreeMap::<String, Value>::new();
     let mut results = Vec::new();
@@ -110,7 +114,7 @@ fn add_source_findings<'a>(
         result.insert("ruleId".to_string(), json!(rule_id));
         result.insert(
             "level".to_string(),
-            json!(sarif_level(&finding["severity"])),
+            json!(crate::findings::finding_level(finding)),
         );
         result.insert("message".to_string(), json!({"text": message}));
         if let Some(path) = finding["path"].as_str() {
@@ -194,7 +198,7 @@ fn add_compiler_diagnostic(
     });
     let mut result = json!({
         "ruleId": rule_id,
-        "level": sarif_level(&diagnostic["severity"]),
+        "level": crate::findings::finding_level(diagnostic),
         "message": {"text": diagnostic["message"]},
     });
     if let (Some(path), Some(line)) = (path, diagnostic["line"].as_u64())
@@ -243,7 +247,7 @@ fn add_failed_practice(
     });
     let mut result = json!({
         "ruleId": rule_id,
-        "level": sarif_level(&check["severity"]),
+        "level": crate::findings::finding_level(check),
         "message": {"text": format!("{}: {}", title, check["status"].as_str().unwrap_or("failed"))},
     });
     annotate_result(config, check, &mut result);
@@ -255,10 +259,8 @@ fn annotate_result(config: &LensConfig, finding: &Value, result: &mut Value) {
         result["partialFingerprints"] = json!({"rqlens/source-anchor-v1": id});
     }
     let rule = finding["rule_id"].as_str().unwrap_or_default();
-    if !matches!(
-        finding["status"].as_str(),
-        Some("unavailable" | "timed-out")
-    ) && let Some(waiver) = config.policy.active_waiver(rule, finding["path"].as_str())
+    if crate::findings::is_waivable(finding)
+        && let Some(waiver) = config.policy.active_waiver(rule, finding["path"].as_str())
     {
         result["suppressions"] =
             json!([{"kind": "external", "status": "accepted", "justification": waiver.reason}]);
@@ -293,14 +295,6 @@ fn payload(document: &Value) -> &Value {
         .get("records")
         .or_else(|| document.get("data"))
         .unwrap_or(document)
-}
-
-fn sarif_level(severity: &Value) -> &'static str {
-    match severity.as_str() {
-        Some("error") => "error",
-        Some("warning") => "warning",
-        _ => "note",
-    }
 }
 
 #[cfg(test)]
