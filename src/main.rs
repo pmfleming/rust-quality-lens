@@ -26,6 +26,8 @@ mod outcomes;
 mod performance;
 mod policy;
 mod producers;
+#[cfg(test)]
+mod refactor_behavior_tests;
 mod review;
 mod risk_model;
 mod sarif;
