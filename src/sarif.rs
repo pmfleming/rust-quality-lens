@@ -91,19 +91,9 @@ fn add_source_findings<'a>(
     results: &mut Vec<Value>,
 ) {
     for finding in findings {
-        if finding["severity"] == "advisory" {
-            continue;
-        }
         let Some(rule_id) = finding["rule_id"].as_str() else {
             continue;
         };
-        if config
-            .policy
-            .active_waiver(rule_id, finding["path"].as_str())
-            .is_some()
-        {
-            continue;
-        }
         let message = finding["message"].as_str().unwrap_or(rule_id);
         rules.entry(rule_id.to_string()).or_insert_with(|| {
             json!({
@@ -131,7 +121,9 @@ fn add_source_findings<'a>(
                 }]),
             );
         }
-        results.push(Value::Object(result));
+        let mut result = Value::Object(result);
+        annotate_result(config, finding, &mut result);
+        results.push(result);
     }
 }
 
@@ -186,7 +178,7 @@ fn add_compiler_diagnostic(
             .unwrap_or_default()
             .to_string(),
     );
-    if !seen.insert(key) || config.policy.active_waiver(rule_id, path).is_some() {
+    if !seen.insert(key) {
         return;
     }
     rules.entry(rule_id.to_string()).or_insert_with(|| {
@@ -218,6 +210,7 @@ fn add_compiler_diagnostic(
             }]),
         );
     }
+    annotate_result(config, diagnostic, &mut result);
     results.push(result);
 }
 
@@ -236,9 +229,6 @@ fn add_failed_practice(
     let Some(rule_id) = check["rule_id"].as_str() else {
         return;
     };
-    if config.policy.active_waiver(rule_id, None).is_some() {
-        return;
-    }
     let title = check["title"].as_str().unwrap_or(rule_id);
     rules.entry(rule_id.to_string()).or_insert_with(|| {
         json!({
@@ -248,11 +238,31 @@ fn add_failed_practice(
             "helpUri": check["source"],
         })
     });
-    results.push(json!({
+    let mut result = json!({
         "ruleId": rule_id,
         "level": sarif_level(&check["severity"]),
         "message": {"text": format!("{}: {}", title, check["status"].as_str().unwrap_or("failed"))},
-    }));
+    });
+    annotate_result(config, check, &mut result);
+    results.push(result);
+}
+
+fn annotate_result(config: &LensConfig, finding: &Value, result: &mut Value) {
+    if let Some(id) = finding["id"].as_str() {
+        result["partialFingerprints"] = json!({"rqlens/source-anchor-v1": id});
+    }
+    let rule = finding["rule_id"].as_str().unwrap_or_default();
+    if !matches!(
+        finding["status"].as_str(),
+        Some("unavailable" | "timed-out")
+    ) && let Some(waiver) = config.policy.active_waiver(rule, finding["path"].as_str())
+    {
+        result["suppressions"] =
+            json!([{"kind": "external", "status": "accepted", "justification": waiver.reason}]);
+    }
+    if let Some(locations) = finding.get("related_locations") {
+        result["properties"]["related_locations"] = locations.clone();
+    }
 }
 
 fn read_optional(config: &LensConfig, file: &str) -> Result<Option<Value>> {
@@ -262,7 +272,7 @@ fn read_optional(config: &LensConfig, file: &str) -> Result<Option<Value>> {
     }
     let contents = fs::read_to_string(&path)
         .with_context(|| format!("reading SARIF input {}", path.display()))?;
-    let document: Value = serde_json::from_str(&contents)
+    let mut document: Value = serde_json::from_str(&contents)
         .with_context(|| format!("parsing SARIF input {}", path.display()))?;
     crate::contracts::validate_artifact(file, &document)
         .with_context(|| format!("invalid SARIF input {file}"))?;
@@ -271,6 +281,7 @@ fn read_optional(config: &LensConfig, file: &str) -> Result<Option<Value>> {
             == crate::fingerprint::Freshness::Current,
         "SARIF input {file} is stale or has incomplete provenance; rerun measurement"
     );
+    crate::findings::normalize(config, &mut document);
     Ok(Some(document))
 }
 

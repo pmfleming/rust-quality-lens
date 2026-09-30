@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "cases": [
+    {"valid": true, "value": {"schema_version": 1, "capability": "syntax", "scope": "source", "status": "completed", "evaluated": 3, "skipped": 0, "reasons": []}},
+    {"valid": true, "value": {"schema_version": 1, "capability": "syntax", "scope": "source", "status": "partial", "evaluated": 2, "skipped": 1, "reasons": ["unsupported syntax"]}},
+    {"valid": true, "value": {"schema_version": 1, "capability": "tests", "scope": "project", "status": "failed_execution", "evaluated": 0, "skipped": 1, "reasons": ["runner crashed"]}},
+    {"valid": true, "value": {"schema_version": 1, "capability": "tests", "scope": "project", "status": "disabled", "evaluated": 0, "skipped": 0, "reasons": ["execution not permitted"]}},
+    {"valid": true, "value": {"schema_version": 1, "capability": "tests", "scope": "project", "status": "unavailable", "evaluated": 0, "skipped": 1, "reasons": ["tool missing"]}},
+    {"valid": true, "value": {"schema_version": 1, "capability": "jsx", "scope": "source", "status": "not_applicable", "evaluated": 0, "skipped": 0, "reasons": ["no JSX files"]}},
+    {"valid": false, "value": {}},
+    {"valid": false, "value": {"schema_version": 1, "capability": "syntax", "scope": "source", "status": "completed", "evaluated": 2, "skipped": 1, "reasons": []}},
+    {"valid": false, "value": {"schema_version": 1, "capability": "syntax", "scope": "source", "status": "completed", "evaluated": 2, "skipped": 0, "reasons": ["unresolved"]}},
+    {"valid": false, "value": {"schema_version": 1, "capability": "tests", "scope": "project", "status": "unavailable", "evaluated": 1, "skipped": 0, "reasons": ["missing"]}},
+    {"valid": false, "value": {"schema_version": 1, "capability": "syntax", "scope": "source", "status": "partial", "evaluated": 0, "skipped": 1, "reasons": []}},
+    {"valid": false, "value": {"schema_version": 1, "capability": "syntax", "scope": "source", "status": "completed", "evaluated": -1, "skipped": 0, "reasons": []}}
+  ]
+}

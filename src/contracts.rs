@@ -18,10 +18,11 @@ pub(crate) use validation::validate_artifact;
 
 pub(crate) fn artifact_document(
     tool: &MeasureTool,
-    _config: &LensConfig,
+    config: &LensConfig,
     context: &RunContext,
-    payload: Value,
+    mut payload: Value,
 ) -> anyhow::Result<Value> {
+    crate::findings::normalize(config, &mut payload);
     let mut confidence: MeasurementConfidence = serde_json::from_value(
         payload
             .get("measurement_confidence")
@@ -42,8 +43,14 @@ pub(crate) fn artifact_document(
     if input_fingerprint["complete"] != true {
         confidence.mark_partial("quality input fingerprint is incomplete");
     }
+    let capability = crate::capability_evidence::CapabilityEvidence::inputs(
+        tool.name(),
+        confidence.is_complete(),
+    );
+    anyhow::ensure!(capability.validate(), "invalid capability evidence");
     let mut document = json!({
         "schema_version": 3,
+        "capabilities": [capability],
         "generated_from": "rqlens",
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "generator_version": env!("CARGO_PKG_VERSION"),
