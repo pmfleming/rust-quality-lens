@@ -1,0 +1,8 @@
+[
+  {"id":"unwrap","partition":"development","rule":"rust.reliability.unwrap","expected":true,"source":"pub fn value(input: Option<u32>) -> u32 { input.unwrap() }\n"},
+  {"id":"explicit-default","partition":"development","rule":"rust.reliability.unwrap","expected":false,"source":"pub fn value(input: Option<u32>) -> u32 { input.unwrap_or(0) }\n"},
+  {"id":"propagation","partition":"holdout","rule":"rust.reliability.unwrap","expected":false,"source":"pub fn value(input: Result<u32, ()>) -> Result<u32, ()> { Ok(input?) }\n"},
+  {"id":"ownership-clone","partition":"holdout","rule":"rust.reliability.unwrap","expected":false,"source":"pub fn value(input: &String) -> String { input.clone() }\n"},
+  {"id":"enum-exhaustive","partition":"holdout","rule":"rust.reliability.unwrap","expected":false,"source":"pub enum Choice { A, B }\npub fn value(input: Choice) -> u32 { match input { Choice::A => 1, Choice::B => 2 } }\n"},
+  {"id":"nested-unwrap","partition":"holdout","rule":"rust.reliability.unwrap","expected":true,"source":"pub fn value(input: Option<Option<u32>>) -> u32 { input.unwrap().unwrap() }\n"}
+]

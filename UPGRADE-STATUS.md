@@ -19,3 +19,9 @@ The review's phases 0–4 are executed as phases 1–5. Each phase has its own c
 - Criterion comparison preserves uncertainty/sample evidence and matching environment. Policy cannot reinterpret unknown/noisy comparisons as point-estimate regressions.
 - Source-linked external findings now enter configured policy rules and SARIF with adapter namespaces; unverified inputs remain unusable for gating.
 - Workspace suite: 163 passed, one ignored. Usage/limitations: `contracts/comparison-evidence.md`.
+
+## Phase 4 — Calibration and anti-gaming
+- Added native labeled-evaluation conformance plus actual Rust idiom cases and movement/rename mutations through the syntax fact backend.
+- Isolated modules no longer claim observed reuse; public surface and implementation size are explicit. Legacy architecture pressure remains separate and advisory.
+- Workspace suite: 166 passed, one ignored.
+- Independent real-world calibration and behavior-reviewed refactor pairs are still required before claiming calibrated ranking; `contracts/calibration-design.md` specifies this boundary.

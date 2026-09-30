@@ -19,6 +19,8 @@ mod external;
 mod facts;
 mod findings;
 mod fingerprint;
+#[cfg(test)]
+mod labeled_evaluation;
 mod measurement;
 mod outcomes;
 mod performance;

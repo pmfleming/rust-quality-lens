@@ -4,6 +4,10 @@ use crate::util::round2;
 use anyhow::Result;
 use serde_json::{Value, json};
 
+#[cfg(test)]
+#[path = "topology_tests.rs"]
+mod tests;
+
 pub(super) fn locality(context: &RunContext) -> Result<Value> {
     let graph = context.module_graph();
     Ok(Value::Array(
@@ -68,9 +72,14 @@ fn leverage_record(graph: &ModuleGraph, module: &ModuleInfo) -> Value {
         json!({
             "reach": inbound,
             "outbound_dependencies": outbound,
-            "leverage_score": round2(score),
+            "leverage_score": (inbound as f64 * 10.0).min(100.0),
+            "leverage_model": "observed-reuse-v2",
+            "calibration": "uncalibrated-advisory",
+            "public_surface": module.public_api_count,
+            "implementation_lines": module.source_nonblank_line_count,
             "pressure_score": round2(100.0 - score),
-            "signals": if score >= 68.0 { vec!["high leverage"] } else { vec!["pressure"] },
+            "signals": if inbound == 0 { vec!["no observed consumers"] } else { vec!["observed reuse"] },
+            "score_components_scope": "legacy pressure complement; not observed reuse",
             "score_components": [
                 {"signal": "base", "raw": 68.0, "contribution": 68.0},
                 {"signal": "inbound_reach", "raw": inbound, "contribution": round2(inbound as f64 * 2.5)},

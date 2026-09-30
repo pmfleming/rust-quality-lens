@@ -1,0 +1,10 @@
+{
+  "observations": [
+    {"id":"positive","partition":"holdout","rule":"rule","expected":true,"observed":true},
+    {"id":"negative","partition":"holdout","rule":"rule","expected":false,"observed":false},
+    {"id":"missed","partition":"holdout","rule":"rule","expected":true,"observed":null},
+    {"id":"unknown-negative","partition":"holdout","rule":"rule","expected":false,"observed":null},
+    {"id":"false-positive","partition":"holdout","rule":"rule","expected":false,"observed":true}
+  ],
+  "expected": {"partition":"holdout","rule":"rule","labels":5,"true_positives":1,"false_positives":1,"false_negatives":1,"true_negatives":1,"abstained":2,"precision":0.5,"recall":0.5,"evaluation_coverage":0.6,"abstention_rate":0.4}
+}
