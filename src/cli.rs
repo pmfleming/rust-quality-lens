@@ -71,6 +71,9 @@ pub(crate) struct SarifArgs {
 
 #[derive(Args)]
 pub(crate) struct ReviewArgs {
+    /// Compare against a saved review's full-project finding snapshot.
+    #[arg(long)]
+    pub(crate) baseline_review: Option<PathBuf>,
     #[arg(long)]
     pub(crate) changed_since: Option<String>,
     #[arg(long)]

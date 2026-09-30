@@ -11,6 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod comparison;
 mod diff;
 #[cfg(test)]
 mod tests;
@@ -31,6 +32,7 @@ pub(crate) fn run_review(
     config: LensConfig,
     changed_since: Option<String>,
     diff_file: Option<PathBuf>,
+    baseline_review: Option<PathBuf>,
 ) -> Result<PathBuf> {
     fs::create_dir_all(&config.output_dir)?;
     let _output_lock = crate::util::lock_file(&config.output_dir.join("rqlens"))?;
@@ -49,26 +51,39 @@ pub(crate) fn run_review(
         .cloned()
         .collect::<Vec<_>>();
 
-    let tools = if measured_files.is_empty() {
-        Vec::new()
-    } else {
-        REVIEW_TOOLS.to_vec()
-    };
+    let tools = REVIEW_TOOLS.to_vec();
     let context = RunContext::new(&config, &tools)?;
+    let full_measurements = tools
+        .iter()
+        .map(|tool| {
+            let mut payload = produce_measurement(tool, &config, &context)?;
+            crate::findings::normalize(&config, &mut payload);
+            Ok(payload)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let finding_snapshot = comparison::snapshot(
+        &config,
+        &full_measurements,
+        context.source_confidence()["complete"] == true
+            && context.correctness_confidence()["complete"] == true
+            && context.identity_resolution.complete
+            && context.snapshot.fingerprint["complete"] == true,
+    );
+    let baseline_comparison =
+        comparison::compare_file(&finding_snapshot, baseline_review.as_deref());
     let (measurements, entrypoints) = if measured_files.is_empty() {
         (Vec::new(), Vec::new())
     } else {
         let measured_file_keys: HashSet<String> = measured_files.iter().map(path_key).collect();
         let measurements = tools
             .iter()
-            .map(|tool| {
-                produce_measurement(tool, &config, &context).map(|payload| ReviewMeasurement {
-                    tool: tool.name().to_string(),
-                    output_file: tool.output_file().to_string(),
-                    payload: filter_payload(&config.project_root, payload, &measured_file_keys),
-                })
+            .zip(full_measurements)
+            .map(|(tool, payload)| ReviewMeasurement {
+                tool: tool.name().to_string(),
+                output_file: tool.output_file().to_string(),
+                payload: filter_payload(&config.project_root, payload, &measured_file_keys),
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect();
         (
             measurements,
             review_entrypoints(
@@ -83,7 +98,9 @@ pub(crate) fn run_review(
     let change_evidence =
         changed_line_coverage(&config, &changed_lines, &context.snapshot.fingerprint);
     let output = ReviewOutput {
-        version: 2,
+        version: 3,
+        finding_snapshot,
+        baseline_comparison,
         generated_from: "rqlens",
         input_fingerprint: context.snapshot.fingerprint.clone(),
         scope: ReviewScope {

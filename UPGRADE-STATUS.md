@@ -13,3 +13,9 @@ The review's phases 0–4 are executed as phases 1–5. Each phase has its own c
 - Artifacts and SARIF share source-anchor/occurrence identities. SARIF preserves advisory findings and records accepted waivers rather than silently dropping them; unavailable/timed-out checks cannot be waived in the exporter.
 - Workspace suite: 160 passed, one ignored.
 - The initial capability ledger is project-input scoped. Full per-rule applicability and symbol-semantic identity (beyond source anchors) remain outstanding.
+
+## Phase 3 — Measurement parity
+- Review v3 includes a full-project finding snapshot and `--baseline-review` comparison, separate from changed-file/hunk presentation. This consumes an explicitly saved base review, not an automatic Git checkout.
+- Criterion comparison preserves uncertainty/sample evidence and matching environment. Policy cannot reinterpret unknown/noisy comparisons as point-estimate regressions.
+- Source-linked external findings now enter configured policy rules and SARIF with adapter namespaces; unverified inputs remain unusable for gating.
+- Workspace suite: 163 passed, one ignored. Usage/limitations: `contracts/comparison-evidence.md`.

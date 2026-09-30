@@ -171,7 +171,9 @@ fn auxiliary_baseline_errors_are_reported_instead_of_skipping_comparisons() -> a
         (
             "performance.json",
             "performance",
-            json!({"records": [{"id": "parse", "estimate_nanoseconds": 100.0}]}),
+            json!({"records": [{"id": "parse", "estimate_nanoseconds": 100.0,
+                "samples": 10, "environment": {"host": "fixture"},
+                "confidence_interval": {"lower_bound": 95.0, "upper_bound": 105.0, "confidence_level": 0.95}}]}),
         ),
     ] {
         let current = document(&config, tool, data);

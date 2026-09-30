@@ -23,6 +23,7 @@ pub(super) fn run(command: Commands) -> Result<()> {
                 LensConfig::load(args.config)?,
                 args.changed_since,
                 args.diff_file,
+                args.baseline_review,
             )?,
             "review data",
         ),

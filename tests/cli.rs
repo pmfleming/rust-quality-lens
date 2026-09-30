@@ -593,7 +593,9 @@ fn review_uses_diff_file_scope() {
     ]);
     let payload =
         read_json(repo_root().join("tests/fixtures/mini_rust_project/target/analysis/review.json"));
-    assert_eq!(payload["version"], 2);
+    assert_eq!(payload["version"], 3);
+    assert_eq!(payload["finding_snapshot"]["version"], 1);
+    assert_eq!(payload["baseline_comparison"]["status"], "not_configured");
     assert_eq!(payload["scope"]["measured_rust_files"][0], "src/lib.rs");
     assert_eq!(
         payload["scope"]["changed_lines"]["src/lib.rs"],

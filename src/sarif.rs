@@ -26,6 +26,8 @@ pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<Path
         &mut results,
     )?;
     add_practice_results(config, &mut rules, &mut results)?;
+    let (external, external_reasons) = crate::external::current_findings(config);
+    add_source_findings(config, external.iter(), &mut rules, &mut results);
     let document = json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -38,6 +40,7 @@ pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<Path
                 }
             },
             "results": results,
+            "properties": {"external_evidence_reasons": external_reasons},
         }]
     });
     let output = output.unwrap_or_else(|| config.output_dir.join("rqlens.sarif"));

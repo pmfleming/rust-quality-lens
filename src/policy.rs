@@ -48,6 +48,17 @@ pub(crate) fn run_check(
     let architecture = classify_findings(config, architecture_findings(documents));
     let test_quality = classify_findings(config, test_quality_findings(documents));
     let operational_failures = operational_failures(documents);
+    let (external_findings, external_reasons) = crate::external::current_findings(config);
+    let external = classify_findings(config, external_findings);
+    if config.policy.rules.iter().any(|(rule, policy)| {
+        rule.starts_with("external.") && policy.level != crate::config::PolicyRuleLevel::Off
+    }) {
+        for reason in &external_reasons {
+            input_failures.push(
+                json!({"policy": "external-evidence", "status": "incomplete", "reason": reason}),
+            );
+        }
+    }
     let policy_rule_evaluations = evaluate_policy_rules(
         &config.policy,
         practices
@@ -55,7 +66,8 @@ pub(crate) fn run_check(
             .iter()
             .chain(&reliability.active)
             .chain(&architecture.active)
-            .chain(&test_quality.active),
+            .chain(&test_quality.active)
+            .chain(&external.active),
     );
     let policy_rule_violations = policy_rule_evaluations
         .iter()
@@ -70,6 +82,7 @@ pub(crate) fn run_check(
     waived_findings.extend(reliability.waived);
     waived_findings.extend(architecture.waived);
     waived_findings.extend(test_quality.waived);
+    waived_findings.extend(external.waived);
     let expired_waivers = config
         .policy
         .expired_waivers()
@@ -149,6 +162,8 @@ pub(crate) fn run_check(
         "test_quality_findings": test_quality.errors,
         "test_quality_warnings": test_quality.warnings,
         "operational_failures": operational_failures,
+        "external_findings": external.active,
+        "external_evidence_reasons": external_reasons,
         "waived_findings": waived_findings,
         "expired_waivers": expired_waivers,
         "policy_rule_evaluations": policy_rule_evaluations,
@@ -529,11 +544,11 @@ fn performance_regressions(
                     "increase": increase,
                     "maximum_increase": maximum,
                     "reason": comparison["reason"],
-                    "status": match increase {
-                        Some(value) if value > maximum => "regressed",
-                        Some(value) if value < 0.0 => "improved",
-                        Some(_) => "unchanged",
-                        None => "incomparable",
+                    "status": match comparison["direction"].as_str() {
+                        Some("regressed") if increase.is_some_and(|value| value > maximum) => "regressed",
+                        Some("improved") => "improved",
+                        Some("regressed" | "within_noise" | "unchanged") => "unchanged",
+                        _ => "incomparable",
                     },
                 })
             })

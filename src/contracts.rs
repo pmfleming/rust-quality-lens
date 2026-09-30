@@ -133,6 +133,8 @@ fn clone_summary(records: &[Value], context: &RunContext) -> Value {
 #[derive(Debug, Serialize)]
 pub(crate) struct ReviewOutput {
     pub(crate) version: u64,
+    pub(crate) finding_snapshot: Value,
+    pub(crate) baseline_comparison: Value,
     pub(crate) generated_from: &'static str,
     pub(crate) input_fingerprint: Value,
     pub(crate) scope: ReviewScope,

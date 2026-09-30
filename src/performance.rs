@@ -21,7 +21,15 @@ pub(crate) fn run_benchmarks(
     let target = cargo_target_directory(config)?;
     let snapshot = crate::measurement::InputSnapshot::capture(config);
     let (criterion_root, command) = execute_benchmarks(config, &target, no_run)?;
-    let (records, mut read_errors) = criterion_records(&criterion_root);
+    let (mut records, mut read_errors) = criterion_records(&criterion_root);
+    let environment = json!({"os": std::env::consts::OS, "arch": std::env::consts::ARCH,
+        "host": hostname::get().ok().map(|host| host.to_string_lossy().into_owned()),
+        "toolchain": crate::toolchain::as_json(&snapshot.toolchain)});
+    for record in &mut records {
+        record
+            .details
+            .insert("environment".into(), environment.clone());
+    }
     let comparisons = baseline_records
         .as_deref()
         .map(|baseline| comparisons(&records, baseline))
@@ -127,10 +135,23 @@ fn criterion_records(root: &Path) -> (Vec<BenchmarkRecord>, Vec<String>) {
 
 fn criterion_record(root: &Path, path: &Path) -> Result<BenchmarkRecord> {
     let estimates: Value = serde_json::from_str(&fs::read_to_string(path)?)?;
-    let estimate = estimates["slope"]["point_estimate"]
+    let estimate_data = if estimates["slope"]["point_estimate"].is_number() {
+        &estimates["slope"]
+    } else {
+        &estimates["mean"]
+    };
+    let estimate = estimate_data["point_estimate"]
         .as_f64()
-        .or_else(|| estimates["mean"]["point_estimate"].as_f64())
         .context("missing Criterion point estimate")?;
+    let sample = path
+        .parent()
+        .map(|parent| parent.join("sample.json"))
+        .and_then(|path| fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    let samples = sample
+        .as_ref()
+        .and_then(|sample| sample["times"].as_array())
+        .map(Vec::len);
     let benchmark_dir = path
         .parent()
         .and_then(Path::parent)
@@ -141,6 +162,11 @@ fn criterion_record(root: &Path, path: &Path) -> Result<BenchmarkRecord> {
         details: serde_json::Map::from_iter([
             ("source".to_string(), json!(normalize_slashes(path))),
             ("engine".to_string(), json!("criterion")),
+            (
+                "confidence_interval".to_string(),
+                estimate_data["confidence_interval"].clone(),
+            ),
+            ("samples".to_string(), json!(samples)),
         ]),
     };
     benchmark_index(std::slice::from_ref(&record))?;
@@ -156,6 +182,14 @@ pub(crate) fn comparisons(
     current: &[BenchmarkRecord],
     baseline: &[BenchmarkRecord],
 ) -> Result<Vec<Value>> {
+    let current_details = current
+        .iter()
+        .map(|record| (&record.id, record))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let baseline_details = baseline
+        .iter()
+        .map(|record| (&record.id, record))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let current = benchmark_index(current)?;
     let old = benchmark_index(baseline)?;
     current.keys().chain(old.keys()).collect::<BTreeSet<_>>().into_iter().map(|id| {
@@ -164,14 +198,47 @@ pub(crate) fn comparisons(
         };
         let delta_percent = (current - baseline) / baseline * 100.0;
         anyhow::ensure!(round2(delta_percent).is_finite(), "benchmark {id} percentage change overflows");
+        let current_record = current_details[id];
+        let baseline_record = baseline_details[id];
+        let current_interval = interval(current_record);
+        let baseline_interval = interval(baseline_record);
+        let environment = current_record.details.get("environment");
+        let matched = environment.is_some_and(|value| value.as_object().is_some_and(|object| !object.is_empty()))
+            && environment == baseline_record.details.get("environment");
+        let direction = match (matched, current_interval, baseline_interval) {
+            (true, Some((low, high, level)), Some((base_low, base_high, base_level))) if level == base_level => {
+                if low > base_high { "regressed" } else if high < base_low { "improved" } else { "within_noise" }
+            }
+            _ => "incomparable",
+        };
         Ok(json!({
             "id": id,
             "baseline_nanoseconds": baseline,
             "current_nanoseconds": current,
             "delta_percent": round2(delta_percent),
-            "direction": if delta_percent > 0.0 { "regressed" } else if delta_percent < 0.0 { "improved" } else { "unchanged" },
+            "direction": direction,
+            "reason": if direction == "incomparable" { Some("Matching environment, sample counts and confidence intervals are required") } else { None },
+            "comparison_method": "nonoverlapping-confidence-intervals-v1",
         }))
     }).collect()
+}
+
+fn interval(record: &BenchmarkRecord) -> Option<(f64, f64, f64)> {
+    if record.details.get("samples")?.as_u64()? < 3 {
+        return None;
+    }
+    let interval = record.details.get("confidence_interval")?;
+    let low = interval["lower_bound"].as_f64()?;
+    let high = interval["upper_bound"].as_f64()?;
+    let level = interval["confidence_level"].as_f64()?;
+    (low.is_finite()
+        && high.is_finite()
+        && low > 0.0
+        && low <= record.estimate_nanoseconds
+        && high >= record.estimate_nanoseconds
+        && (0.0..1.0).contains(&level)
+        && level > 0.0)
+        .then_some((low, high, level))
 }
 
 #[cfg(test)]
@@ -286,6 +353,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     #[test]
+    fn benchmark_comparison_requires_matching_environment_and_nonoverlapping_intervals()
+    -> anyhow::Result<()> {
+        let record = |estimate, low, high, host| {
+            json!([{ "id": "parse", "estimate_nanoseconds": estimate,
+            "samples": 10, "environment": {"host": host},
+            "confidence_interval": {"lower_bound": low, "upper_bound": high, "confidence_level": 0.95}}])
+        };
+        let base = super::benchmark_records(&record(100.0, 95.0, 105.0, "same"))?;
+        for (estimate, low, high, host, expected) in [
+            (120.0, 115.0, 125.0, "same", "regressed"),
+            (102.0, 97.0, 107.0, "same", "within_noise"),
+            (120.0, 115.0, 125.0, "other", "incomparable"),
+        ] {
+            let current = super::benchmark_records(&record(estimate, low, high, host))?;
+            assert_eq!(comparisons(&current, &base)?[0]["direction"], expected);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn benchmark_comparisons_report_relative_regressions() -> anyhow::Result<()> {
         let current =
             super::benchmark_records(&json!([{"id": "parse", "estimate_nanoseconds": 120.0}]))?;
@@ -293,7 +380,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             super::benchmark_records(&json!([{"id": "parse", "estimate_nanoseconds": 100.0}]))?;
         let rows = comparisons(&current, &baseline)?;
         assert_eq!(rows[0]["delta_percent"], 20.0);
-        assert_eq!(rows[0]["direction"], "regressed");
+        assert_eq!(
+            rows[0]["direction"], "incomparable",
+            "point estimates alone do not establish a regression"
+        );
         for (current, baseline) in [(&current[..], &[][..]), (&[][..], &baseline[..])] {
             assert_eq!(
                 comparisons(current, baseline)?[0]["direction"],
