@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::artifacts::{MapEvidence, module_metric};
 use crate::config::LensConfig;
@@ -177,6 +177,8 @@ fn module_edges(graph: &ModuleGraph, module: &ModuleInfo, evidence: &MapEvidence
         .get(&module.key)
         .into_iter()
         .flatten()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .map(|target| {
             let edge = (module.key.clone(), target.clone());
             json!({"data": {
@@ -193,6 +195,8 @@ fn module_edges(graph: &ModuleGraph, module: &ModuleInfo, evidence: &MapEvidence
         .get(&module.key)
         .into_iter()
         .flatten()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .map(|target| {
             json!({"data": {
                 "source": module.key,

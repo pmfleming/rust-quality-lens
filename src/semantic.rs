@@ -55,6 +55,11 @@ impl IdentityResolutionSummary {
     pub(crate) fn to_json(&self) -> Value {
         let mut value = serde_json::to_value(self).unwrap_or_else(|_| json!({}));
         if let Some(object) = value.as_object_mut() {
+            // Execution diagnostics are logged, not semantic measurement inputs.
+            // Keep them in the native/cache structure without making identical
+            // cold and warm analysis results differ on the artifact wire.
+            object.remove("cache_hit");
+            object.remove("duration_ms");
             let percent = if self.reference_count == 0 {
                 100.0
             } else {
@@ -77,6 +82,18 @@ struct IdentityCache {
 }
 
 pub(crate) fn resolve(
+    config: &LensConfig,
+    facts: &mut [FileFacts],
+) -> Result<IdentityResolutionSummary> {
+    let summary = resolve_inner(config, facts)?;
+    eprintln!(
+        "semantic identity execution: cache_hit={}, duration_ms={}",
+        summary.cache_hit, summary.duration_ms
+    );
+    Ok(summary)
+}
+
+fn resolve_inner(
     config: &LensConfig,
     facts: &mut [FileFacts],
 ) -> Result<IdentityResolutionSummary> {
@@ -1006,10 +1023,10 @@ mod macro_tests;
 #[cfg(test)]
 mod tests {
     use super::{
-        definition_location, file_uri, is_semantic_candidate, percent_decode, percent_encode,
-        resolve, uri_path, utf16_column_to_byte,
+        IdentityResolutionSummary, definition_location, file_uri, is_semantic_candidate,
+        percent_decode, percent_encode, resolve, uri_path, utf16_column_to_byte,
     };
-    use crate::config::LensConfig;
+    use crate::config::{LensConfig, SemanticIdentityMode};
     use crate::facts::{DependencyReferenceFact, FileFacts};
     use serde_json::json;
     use std::fs;
@@ -1189,6 +1206,23 @@ mod tests {
             "generated"
         );
         Ok(())
+    }
+
+    #[test]
+    fn semantic_evidence_is_independent_of_execution_telemetry() {
+        let mut summary = IdentityResolutionSummary::disabled(SemanticIdentityMode::Auto, 3);
+        let before = summary.to_json();
+        summary.cache_hit = true;
+        summary.duration_ms = 1234;
+        assert_eq!(before, summary.to_json());
+        assert!(before.get("duration_ms").is_none());
+        assert!(before.get("cache_hit").is_none());
+        summary.unresolved_count = 2;
+        assert_ne!(
+            before,
+            summary.to_json(),
+            "semantic changes must stay visible"
+        );
     }
 
     #[test]

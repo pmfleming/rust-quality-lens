@@ -1,0 +1,26 @@
+{
+  "criterion": "T2",
+  "status": "passed",
+  "source": "T2 implementation on ea804865594ee9a0853df14473b43ed168fe26b1; committed with this evidence",
+  "analyzer_source_inventory_sha256": "947413baaa23a76e31e99665921a3b5f7cccd962327edcbc8029f7786dbc6c24",
+  "binary_sha256": "2506e13405d18a6744f8b5bb6492798b2d863884a40f871ee992540f225d22ba",
+  "command": "python3 acceptance/trust_campaign.py --output target/trust-t2-final",
+  "normalization": ["generated_at", "measured_at"],
+  "tools": ["hotspots", "clones", "escape-hatches", "type-health", "reliability", "test-quality", "api-health", "correctness", "locality", "leverage", "module-cohesion", "architecture-rules", "map"],
+  "scope": "Two executions of 13 focused static producers, existing daemon policies and Nix profiles; array order, fingerprints, semantics and confidence preserved. Partial evidence remains partial. This is not execution reproducibility or complete native CI.",
+  "results": [
+    {"project":"app-daemon","revision":"5ca88f0f8b56f7e236be58566e67bc0a7681b42b","source_sha256":"d2ba43e7ebaa4eb24ab53a53d8434bbf80c40722e9a33958c1cc25711da77cbd","source_stable":true,"commands_passed":26,"artifacts_equal":13},
+    {"project":"bar-daemon","revision":"61b81513031f468be6303ec053bee6869228374a","source_sha256":"a8edf8155533a94caf84a1d38adf358da7a1c2bbe9a6c1ec9af0455ea181ae80","source_stable":true,"commands_passed":26,"artifacts_equal":13},
+    {"project":"bt-daemon","revision":"9628f765ac23df9768a5fad090cf8204e2eb67c4","source_sha256":"b143d9d3327b595d68157b4042b296163cb07fe284ecbc146faa3bcfbdefe4c6","source_stable":true,"commands_passed":26,"artifacts_equal":13},
+    {"project":"clip-daemon","revision":"3e2f319455e77f786d7760dea327c52d4c0e60de","source_sha256":"4d3e3219095c410c3fcf1f1e64eacbc3014ce8ba119b17597c2c87ebd903bd50","source_stable":true,"commands_passed":26,"artifacts_equal":13},
+    {"project":"daemon-framework","revision":"c13f27d0dbbbc040a9ccc0f8997dbcc1ab348f3b","source_sha256":"92f04eadc61b9cb6638529e22dc3035f7716b51408c4a58eb7ca0bd5e4610e5e","source_stable":true,"commands_passed":26,"artifacts_equal":13},
+    {"project":"nm-daemon","revision":"cf09351fdac35df4b24754a7c01e8e2dcaaac632","source_sha256":"32752f7a2844e0ca94048a2f574942e3009c60458698c0d6be01d7dbe487f466","source_stable":true,"commands_passed":26,"artifacts_equal":13},
+    {"project":"update-daemon","revision":"918127d45c04cbc33633615b5826ca5e27e86329","source_sha256":"2f7338b0582c2488098f72f57e5adb296f7ff0aa1808cab46841ab40c086bd48","source_stable":true,"commands_passed":26,"artifacts_equal":13}
+  ],
+  "native_checks": {"workspace_tests_passed":174,"live_macro_tests_passed":1,"acceptance_python_tests_passed":5,"format":0,"check":0,"clippy":0,"documentation":0},
+  "raw_evidence": "target/trust-t2-final/{provenance.json,status.json,<project>/summary.json,<project>/run-{1,2}/}; native logs target/trust-t2-native/",
+  "investigated_attempts": [
+    "The earlier target/trust-t2 nm-daemon attempt rejected changed helper inputs while a CLI regression was being refined. It is not acceptance evidence; the final frozen campaign passed.",
+    "The expanded campaign exposed a correctness-producer panic on the framework's virtual Cargo workspace. Replaced unchecked TOML package indexing with optional lookup, added a CLI regression, and reran all seven projects with the final executable."
+  ]
+}

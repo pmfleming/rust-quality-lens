@@ -262,7 +262,10 @@ fn crate_names(config: &LensConfig) -> BTreeSet<String> {
     ]);
     if let Ok(text) = std::fs::read_to_string(config.project_root.join("Cargo.toml"))
         && let Ok(manifest) = toml::from_str::<toml::Value>(&text)
-        && let Some(name) = manifest["package"]["name"].as_str()
+        && let Some(name) = manifest
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
     {
         names.insert(name.to_string());
         names.insert(name.replace('-', "_"));

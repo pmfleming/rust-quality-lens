@@ -8,7 +8,7 @@ Each passed row must cite commands, actual results, source revision, bounded sco
 
 ## Current closure result
 
-Steps 1–5 are implementation iterations, not completed acceptance. Four criteria have scoped evidence; **21/25 remain unresolved**. `step-5.md` records clean native workflows, investigated failures and platform gaps. Operational recovery/limits are in `../contracts/operational-scope.md`.
+Steps 1–5 are implementation iterations, not completed acceptance. Five criteria have scoped evidence; **20/25 remain unresolved**. T1 was reconfirmed on local daemons; T2 now passes 91 exact artifact comparisons across 13 static producers on six daemons plus daemon-framework (`trust-t2-results.json`, `../contracts/determinism.md`). T3 and T4 are not certified. `step-5.md` records clean native workflows, investigated failures and platform gaps. Operational recovery/limits are in `../contracts/operational-scope.md`.
 
 Additional checks:
 
@@ -17,6 +17,7 @@ python3 -m unittest discover -s acceptance -p 'test_*.py'
 python3 acceptance/calibration.py
 python3 acceptance/calibration.py --release  # intentionally blocked pending independent study
 python3 acceptance/profile.py               # after native build/helper prewarming
+python3 acceptance/trust_campaign.py --output target/trust-new  # fresh directory; built rqlens required
 ```
 
 `resource-budgets.json` fixes the sampled workload ceilings; `resource-results.json` retains all three repetitions and source-snapshot identifiers. These synthetic observations are not a cross-language benchmark or a universal memory guarantee. The structural gate also rejects deleted criteria and remains active under `python -O`.

@@ -1,10 +1,16 @@
 # Cross-lens upgrade execution
 
-## Latest: acceptance closure steps 1–5
+## Latest: trust acceptance T1–T2
+
+T1's scoped package/target and SARIF regressions are reconfirmed. T2 is now evidenced: deterministic graph-edge publication, semantic execution diagnostics kept out of measurement JSON, and a virtual-workspace correctness panic fixed. All 13 static producers match across two runs on each of six local daemons plus daemon-framework (182 successful commands; 91 comparisons). Native tests: 174 plus the live macro test. See `acceptance/trust-t2-results.json` and `contracts/determinism.md`.
+
+Acceptance is **not complete**: 5/25 criteria are evidenced; 20 remain unresolved. T3 still has unresolved-semantics counterexamples and T4's full platform matrix is not certified. No push is permitted yet.
+
+## Previous: acceptance closure steps 1–5
 
 All 17 Linux Rust 1.95 workflow commands passed from a clean source snapshot, including 171 normal workspace tests plus the live macro test, audit/deny, installed-package smoke, coverage-backed measurement, self metrics, SARIF, policy and repeated resource profiles. Source-size rebaselining is explicit in `acceptance/source-budget-review.md`; other self budgets were not raised. Batches now reject competing writers and escaping filenames.
 
-Acceptance is **not complete**: 4/25 required criteria are evidenced, 21 remain unresolved. No push is permitted yet. See the repository ledger `acceptance/criteria.json`, `acceptance/step-5.md`, and packaged operational limits in `contracts/operational-scope.md`. Independent calibration/intent review and broader semantic, operational and platform obligations remain open.
+At that checkpoint, 4/25 required criteria were evidenced and 21 remained unresolved. No push is permitted yet. See the repository ledger `acceptance/criteria.json`, `acceptance/step-5.md`, and packaged operational limits in `contracts/operational-scope.md`. Independent calibration/intent review and broader semantic, operational and platform obligations remain open.
 
 ## Historical implementation record
 
