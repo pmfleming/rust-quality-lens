@@ -64,7 +64,10 @@ impl MeasurementConfidence {
             .entry("missing_input")
             .or_insert_with(|| Value::Array(Vec::new()));
         if let Some(missing) = missing.as_array_mut() {
-            missing.push(Value::String(reason.to_string()));
+            let reason = Value::String(reason.to_string());
+            if !missing.contains(&reason) {
+                missing.push(reason);
+            }
         }
     }
 

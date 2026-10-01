@@ -8,7 +8,7 @@ Each passed row must cite commands, actual results, source revision, bounded sco
 
 ## Current closure result
 
-Steps 1–5 are implementation iterations, not completed acceptance. Five criteria have scoped evidence; **20/25 remain unresolved**. T1 was reconfirmed on local daemons; T2 now passes 91 exact artifact comparisons across 13 static producers on six daemons plus daemon-framework (`trust-t2-results.json`, `../contracts/determinism.md`). T3 and T4 are not certified. `step-5.md` records clean native workflows, investigated failures and platform gaps. Operational recovery/limits are in `../contracts/operational-scope.md`.
+Steps 1–5 are implementation iterations, not completed acceptance. Six criteria have scoped evidence; **19/25 remain unresolved**. T1 is reconfirmed; T2 and T3 pass the final 182-command/91-comparison campaign on six daemons plus daemon-framework. Unresolved type/semantic scope now explicitly abstains (`trust-t3-review.md`, `trust-t3-results.json`, `../contracts/semantic-abstention.md`). T4 is **not passed**: strict native policy rejects partial self-evidence, and platform/latest-stable certification remains outstanding (`trust-t4-results.json`). Historical clean results are in `step-5.md`; they do not certify the new implementation. Operational recovery/limits are in `../contracts/operational-scope.md`.
 
 Additional checks:
 
@@ -18,6 +18,7 @@ python3 acceptance/calibration.py
 python3 acceptance/calibration.py --release  # intentionally blocked pending independent study
 python3 acceptance/profile.py               # after native build/helper prewarming
 python3 acceptance/trust_campaign.py --output target/trust-new  # fresh directory; built rqlens required
+python3 acceptance/check_trust_t3.py target/trust-new            # current incomplete syntax profiles
 ```
 
 `resource-budgets.json` fixes the sampled workload ceilings; `resource-results.json` retains all three repetitions and source-snapshot identifiers. These synthetic observations are not a cross-language benchmark or a universal memory guarantee. The structural gate also rejects deleted criteria and remains active under `python -O`.

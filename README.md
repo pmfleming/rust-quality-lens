@@ -275,6 +275,21 @@ parse, `tree-sitter-rust` recovers text metrics, function spans, and raw
 complexity where possible. Recovered rows remain partial; calibrated hotspot
 scores stay `null`, and missing architecture inputs do not become zero risk.
 
+### Type-health abstention
+
+Type/impl ownership is joined conservatively within Cargo package, target and
+lexical module. Aliases, conditional compilation, unexpanded macros/attributes,
+ambiguous owners and incomplete provenance make the inventory partial—even if
+no type rows were extracted. Opaque expression macros can also generate
+non-local implementations.
+
+Unknown method/impl totals and structural scores are `null`, not zero.
+`observed_method_count`, `observed_impl_block_count`, `observed_impl_file_count`
+and `impl_files` retain syntactic observations, not compiled totals. Known zero
+remains numeric when the syntax inventory is complete. Confidence propagates to
+rows, envelopes, capabilities and policy; conservative abstention can therefore
+fail the strict partial-evidence gate. See [Semantic abstention](contracts/semantic-abstention.md).
+
 ### Complexity and clones
 
 `hotspots.json` reports versioned cyclomatic and cognitive complexity.
@@ -297,7 +312,8 @@ internal dependency references. `[rust].identity_resolution` accepts:
 
 - `auto`: semantic results with explicit syntax fallback;
 - `required`: fail unless every candidate resolves;
-- `disabled`: use Cargo and syntax identities only.
+- `disabled`: use Cargo and syntax identities only; references needing semantic
+  resolution keep the evidence partial. An empty reference scope needs no backend.
 
 Results are cached by analyzer version and source fingerprint. Map, locality,
 leverage, clone, and review rows preserve Cargo-qualified package, target, and

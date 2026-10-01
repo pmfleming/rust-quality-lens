@@ -7,7 +7,7 @@ use crate::facts::RunContext;
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let graph = context.module_graph();
     let evaluation = config.architecture.evaluate(graph);
-    let mut confidence = context.source_confidence();
+    let mut confidence = context.semantic_confidence(context.source_confidence())?;
     if !config.architecture.rules.is_empty()
         && evaluation.unresolved_references > 0
         && let Some(object) = confidence.as_object_mut()

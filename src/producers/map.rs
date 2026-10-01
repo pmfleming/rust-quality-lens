@@ -45,14 +45,9 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
             "unresolved_references": architecture_evaluation.unresolved_references,
         },
     });
-    let mut measurement_confidence =
-        evidence.measurement_confidence(&context.source_files, &graph.facts);
-    if let Some(object) = measurement_confidence.as_object_mut() {
-        object.insert(
-            "semantic_identity".to_string(),
-            context.identity_resolution.to_json(),
-        );
-    }
+    let measurement_confidence = context.semantic_confidence(
+        evidence.measurement_confidence(&context.source_files, &graph.facts),
+    )?;
     Ok(json!({
         "meta": map_metadata(config, context, summary),
         "graph": {

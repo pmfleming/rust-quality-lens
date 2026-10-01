@@ -1,6 +1,13 @@
-use super::{impl_identity, impl_index, type_identity};
-use crate::facts::{FileFacts, ImplFact, TypeFact};
+use crate::facts::{FileFacts, ImplFact, TypeFact, TypeImplIndex, impl_identity};
 use std::collections::BTreeSet;
+
+#[test]
+fn missing_type_constraints_do_not_mean_no_constraints() {
+    let mut items = serde_json::json!({"types": [], "impls": [], "tests": []});
+    assert!(serde_json::from_value::<crate::facts::FileItems>(items.clone()).is_err());
+    items["type_identity_limitations"] = serde_json::json!([]);
+    assert!(serde_json::from_value::<crate::facts::FileItems>(items).is_ok());
+}
 
 #[test]
 fn type_implementations_are_package_and_target_local() -> anyhow::Result<()> {
@@ -31,14 +38,16 @@ fn type_implementations_are_package_and_target_local() -> anyhow::Result<()> {
         });
         facts.push(fact);
     }
-    let index = impl_index(&facts);
+    let index = TypeImplIndex::new(&facts);
     for (fact, methods) in facts.iter().zip([1, 2, 4]) {
-        let summary = &index[&type_identity(fact, "lib::Widget")];
+        let summary = index
+            .get(fact, "lib::Widget")
+            .ok_or_else(|| anyhow::anyhow!("expected package-local implementation"))?;
         assert_eq!(summary.method_count, methods);
         assert_eq!(summary.block_count, 1);
         let metadata = crate::measurement::tool_score_metadata("type_health");
         let provenance = crate::measurement::provenance();
-        let confidence = serde_json::json!({"complete": true});
+        let confidence = serde_json::json!({"complete": true, "partial": false});
         let row = super::type_row(
             fact,
             &fact.items.types[0],
@@ -47,7 +56,7 @@ fn type_implementations_are_package_and_target_local() -> anyhow::Result<()> {
             &provenance,
             &confidence,
         );
-        assert_eq!(row.method_count, methods);
+        assert_eq!(row.method_count, Some(methods));
         let wire = serde_json::to_value(row)?;
         assert_eq!(wire["package_name"], fact.package_name);
         assert_eq!(wire["qualified_name"], "lib::Widget");

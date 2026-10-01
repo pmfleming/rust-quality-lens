@@ -58,17 +58,23 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
             "change_entropy": round2(records.iter().filter_map(|record| record["change_entropy_contribution"].as_f64()).sum()),
         },
         "records": records,
-        "measurement_confidence": {
-            "complete": git_available,
-            "partial": !git_available,
-            "confidence_scope": "module_cohesion_and_change_entropy",
-            "required_inputs": ["rust_syntax_facts", "git_history"],
-            "observed_inputs": {"module_count": context.source_facts.len(), "git_history": git_available},
-            "missing_input": if git_available { Vec::<String>::new() } else { vec!["git history unavailable or empty".to_string()] },
-            "stale_input": [],
-            "unsupported_pattern": [],
-        }
+        "measurement_confidence": cohesion_confidence(context, git_available)?,
     }))
+}
+
+fn cohesion_confidence(context: &RunContext, git_available: bool) -> Result<Value> {
+    let mut source = context.source_confidence();
+    source["confidence_scope"] = json!("module_cohesion_and_change_entropy");
+    source["observed_inputs"]["module_count"] = json!(context.source_facts.len());
+    source["observed_inputs"]["git_history"] = json!(git_available);
+    let mut confidence: crate::contracts::MeasurementConfidence = serde_json::from_value(source)?;
+    if !git_available {
+        confidence.mark_partial("git history unavailable or empty");
+    }
+    context
+        .identity_resolution
+        .apply_confidence(&mut confidence);
+    Ok(serde_json::to_value(confidence)?)
 }
 
 fn git_changes(config: &LensConfig) -> BTreeMap<String, u64> {

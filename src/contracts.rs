@@ -27,17 +27,18 @@ pub(crate) fn artifact_document(
         payload
             .get("measurement_confidence")
             .cloned()
-            .unwrap_or_else(|| context.source_confidence()),
+            .unwrap_or_else(|| {
+                if matches!(tool, MeasureTool::TypeHealth) {
+                    context.type_confidence()
+                } else {
+                    context.source_confidence()
+                }
+            }),
     )?;
-    if matches!(
-        tool,
-        MeasureTool::ArchitectureRules
-            | MeasureTool::Locality
-            | MeasureTool::Leverage
-            | MeasureTool::ModuleCohesion
-            | MeasureTool::Map
-    ) {
-        confidence.insert("semantic_identity", context.identity_resolution.to_json());
+    if tool.requires_semantic_identity() {
+        context
+            .identity_resolution
+            .apply_confidence(&mut confidence);
     }
     let input_fingerprint = &context.snapshot.fingerprint;
     if input_fingerprint["complete"] != true {
@@ -347,13 +348,28 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "qualified_name",
                 "module_key",
                 "structural_risk",
+                "structural_score",
+                "method_count",
+                "impl_block_count",
+                "impl_file_count",
+                "observed_method_count",
+                "observed_impl_block_count",
+                "observed_impl_file_count",
+                "measurement_confidence",
             ],
             json!({
                 "type_name": {"type": "string"},
                 "qualified_name": {"type": "string"},
                 "module_key": {"type": "string"},
-                "structural_risk": {"type": "number"},
-                "structural_score": {"type": "number"},
+                "method_count": {"type": ["integer", "null"], "minimum": 0},
+                "impl_block_count": {"type": ["integer", "null"], "minimum": 0},
+                "impl_file_count": {"type": ["integer", "null"], "minimum": 0},
+                "observed_method_count": {"type": "integer", "minimum": 0},
+                "observed_impl_block_count": {"type": "integer", "minimum": 0},
+                "observed_impl_file_count": {"type": "integer", "minimum": 0},
+                "structural_risk": {"type": ["number", "null"]},
+                "structural_score": {"type": ["number", "null"]},
+                "measurement_confidence": measurement_confidence_schema(),
                 "signals": {"type": "array", "items": {"type": "string"}},
             }),
         ),

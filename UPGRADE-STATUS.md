@@ -1,10 +1,12 @@
 # Cross-lens upgrade execution
 
-## Latest: trust acceptance T1–T2
+## Latest: trust acceptance T1–T3; T4 remains unmet
 
-T1's scoped package/target and SARIF regressions are reconfirmed. T2 is now evidenced: deterministic graph-edge publication, semantic execution diagnostics kept out of measurement JSON, and a virtual-workspace correctness panic fixed. All 13 static producers match across two runs on each of six local daemons plus daemon-framework (182 successful commands; 91 comparisons). Native tests: 174 plus the live macro test. See `acceptance/trust-t2-results.json` and `contracts/determinism.md`.
+T1's scoped package/target and SARIF regressions are reconfirmed. T2 has deterministic edges/semantic evidence and a virtual-workspace correctness regression. T3 now abstains on unresolved type owners, opaque macros/attributes, cfg and unavailable semantics; unknown totals/scores are null rather than zero. Positive controls retain known zero and package/target isolation.
 
-Acceptance is **not complete**: 5/25 criteria are evidenced; 20 remain unresolved. T3 still has unresolved-semantics counterexamples and T4's full platform matrix is not certified. No push is permitted yet.
+The final T3 campaign passes all 182 commands and 91 artifact comparisons across 13 static producers on six local daemons plus daemon-framework. All project sources, including existing nm-daemon edits, are preserved. Native tests: 184 plus the live macro test; eight Python acceptance tests pass. See `acceptance/trust-t3-review.md`, `acceptance/trust-t3-results.json` and `contracts/semantic-abstention.md`.
+
+Acceptance is **not complete**: 6/25 criteria are evidenced; 19 remain unresolved. T4 fails the strict local policy gate because self-evidence is honestly partial (16/17 workflow commands pass); clean/platform/latest-stable certification is still outstanding. No gate, source scope or budget was weakened. No push is permitted yet.
 
 ## Previous: acceptance closure steps 1–5
 

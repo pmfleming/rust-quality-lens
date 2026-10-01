@@ -38,7 +38,7 @@ impl IdentityResolutionSummary {
             mode,
             backend: "syntax_fallback".to_string(),
             available: false,
-            complete: mode == SemanticIdentityMode::Disabled,
+            complete: reference_count == 0,
             cache_hit: false,
             reference_count,
             resolved_count: 0,
@@ -47,8 +47,26 @@ impl IdentityResolutionSummary {
             unresolved_count: reference_count,
             duration_ms: 0,
             analyzer_version: None,
-            reason: (mode != SemanticIdentityMode::Disabled)
-                .then(|| "rust-analyzer resolution was unavailable".to_string()),
+            reason: (reference_count > 0).then(|| {
+                if mode == SemanticIdentityMode::Disabled {
+                    "semantic identity resolution was disabled".to_string()
+                } else {
+                    "rust-analyzer resolution was unavailable".to_string()
+                }
+            }),
+        }
+    }
+
+    pub(crate) fn apply_confidence(
+        &self,
+        confidence: &mut crate::contracts::MeasurementConfidence,
+    ) {
+        confidence.insert("semantic_identity", self.to_json());
+        if !self.complete {
+            confidence.mark_partial(&format!(
+                "semantic identity is incomplete: {}",
+                self.reason.as_deref().unwrap_or("unresolved references")
+            ));
         }
     }
 
@@ -1206,6 +1224,21 @@ mod tests {
             "generated"
         );
         Ok(())
+    }
+
+    #[test]
+    fn disabled_semantics_abstain_but_empty_scope_is_complete() {
+        for mode in [
+            SemanticIdentityMode::Auto,
+            SemanticIdentityMode::Disabled,
+            SemanticIdentityMode::Required,
+        ] {
+            assert!(IdentityResolutionSummary::disabled(mode, 0).complete);
+            let summary = IdentityResolutionSummary::disabled(mode, 1);
+            assert!(!summary.complete);
+            assert!(summary.reason.is_some());
+            assert_eq!(summary.unresolved_count, 1);
+        }
     }
 
     #[test]

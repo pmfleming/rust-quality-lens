@@ -56,7 +56,7 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<super::Arti
     if file == "coverage.json" && header.measurement_confidence.is_complete() {
         super::coverage_percent(value)?;
     }
-    validate_policy_payload(file, payload)?;
+    validate_policy_payload(file, payload, &header)?;
     Ok(header)
 }
 
@@ -79,7 +79,11 @@ fn checked_payload(value: &Value, array_payload: bool) -> Result<&Value> {
     Ok(payload)
 }
 
-fn validate_policy_payload(file: &str, payload: &Value) -> Result<()> {
+fn validate_policy_payload(
+    file: &str,
+    payload: &Value,
+    header: &super::ArtifactHeader,
+) -> Result<()> {
     match file {
         "correctness_review.json" => test_summary(payload),
         "rust_practices.json" => each(&payload["checks"], practice),
@@ -87,11 +91,62 @@ fn validate_policy_payload(file: &str, payload: &Value) -> Result<()> {
         "architecture_rules.json" => each(&payload["violations"], finding),
         "test_quality.json" => each(&payload["findings"], finding),
         "map.json" => each(&payload["graph"]["nodes"], map_node),
+        "type_health.json" => {
+            type_health_rows(payload, header.measurement_confidence.is_complete())
+        }
         "operational_evidence.json" => each(&payload["records"], operational),
         "performance.json" => super::benchmark_records(&payload["records"]).map(|_| ()),
         "repository_outcomes.json" => array(&payload["records"]).map(|_| ()),
         _ => Ok(()),
     }
+}
+
+fn type_health_rows(payload: &Value, complete: bool) -> Result<()> {
+    for row in array(payload)? {
+        type_health(row)?;
+        ensure!(
+            !complete || row["measurement_confidence"]["complete"] == true,
+            "complete type-health artifact contains a partial row"
+        );
+    }
+    Ok(())
+}
+
+fn type_health(row: &Value) -> Result<()> {
+    let confidence: super::MeasurementConfidence =
+        serde_json::from_value(row["measurement_confidence"].clone())?;
+    for (field, integer) in [
+        ("method_count", true),
+        ("impl_block_count", true),
+        ("impl_file_count", true),
+        ("structural_risk", false),
+        ("structural_score", false),
+    ] {
+        let value = row
+            .get(field)
+            .ok_or_else(|| anyhow::anyhow!("missing {field}"))?;
+        let numeric = if integer {
+            value.as_u64().is_some()
+        } else {
+            value.as_f64().is_some()
+        };
+        ensure!(
+            if confidence.is_complete() {
+                numeric
+            } else {
+                value.is_null()
+            },
+            "type-health {field} must be numeric when complete and null when partial"
+        );
+    }
+    for field in [
+        "observed_method_count",
+        "observed_impl_block_count",
+        "observed_impl_file_count",
+    ] {
+        ensure!(row[field].as_u64().is_some(), "missing or invalid {field}");
+    }
+    Ok(())
 }
 
 fn each(value: &Value, validate: fn(&Value) -> Result<()>) -> Result<()> {
@@ -179,7 +234,9 @@ fn finding(value: &Value) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{map_node, operational, practice, reliability, validate_artifact};
+    use super::{
+        map_node, operational, practice, reliability, type_health_rows, validate_artifact,
+    };
     use crate::measurement::MODEL_VERSION;
     use anyhow::Result;
     use serde_json::{Value, json};
@@ -214,6 +271,32 @@ mod tests {
                 assert!(validate(&row).is_err());
             }
         }
+    }
+
+    #[test]
+    fn type_health_does_not_validate_unknown_counts_as_zero() -> Result<()> {
+        let mut row = json!({
+            "measurement_confidence": {"complete": false, "partial": true},
+            "method_count": null, "impl_block_count": null, "impl_file_count": null,
+            "structural_risk": null, "structural_score": null,
+            "observed_method_count": 0, "observed_impl_block_count": 0, "observed_impl_file_count": 0,
+        });
+        type_health_rows(&json!([row]), false)?;
+        assert!(type_health_rows(&json!([row]), true).is_err());
+        row["method_count"] = json!(0);
+        assert!(type_health_rows(&json!([row]), false).is_err());
+        row["measurement_confidence"] = json!({"complete": true, "partial": false});
+        for field in [
+            "method_count",
+            "impl_block_count",
+            "impl_file_count",
+            "structural_risk",
+            "structural_score",
+        ] {
+            row[field] = json!(0);
+        }
+        type_health_rows(&json!([row]), true)?;
+        Ok(())
     }
 
     #[test]

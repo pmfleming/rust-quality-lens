@@ -1,0 +1,161 @@
+{
+  "criterion": "T4",
+  "status": "failed",
+  "source": "T3 working implementation on c355400; source changes committed with this evidence, later documentation is not executable input",
+  "binary_sha256": "2bdcef6d8ab0a20e6445aa5febe520b93ef92c49ba6a969c0a862667e7f37d93",
+  "platform": "Linux x86_64",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14) (built from a source tarball)",
+  "scope": "Local Linux working-tree workflow, not clean or cross-platform CI certification",
+  "commands_passed": 16,
+  "commands_total": 17,
+  "commands": [
+    {
+      "check": "format",
+      "command": "cargo fmt --all --check",
+      "exit_code": 0,
+      "seconds": 0.46
+    },
+    {
+      "check": "helper-parity",
+      "command": "bash scripts/check-bundled-helpers.sh",
+      "exit_code": 0,
+      "seconds": 0.02
+    },
+    {
+      "check": "check",
+      "command": "cargo check --workspace --all-targets --locked",
+      "exit_code": 0,
+      "seconds": 2.92
+    },
+    {
+      "check": "clippy",
+      "command": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      "exit_code": 0,
+      "seconds": 0.31
+    },
+    {
+      "check": "tests",
+      "command": "cargo test --workspace --locked",
+      "exit_code": 0,
+      "seconds": 22.62
+    },
+    {
+      "check": "macro-test",
+      "command": "cargo test --locked semantic::macro_tests -- --ignored",
+      "exit_code": 0,
+      "seconds": 14.98
+    },
+    {
+      "check": "docs",
+      "command": "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --locked --no-deps",
+      "exit_code": 0,
+      "seconds": 2.97
+    },
+    {
+      "check": "audit",
+      "command": "cargo audit --json",
+      "exit_code": 0,
+      "seconds": 0.76
+    },
+    {
+      "check": "deny",
+      "command": "cargo deny check",
+      "exit_code": 0,
+      "seconds": 0.62
+    },
+    {
+      "check": "verify",
+      "command": "cargo run --locked --bin rqlens -- verify",
+      "exit_code": 0,
+      "seconds": 22.1
+    },
+    {
+      "check": "package",
+      "command": "bash scripts/check-package.sh",
+      "exit_code": 0,
+      "seconds": 46.13
+    },
+    {
+      "check": "catalog",
+      "command": "cargo run --locked --bin rqlens -- catalog",
+      "exit_code": 0,
+      "seconds": 0.46
+    },
+    {
+      "check": "measure",
+      "command": "cargo run --locked --bin rqlens -- measure all",
+      "exit_code": 0,
+      "seconds": 90.48
+    },
+    {
+      "check": "self-metrics",
+      "command": "bash scripts/check-self-metrics.sh",
+      "exit_code": 0,
+      "seconds": 0.36
+    },
+    {
+      "check": "sarif",
+      "command": "cargo run --locked --bin rqlens -- sarif",
+      "exit_code": 0,
+      "seconds": 1.07
+    },
+    {
+      "check": "policy",
+      "command": "cargo run --locked --bin rqlens -- check --fail-on partial --fail-on test-failure --fail-on practice-failure --fail-on reliability-finding",
+      "exit_code": 1,
+      "seconds": 1.47
+    },
+    {
+      "check": "resources",
+      "command": "python3 acceptance/profile.py",
+      "exit_code": 0,
+      "seconds": 9.33
+    }
+  ],
+  "normal_tests_passed": 184,
+  "live_macro_tests_passed": 1,
+  "policy": {
+    "exit_code": 1,
+    "passed": false,
+    "failed_policies": [
+      "configured-rules",
+      "partial",
+      "reliability-finding",
+      "test-failure"
+    ],
+    "partial_artifacts": [
+      "api_health.json",
+      "architecture_rules.json",
+      "clones.json",
+      "correctness_review.json",
+      "hotspots.json",
+      "leverage_metrics.json",
+      "locality_metrics.json",
+      "map.json",
+      "module_cohesion.json",
+      "reliability_findings.json",
+      "rust_escape_hatches.json",
+      "test_quality.json",
+      "type_health.json"
+    ],
+    "observed_test_failures": [],
+    "observed_practice_failures": [],
+    "stale_artifacts": [],
+    "explanation": "Required source evidence is partial because extraction does not expand visitor macros; type scope also cannot resolve opaque macros, attributes and cfg. The strict gate was not weakened. Advisory thresholds/findings are not asserted absent."
+  },
+  "self_metrics": {
+    "maximum_hotspot": 69.55,
+    "maximum_cyclomatic": 20,
+    "maximum_cognitive": 11,
+    "source_lines": 21941,
+    "source_line_ceiling": 22500,
+    "scope": "Unchanged rqlens.toml source roots; gates and weights unchanged"
+  },
+  "unexecuted": [
+    "latest-stable matrix",
+    "macOS",
+    "Windows"
+  ],
+  "logs": "target/trust-t4-verified/",
+  "release_authorized": false
+}

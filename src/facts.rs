@@ -14,6 +14,10 @@ use std::path::PathBuf;
 mod graph;
 mod helpers;
 mod test_runner;
+mod type_identity;
+pub(crate) use type_identity::TypeImplIndex;
+#[cfg(test)]
+pub(crate) use type_identity::impl_identity;
 #[cfg(test)]
 mod tests;
 
@@ -153,6 +157,7 @@ pub(crate) struct SourceMetrics {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct FileItems {
+    pub(crate) type_identity_limitations: Vec<String>,
     pub(crate) types: Vec<TypeFact>,
     pub(crate) impls: Vec<ImplFact>,
     pub(crate) tests: Vec<TestFact>,
@@ -258,6 +263,7 @@ pub(crate) struct RunContext {
     pub(crate) source_files: Vec<PathBuf>,
     pub(crate) correctness_files: Vec<PathBuf>,
     graph: OnceLock<ModuleGraph>,
+    type_impls: OnceLock<TypeImplIndex>,
     pub(crate) source_facts: Vec<FileFacts>,
     pub(crate) correctness_facts: Vec<FileFacts>,
     pub(crate) correctness_paths: Vec<String>,
@@ -265,6 +271,28 @@ pub(crate) struct RunContext {
 }
 
 impl RunContext {
+    pub(crate) fn type_impl_index(&self) -> &TypeImplIndex {
+        self.type_impls
+            .get_or_init(|| TypeImplIndex::new(&self.source_facts))
+    }
+
+    pub(crate) fn type_confidence(&self) -> serde_json::Value {
+        self.type_impl_index().confidence(
+            self.source_confidence(),
+            self.snapshot.fingerprint["complete"] == true,
+        )
+    }
+
+    pub(crate) fn semantic_confidence(
+        &self,
+        source: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let mut confidence: crate::contracts::MeasurementConfidence =
+            serde_json::from_value(source)?;
+        self.identity_resolution.apply_confidence(&mut confidence);
+        Ok(serde_json::to_value(confidence)?)
+    }
+
     pub(crate) fn module_graph(&self) -> &ModuleGraph {
         self.graph
             .get_or_init(|| graph::module_graph(&self.source_facts))
@@ -313,6 +341,7 @@ impl RunContext {
             source_files,
             correctness_files,
             graph: OnceLock::new(),
+            type_impls: OnceLock::new(),
             source_facts,
             correctness_facts,
             correctness_paths,

@@ -1,0 +1,123 @@
+{
+  "criterion": "T3",
+  "status": "passed",
+  "binary_sha256": "2bdcef6d8ab0a20e6445aa5febe520b93ef92c49ba6a969c0a862667e7f37d93",
+  "analyzer_source": {
+    "head": "c3554001a5fcf07734c0cac6ddeda21fb611ce0a",
+    "dirty": true,
+    "files_sha256": "5cce7c8512c6a9aefa37f6a16552e9eb373a2f798c5131ce8496d7ad5116bcc1"
+  },
+  "results": [
+    {
+      "project": "app-daemon",
+      "revision": "5ca88f0f8b56f7e236be58566e67bc0a7681b42b",
+      "source_sha256": "d2ba43e7ebaa4eb24ab53a53d8434bbf80c40722e9a33958c1cc25711da77cbd",
+      "source_stable": true,
+      "commands_passed": 26,
+      "artifacts_equal": 13,
+      "partial_type_rows": 104,
+      "type_abstention_reasons": 737
+    },
+    {
+      "project": "bar-daemon",
+      "revision": "61b81513031f468be6303ec053bee6869228374a",
+      "source_sha256": "a8edf8155533a94caf84a1d38adf358da7a1c2bbe9a6c1ec9af0455ea181ae80",
+      "source_stable": true,
+      "commands_passed": 26,
+      "artifacts_equal": 13,
+      "partial_type_rows": 228,
+      "type_abstention_reasons": 1895
+    },
+    {
+      "project": "bt-daemon",
+      "revision": "9628f765ac23df9768a5fad090cf8204e2eb67c4",
+      "source_sha256": "b143d9d3327b595d68157b4042b296163cb07fe284ecbc146faa3bcfbdefe4c6",
+      "source_stable": true,
+      "commands_passed": 26,
+      "artifacts_equal": 13,
+      "partial_type_rows": 118,
+      "type_abstention_reasons": 1067
+    },
+    {
+      "project": "clip-daemon",
+      "revision": "3e2f319455e77f786d7760dea327c52d4c0e60de",
+      "source_sha256": "4d3e3219095c410c3fcf1f1e64eacbc3014ce8ba119b17597c2c87ebd903bd50",
+      "source_stable": true,
+      "commands_passed": 26,
+      "artifacts_equal": 13,
+      "partial_type_rows": 120,
+      "type_abstention_reasons": 575
+    },
+    {
+      "project": "nm-daemon",
+      "revision": "cf09351fdac35df4b24754a7c01e8e2dcaaac632",
+      "source_sha256": "32752f7a2844e0ca94048a2f574942e3009c60458698c0d6be01d7dbe487f466",
+      "source_stable": true,
+      "commands_passed": 26,
+      "artifacts_equal": 13,
+      "partial_type_rows": 321,
+      "type_abstention_reasons": 1901
+    },
+    {
+      "project": "update-daemon",
+      "revision": "918127d45c04cbc33633615b5826ca5e27e86329",
+      "source_sha256": "2f7338b0582c2488098f72f57e5adb296f7ff0aa1808cab46841ab40c086bd48",
+      "source_stable": true,
+      "commands_passed": 26,
+      "artifacts_equal": 13,
+      "partial_type_rows": 18,
+      "type_abstention_reasons": 514
+    },
+    {
+      "project": "daemon-framework",
+      "revision": "c13f27d0dbbbc040a9ccc0f8997dbcc1ab348f3b",
+      "source_sha256": "92f04eadc61b9cb6638529e22dc3035f7716b51408c4a58eb7ca0bd5e4610e5e",
+      "source_stable": true,
+      "commands_passed": 26,
+      "artifacts_equal": 13,
+      "partial_type_rows": 69,
+      "type_abstention_reasons": 471
+    }
+  ],
+  "source_note": "Frozen T3 working implementation on c355400, committed with this evidence. Subsequent report/README changes are not executable inputs.",
+  "scope": "Fail-closed syntax-derived struct/enum inventory and impl ownership; requested architecture identity. No compiler-complete expansion, layout, calibration or whole-release certification.",
+  "command": "python3 acceptance/trust_campaign.py --output target/trust-t3-confirmed && python3 acceptance/check_trust_t3.py target/trust-t3-confirmed",
+  "normalization": [
+    "generated_at",
+    "measured_at"
+  ],
+  "normal_tests_passed": 184,
+  "live_macro_tests_passed": 1,
+  "acceptance_python_tests_passed": 8,
+  "package_identity_fixture": {
+    "complete": true,
+    "trust-a_methods": 1,
+    "trust-b_methods": 2,
+    "log": "target/trust-t3-native/package-final.log"
+  },
+  "app_daemon_macro_example": {
+    "omitted_types": [
+      "ComputeUsage",
+      "StorageUsage",
+      "NetworkUsage",
+      "EnergyUsage",
+      "ResourceAvailability"
+    ],
+    "explicit_reason": "unexpanded item macro usage_fields!; generated items/methods are not inventoried",
+    "complete": false,
+    "capability": "partial",
+    "authoritative_totals_and_scores": null
+  },
+  "source_preservation": "All seven project inventories remained unchanged, including Nix setup, and match the T2 baseline. Existing nm-daemon changes were preserved.",
+  "raw_evidence": "target/trust-t3-confirmed/; target/trust-t3-native/; target/trust-t4-verified/",
+  "investigated_attempts": [
+    "target/trust-t3-final passed repeatability on the earlier implementation but did not cover attribute/expression macro generation or require helper limitation metadata. It is superseded.",
+    "target/trust-t3-verified was explicitly stopped before changing helper sources to add the compiling non-local impl macro regression. It is not acceptance evidence.",
+    "The golden same-name test originally expected numeric totals despite unexpanded macros. It now checks preserved source observations and null unknown totals; a separate macro-free fixture proves known numeric zero and qualified owners."
+  ],
+  "limitations": [
+    "Conservative macro/attribute/cfg abstention makes all seven current type inventories partial; observed syntax counts remain available. These are support limitations, not daemon defect labels.",
+    "The complete native workflow does not pass: the strict policy gate rejects partial self-evidence. See trust-t4-results.json.",
+    "Cross-reporter equivalence, exhaustive applicability, broader language profiles and independent calibration remain separate unresolved criteria."
+  ]
+}

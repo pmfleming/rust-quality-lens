@@ -106,6 +106,7 @@ fn measure_snapshot(
         config,
         &measurements,
         context.source_confidence()["complete"] == true
+            && context.type_confidence()["complete"] == true
             && context.correctness_confidence()["complete"] == true
             && context.identity_resolution.complete
             && context.snapshot.fingerprint["complete"] == true,

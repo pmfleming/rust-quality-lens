@@ -721,16 +721,23 @@ fn type_health_keeps_same_named_types_separate() {
         .iter()
         .find(|item| item["qualified_name"] == "beta::Config")
         .unwrap();
-    assert_eq!(alpha["method_count"], 1);
-    assert_eq!(beta["method_count"], 2);
+    // This fixture includes unexpanded item/test macros: preserve known joins,
+    // but do not present source observations as complete type inventories.
+    assert_eq!(alpha["observed_method_count"], 1);
+    assert_eq!(beta["observed_method_count"], 2);
+    for row in rows {
+        assert!(row["method_count"].is_null());
+        assert!(row["structural_risk"].is_null());
+        assert_eq!(row["measurement_confidence"]["complete"], false);
+    }
     assert!(rows.iter().any(|item| item["qualified_name"] == "domain::TupleConfig"
         && item["shape"] == "tuple"));
     let domain = rows
         .iter()
         .find(|item| item["qualified_name"] == "domain::Config")
         .unwrap();
-    assert_eq!(domain["method_count"], 1);
-    assert_eq!(domain["impl_file_count"], 1);
+    assert_eq!(domain["observed_method_count"], 1);
+    assert_eq!(domain["observed_impl_file_count"], 1);
     assert!(
         domain["impl_files"][0]
             .as_str()

@@ -34,6 +34,7 @@ struct FileFacts {
     child_modules: Vec<String>,
     module_files: Vec<ModuleFileFact>,
     unsupported_patterns: Vec<String>,
+    type_identity_limitations: Vec<String>,
     public_api_count: usize,
     documented_public_api_count: usize,
     has_crate_docs: bool,
@@ -143,6 +144,7 @@ struct FactVisitor {
     child_modules: Vec<String>,
     module_files: Vec<ModuleFileFact>,
     unsupported_patterns: Vec<String>,
+    type_identity_limitations: Vec<String>,
     module_stack: Vec<String>,
     public_api_count: usize,
     documented_public_api_count: usize,
@@ -161,6 +163,7 @@ struct FactVisitor {
     quality_findings: Vec<QualityFinding>,
     source_lines: Vec<String>,
     test_scope_depth: usize,
+    block_depth: usize,
 }
 
 impl FactVisitor {
@@ -182,6 +185,7 @@ impl FactVisitor {
             child_modules: Vec::new(),
             module_files: Vec::new(),
             unsupported_patterns: Vec::new(),
+            type_identity_limitations: Vec::new(),
             module_stack: Vec::new(),
             public_api_count: 0,
             documented_public_api_count: 0,
@@ -202,6 +206,7 @@ impl FactVisitor {
             quality_findings: Vec::new(),
             source_lines: content.lines().map(str::to_string).collect(),
             test_scope_depth: 0,
+            block_depth: 0,
         }
     }
 
@@ -233,6 +238,8 @@ impl FactVisitor {
             .sort_by(|a, b| a.module_key.cmp(&b.module_key));
         self.unsupported_patterns.sort();
         self.unsupported_patterns.dedup();
+        self.type_identity_limitations.sort();
+        self.type_identity_limitations.dedup();
         FileFacts {
             path: self.path,
             module_key: self.module_key,
@@ -248,6 +255,7 @@ impl FactVisitor {
             child_modules: self.child_modules,
             module_files: self.module_files,
             unsupported_patterns: self.unsupported_patterns,
+            type_identity_limitations: self.type_identity_limitations,
             public_api_count: self.public_api_count,
             documented_public_api_count: self.documented_public_api_count,
             has_crate_docs: self.has_crate_docs,
@@ -344,7 +352,56 @@ impl FactVisitor {
         attrs.iter().for_each(|attr| self.scan_attr(attr));
     }
 
+    fn note_type_macro(&mut self, path: &str, span: Span) {
+        if path != "macro_rules" {
+            self.type_identity_limitations.push(format!(
+                "{}:{}: unexpanded macro {path}! may generate types or non-local implementations",
+                self.path,
+                span_start_line(span)
+            ));
+        }
+    }
+
+    fn note_type_attribute(&mut self, attr: &Attribute) {
+        let path = path_to_string(attr.path());
+        let reason = match path.as_str() {
+            "cfg" | "cfg_attr" => Some("conditional type/impl scope requires cfg evaluation"),
+            // Inert built-in attributes do not expand the item inventory. Do not
+            // assume derive/test names resolve to built-ins rather than imports.
+            "doc"
+            | "repr"
+            | "allow"
+            | "expect"
+            | "deny"
+            | "forbid"
+            | "deprecated"
+            | "must_use"
+            | "non_exhaustive"
+            | "inline"
+            | "cold"
+            | "track_caller"
+            | "no_mangle"
+            | "export_name"
+            | "link_name"
+            | "link"
+            | "unsafe"
+            | "path"
+            | "macro_use"
+            | "macro_export"
+            | "automatically_derived" => None,
+            _ => Some("attribute/derive expansion is not included in the type inventory"),
+        };
+        if let Some(reason) = reason {
+            self.type_identity_limitations.push(format!(
+                "{}:{}: {reason}: #[{path}]",
+                self.path,
+                span_start_line(attr.span())
+            ));
+        }
+    }
+
     fn scan_attr(&mut self, attr: &Attribute) {
+        self.note_type_attribute(attr);
         let path = path_to_string(attr.path());
         let tokens = attr.meta.to_token_stream().to_string();
         if path == "repr" {
@@ -695,7 +752,25 @@ impl<'ast> Visit<'ast> for StandardComplexity {
 }
 
 impl<'ast> Visit<'ast> for FactVisitor {
+    fn visit_block(&mut self, block: &'ast syn::Block) {
+        self.block_depth += 1;
+        visit::visit_block(self, block);
+        self.block_depth = self.block_depth.saturating_sub(1);
+    }
+
+    fn visit_impl_item_macro(&mut self, item: &'ast syn::ImplItemMacro) {
+        self.note_unexpanded_macro(&item.mac, "impl");
+        visit::visit_impl_item_macro(self, item);
+    }
+
     fn visit_item(&mut self, i: &'ast Item) {
+        if self.block_depth > 0 && matches!(i, Item::Struct(_) | Item::Enum(_) | Item::Impl(_)) {
+            self.unsupported_patterns.push(format!(
+                "{}:{}: block-local type or implementation requires lexical scope resolution",
+                self.path,
+                span_start_line(i.span())
+            ));
+        }
         match i {
             Item::Const(item) => {
                 self.scan_attrs(&item.attrs);
@@ -789,6 +864,7 @@ impl<'ast> Visit<'ast> for FactVisitor {
 
     fn visit_macro(&mut self, i: &'ast syn::Macro) {
         let path = path_to_string(&i.path);
+        self.note_type_macro(&path, i.path.span());
         self.add_dependency_at(
             path.clone(),
             i.path
@@ -990,7 +1066,22 @@ impl FactVisitor {
     }
 
     fn record_impl_fact(&mut self, item: &ItemImpl, method_count: usize) {
-        let Some(qualified_type_name) = impl_type_path(&item.self_ty) else {
+        let owner = match item.self_ty.as_ref() {
+            Type::Path(path)
+                if path.qself.is_none()
+                    && path.path.leading_colon.is_none()
+                    && self.block_depth == 0 =>
+            {
+                Some(path_to_string(&path.path))
+            }
+            _ => None,
+        };
+        let Some(qualified_type_name) = owner else {
+            self.unsupported_patterns.push(format!(
+                "{}:{}: impl target requires semantic type resolution",
+                self.path,
+                span_start_line(item.impl_token.span)
+            ));
             return;
         };
         let type_name = qualified_type_name
@@ -1009,6 +1100,9 @@ impl FactVisitor {
     }
 
     fn record_method_metrics(&mut self, owner: &str, method: &ImplItemFn) {
+        for attr in &method.attrs {
+            self.note_type_attribute(attr);
+        }
         let name = method.sig.ident.to_string();
         self.record_function_metrics(
             name.clone(),
@@ -1018,9 +1112,21 @@ impl FactVisitor {
         );
     }
 
+    fn note_unexpanded_macro(&mut self, mac: &syn::Macro, kind: &str) {
+        self.unsupported_patterns.push(format!(
+            "{}:{}: unexpanded {kind} macro {}!; generated items/methods are not inventoried",
+            self.path,
+            span_start_line(mac.path.span()),
+            path_to_string(&mac.path)
+        ));
+    }
+
     fn record_item_macro(&mut self, item: &syn::ItemMacro) {
         self.scan_attrs(&item.attrs);
         let path = path_to_string(&item.mac.path);
+        if path != "macro_rules" {
+            self.note_unexpanded_macro(&item.mac, "item");
+        }
         self.add_dependency_at(
             path.clone(),
             item.mac
@@ -1480,6 +1586,7 @@ fn failed_record(path: &str, parse_status: String) -> FileFacts {
         child_modules: Vec::new(),
         module_files: Vec::new(),
         unsupported_patterns: Vec::new(),
+        type_identity_limitations: Vec::new(),
         public_api_count: 0,
         documented_public_api_count: 0,
         has_crate_docs: false,
