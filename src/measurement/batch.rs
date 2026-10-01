@@ -1,6 +1,6 @@
 //! Stage a measurement batch so an input change or producer failure cannot
 //! replace previous evidence with a partially completed run.
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -14,11 +14,35 @@ pub(crate) struct ArtifactBatch {
     destination: PathBuf,
     pub(crate) config: LensConfig,
     written: BTreeSet<String>,
+    _lock: PublicationLock,
+}
+
+// Cooperative writers fail closed. A crashed process leaves this marker for
+// explicit operator recovery; silently breaking another writer's lock is unsafe.
+struct PublicationLock(PathBuf);
+impl PublicationLock {
+    fn acquire(directory: &std::path::Path) -> Result<Self> {
+        let path = directory.join(".rqlens-batch.lock");
+        fs::OpenOptions::new().write(true).create_new(true).open(&path)
+            .with_context(|| format!("acquiring publication lock {}; another writer or interrupted run requires attention", path.display()))?;
+        Ok(Self(path))
+    }
+}
+impl Drop for PublicationLock {
+    fn drop(&mut self) {
+        if let Err(error) = fs::remove_file(&self.0) {
+            eprintln!(
+                "cannot release publication lock {}: {error}",
+                self.0.display()
+            );
+        }
+    }
 }
 
 impl ArtifactBatch {
     pub(crate) fn new(config: &LensConfig) -> Result<Self> {
         fs::create_dir_all(&config.output_dir)?;
+        let lock = PublicationLock::acquire(&config.output_dir)?;
         let directory = tempfile::Builder::new()
             .prefix(".rqlens-batch-")
             .tempdir_in(&config.output_dir)?;
@@ -44,10 +68,15 @@ impl ArtifactBatch {
             destination: config.output_dir.clone(),
             config: staged,
             written: BTreeSet::new(),
+            _lock: lock,
         })
     }
 
     pub(crate) fn write(&mut self, file: &str, document: &serde_json::Value) -> Result<()> {
+        ensure!(
+            file.ends_with(".json") && !file.contains(['/', '\\', ':']),
+            "artifact must be a JSON basename"
+        );
         write_json(&self.directory.path().join(file), document)?;
         self.written.insert(file.to_string());
         Ok(())
@@ -75,6 +104,28 @@ mod tests {
     use anyhow::Result;
     use serde_json::json;
     use std::fs;
+
+    #[test]
+    fn competing_writers_and_escaping_names_are_rejected() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let path = root.path().join("rqlens.toml");
+        fs::write(&path, "source_roots = [\"src\"]\n")?;
+        let config = LensConfig::load(Some(path))?;
+        let mut batch = ArtifactBatch::new(&config)?;
+        assert!(ArtifactBatch::new(&config).is_err());
+        for name in [
+            "../outside.json",
+            "sub/artifact.json",
+            "C:artifact.json",
+            "sub\\artifact.json",
+            "not-json",
+        ] {
+            assert!(batch.write(name, &json!({})).is_err());
+        }
+        drop(batch);
+        assert!(ArtifactBatch::new(&config).is_ok());
+        Ok(())
+    }
 
     #[test]
     fn changed_inputs_leave_previous_artifacts_untouched() -> Result<()> {

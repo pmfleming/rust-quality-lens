@@ -1,0 +1,158 @@
+{
+  "status": "passed",
+  "revision": "c4a27d87ae541401b03a10ad69e5eade6fc90fd5",
+  "platform": "Linux-6.18.39-x86_64-with-glibc2.42",
+  "budgets": {
+    "profile": "linux-x86_64, Rust 1.95; source-only hotspots 10/50/100 files; first/repeat processes with prebuilt CLI/helper",
+    "command": [
+      "python3",
+      "scripts/benchmark-measure.py"
+    ],
+    "repetitions": 3,
+    "records_per_repetition": 6,
+    "max_duration_ms": 5000,
+    "rss_field": "children_peak_rss_native_units",
+    "max_peak_rss_kib": 131072,
+    "limitations": "Regression resource ceilings fixed before this campaign, not general runtime bounds. Child RSS is cumulative and interpreted as KiB only on Linux. OS caches may be warm. Builds, project tests and semantic identity are excluded."
+  },
+  "samples": [
+    {
+      "repetition": 1,
+      "environment": {
+        "benchmark": "source-only-hotspots",
+        "platform": "Linux-6.18.39-x86_64-with-glibc2.42",
+        "scope": "prebuilt binary/helper; OS caches may be warm; child RSS peak cumulative (KiB on Linux, bytes on macOS)"
+      },
+      "records": [
+        {
+          "files": 10,
+          "run": "first-process",
+          "duration_ms": 610,
+          "children_peak_rss_native_units": 54268
+        },
+        {
+          "files": 10,
+          "run": "repeat-process",
+          "duration_ms": 737,
+          "children_peak_rss_native_units": 54396
+        },
+        {
+          "files": 50,
+          "run": "first-process",
+          "duration_ms": 829,
+          "children_peak_rss_native_units": 54396
+        },
+        {
+          "files": 50,
+          "run": "repeat-process",
+          "duration_ms": 839,
+          "children_peak_rss_native_units": 54396
+        },
+        {
+          "files": 100,
+          "run": "first-process",
+          "duration_ms": 1001,
+          "children_peak_rss_native_units": 54396
+        },
+        {
+          "files": 100,
+          "run": "repeat-process",
+          "duration_ms": 968,
+          "children_peak_rss_native_units": 54396
+        }
+      ]
+    },
+    {
+      "repetition": 2,
+      "environment": {
+        "benchmark": "source-only-hotspots",
+        "platform": "Linux-6.18.39-x86_64-with-glibc2.42",
+        "scope": "prebuilt binary/helper; OS caches may be warm; child RSS peak cumulative (KiB on Linux, bytes on macOS)"
+      },
+      "records": [
+        {
+          "files": 10,
+          "run": "first-process",
+          "duration_ms": 749,
+          "children_peak_rss_native_units": 53976
+        },
+        {
+          "files": 10,
+          "run": "repeat-process",
+          "duration_ms": 788,
+          "children_peak_rss_native_units": 54260
+        },
+        {
+          "files": 50,
+          "run": "first-process",
+          "duration_ms": 840,
+          "children_peak_rss_native_units": 54260
+        },
+        {
+          "files": 50,
+          "run": "repeat-process",
+          "duration_ms": 846,
+          "children_peak_rss_native_units": 54260
+        },
+        {
+          "files": 100,
+          "run": "first-process",
+          "duration_ms": 999,
+          "children_peak_rss_native_units": 54396
+        },
+        {
+          "files": 100,
+          "run": "repeat-process",
+          "duration_ms": 908,
+          "children_peak_rss_native_units": 54396
+        }
+      ]
+    },
+    {
+      "repetition": 3,
+      "environment": {
+        "benchmark": "source-only-hotspots",
+        "platform": "Linux-6.18.39-x86_64-with-glibc2.42",
+        "scope": "prebuilt binary/helper; OS caches may be warm; child RSS peak cumulative (KiB on Linux, bytes on macOS)"
+      },
+      "records": [
+        {
+          "files": 10,
+          "run": "first-process",
+          "duration_ms": 735,
+          "children_peak_rss_native_units": 54024
+        },
+        {
+          "files": 10,
+          "run": "repeat-process",
+          "duration_ms": 690,
+          "children_peak_rss_native_units": 54028
+        },
+        {
+          "files": 50,
+          "run": "first-process",
+          "duration_ms": 836,
+          "children_peak_rss_native_units": 54204
+        },
+        {
+          "files": 50,
+          "run": "repeat-process",
+          "duration_ms": 796,
+          "children_peak_rss_native_units": 54204
+        },
+        {
+          "files": 100,
+          "run": "first-process",
+          "duration_ms": 979,
+          "children_peak_rss_native_units": 54396
+        },
+        {
+          "files": 100,
+          "run": "repeat-process",
+          "duration_ms": 961,
+          "children_peak_rss_native_units": 54396
+        }
+      ]
+    }
+  ]
+}

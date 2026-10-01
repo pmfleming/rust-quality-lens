@@ -1,0 +1,10 @@
+{
+  "profile": "linux-x86_64, Rust 1.95; source-only hotspots 10/50/100 files; first/repeat processes with prebuilt CLI/helper",
+  "command": ["python3", "scripts/benchmark-measure.py"],
+  "repetitions": 3,
+  "records_per_repetition": 6,
+  "max_duration_ms": 5000,
+  "rss_field": "children_peak_rss_native_units",
+  "max_peak_rss_kib": 131072,
+  "limitations": "Regression resource ceilings fixed before this campaign, not general runtime bounds. Child RSS is cumulative and interpreted as KiB only on Linux. OS caches may be warm. Builds, project tests and semantic identity are excluded."
+}
