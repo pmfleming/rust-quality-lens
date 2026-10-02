@@ -160,11 +160,7 @@ mod tests {
 
     #[test]
     fn imported_findings_require_producer_source_identity() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        std::fs::create_dir(root.path().join("src"))?;
-        std::fs::write(root.path().join("src/lib.rs"), "pub fn a() {}")?;
-        std::fs::write(root.path().join("rqlens.toml"), "source_roots = ['src']\n")?;
-        let config = crate::config::LensConfig::load(Some(root.path().join("rqlens.toml")))?;
+        let (root, config) = crate::test_support::source_project(Some("pub fn a() {}"))?;
         let report = root.path().join("report.json");
         let mut evidence = json!({"tool":{"name":"other","version":"1"},"status":"completed","scope":{},
             "confidence":{"complete":true},"metrics":[],"findings":[{"rule_id":"rule","message":"problem","severity":"warning","path":"src/lib.rs","line":1}]});

@@ -1,4 +1,4 @@
-use crate::config::LensConfig;
+use crate::{config::LensConfig, tool::MeasureTool};
 use anyhow::Result;
 use serde_json::{Value, json};
 
@@ -6,10 +6,10 @@ pub(crate) fn print_catalog(config: &LensConfig) -> Result<()> {
     let tasks: Vec<Value> = task_definitions()
         .into_iter()
         .map(|task| {
-            let output_files = if task.tool == "correctness" {
+            let output_files = if matches!(task.tool, MeasureTool::Correctness) {
                 vec!["correctness_review.json", "test_catalog.json"]
             } else {
-                vec![task.output_file]
+                vec![task.tool.output_file()]
             };
             json!({
                 "id": task.id,
@@ -17,14 +17,14 @@ pub(crate) fn print_catalog(config: &LensConfig) -> Result<()> {
                 "subcategory": task.subcategory,
                 "title": task.title,
                 "description": task.description,
-                "commands": [["rqlens", "measure", task.tool]],
+                "commands": [["rqlens", "measure", task.tool.name()]],
                 "output_artifacts": output_files.iter().map(|file| format!("target/analysis/{file}")).collect::<Vec<_>>(),
                 "absolute_output_artifacts": output_files.iter().map(|file| config.output_dir.join(file).to_string_lossy().to_string()).collect::<Vec<_>>(),
-                "depends_on": task.depends_on,
-                "expensive": task.expensive,
+                "depends_on": task.dependencies(),
+                "expensive": task.expensive(),
                 "supports_individual_run": true,
                 "lens": "rust-quality-lens",
-                "tool": task.tool,
+                "tool": task.tool.name(),
                 "aliases": task.aliases,
             })
         })
@@ -47,252 +47,214 @@ pub(crate) fn print_catalog(config: &LensConfig) -> Result<()> {
 }
 
 struct TaskDefinition {
-    tool: &'static str,
+    tool: MeasureTool,
     id: &'static str,
     aliases: Vec<&'static str>,
     category: &'static str,
     subcategory: &'static str,
     title: &'static str,
     description: &'static str,
-    output_file: &'static str,
-    depends_on: Vec<&'static str>,
-    expensive: bool,
+}
+
+impl TaskDefinition {
+    fn dependencies(&self) -> &[&str] {
+        match self.tool {
+            MeasureTool::TestQuality => &["correctness.catalog"],
+            MeasureTool::FunctionRisk => &["quality.hotspots", "correctness.coverage"],
+            MeasureTool::Map => &[
+                "quality.hotspots",
+                "correctness.catalog",
+                "quality.locality_dynamic",
+                "quality.locality_leverage",
+            ],
+            _ => &[],
+        }
+    }
+
+    fn expensive(&self) -> bool {
+        matches!(
+            self.tool,
+            MeasureTool::SemanticApi
+                | MeasureTool::SourceExpansion
+                | MeasureTool::Practices
+                | MeasureTool::CorrectnessRun
+                | MeasureTool::Coverage
+        )
+    }
 }
 
 fn task_definitions() -> Vec<TaskDefinition> {
     vec![
         TaskDefinition {
-            tool: "hotspots",
+            tool: MeasureTool::Hotspots,
             id: "quality.hotspots",
             aliases: vec![],
             category: "quality",
             subcategory: "hotspots",
             title: "Hotspots",
             description: "Reports standard cyclomatic and cognitive complexity, then ranks function and module branch, path, nesting, and size pressure using RQLens-specific proxies.",
-            output_file: "hotspots.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "clones",
+            tool: MeasureTool::Clones,
             id: "quality.clones",
             aliases: vec![],
             category: "quality",
             subcategory: "clones",
             title: "Clones",
             description: "Finds repeated token and AST-like code structures.",
-            output_file: "clones.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "escape-hatches",
+            tool: MeasureTool::EscapeHatches,
             id: "quality.escape_hatches",
             aliases: vec!["quality.escape-hatches"],
             category: "quality",
             subcategory: "safety",
             title: "Rust Escape Hatches",
             description: "Tracks unsafe, FFI, raw memory, globals, glob imports, and lint suppressions.",
-            output_file: "rust_escape_hatches.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "reliability",
+            tool: MeasureTool::Reliability,
             id: "quality.reliability",
             aliases: vec!["quality.safety-contracts"],
             category: "quality",
             subcategory: "safety",
             title: "Safety and Reliability Findings",
             description: "Reports undocumented unsafe contracts and explicit panic paths as source evidence.",
-            output_file: "reliability_findings.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "architecture-rules",
+            tool: MeasureTool::ArchitectureRules,
             id: "quality.architecture_rules",
             aliases: vec!["quality.boundaries"],
             category: "quality",
             subcategory: "architecture",
             title: "Architecture Rules",
             description: "Evaluates configured Cargo-qualified module dependency boundaries.",
-            output_file: "architecture_rules.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "test-quality",
+            tool: MeasureTool::TestQuality,
             id: "quality.test_quality",
             aliases: vec![],
             category: "correctness",
             subcategory: "tests",
             title: "Test Quality",
             description: "Reports assertion, system-under-test call, and ignored-test evidence.",
-            output_file: "test_quality.json",
-            depends_on: vec!["correctness.catalog"],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "api-health",
+            tool: MeasureTool::ApiHealth,
             id: "quality.api_health",
             aliases: vec!["quality.documentation"],
             category: "quality",
             subcategory: "api",
             title: "API Documentation Health",
             description: "Measures public-item and crate-level documentation evidence without treating coverage as correctness.",
-            output_file: "api_health.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "semantic-api",
+            tool: MeasureTool::SemanticApi,
             id: "quality.semantic_api",
             aliases: vec!["quality.public_api"],
             category: "quality",
             subcategory: "api",
             title: "Reachable Public API",
             description: "Optionally inventories compiler-derived reachable public API through cargo-public-api.",
-            output_file: "semantic_api.json",
-            depends_on: vec![],
-            expensive: true,
         },
         TaskDefinition {
-            tool: "source-expansion",
+            tool: MeasureTool::SourceExpansion,
             id: "quality.source_expansion",
             aliases: vec![],
             category: "quality",
             subcategory: "semantics",
             title: "Source Expansion Observations",
             description: "Opt-in item/impl macro expansion evidence; does not certify cfg, generated facts or compiler ownership. Not included in measure all.",
-            output_file: "source_expansion.json",
-            depends_on: vec![],
-            expensive: true,
         },
         TaskDefinition {
-            tool: "type-health",
+            tool: MeasureTool::TypeHealth,
             id: "quality.type_health",
             aliases: vec!["quality.type-health"],
             category: "quality",
             subcategory: "structure",
             title: "Type Health",
             description: "Ranks wide structs, large enums, broad method surfaces, and impl spread.",
-            output_file: "type_health.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "practices",
+            tool: MeasureTool::Practices,
             id: "quality.rust_practices",
             aliases: vec!["quality.verification"],
             category: "quality",
             subcategory: "standards",
             title: "Rust Practices",
             description: "Runs official Rust gates and records project maturity evidence without mixing them into architecture scores.",
-            output_file: "rust_practices.json",
-            depends_on: vec![],
-            expensive: true,
         },
         TaskDefinition {
-            tool: "locality",
+            tool: MeasureTool::Locality,
             id: "quality.locality_dynamic",
             aliases: vec!["quality.locality"],
             category: "quality",
             subcategory: "locality",
             title: "Code Locality",
             description: "Measures dependency spread, hidden coupling, interface explicitness, and change locality.",
-            output_file: "locality_metrics.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "leverage",
+            tool: MeasureTool::Leverage,
             id: "quality.locality_leverage",
             aliases: vec!["quality.leverage"],
             category: "quality",
             subcategory: "leverage",
             title: "Architecture Leverage",
             description: "Measures reach, invariant surface, divergence pressure, and co-change ripple.",
-            output_file: "leverage_metrics.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "module-cohesion",
+            tool: MeasureTool::ModuleCohesion,
             id: "quality.module_cohesion",
             aliases: vec!["quality.change_entropy"],
             category: "quality",
             subcategory: "architecture",
             title: "Module Cohesion and Change Entropy",
             description: "Reports responsibility spread, dependency pressure, and Git change entropy without treating them as defect predictions.",
-            output_file: "module_cohesion.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "correctness",
+            tool: MeasureTool::Correctness,
             id: "correctness.catalog",
             aliases: vec![],
             category: "correctness",
             subcategory: "tests",
             title: "Correctness Catalog",
             description: "Discovers Rust tests and groups them by generic architecture area.",
-            output_file: "correctness_review.json",
-            depends_on: vec![],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "correctness-run",
+            tool: MeasureTool::CorrectnessRun,
             id: "correctness.all",
             aliases: vec![],
             category: "correctness",
             subcategory: "tests",
             title: "All Tests",
             description: "Runs the full Rust test suite and attaches status to the correctness catalog.",
-            output_file: "correctness_review.json",
-            depends_on: vec![],
-            expensive: true,
         },
         TaskDefinition {
-            tool: "coverage",
+            tool: MeasureTool::Coverage,
             id: "correctness.coverage",
             aliases: vec![],
             category: "correctness",
             subcategory: "coverage",
             title: "Test Coverage",
             description: "Runs cargo-llvm-cov and reports line, region, function, and branch coverage by Rust module.",
-            output_file: "coverage.json",
-            depends_on: vec![],
-            expensive: true,
         },
         TaskDefinition {
-            tool: "function-risk",
+            tool: MeasureTool::FunctionRisk,
             id: "correctness.function_risk",
             aliases: vec!["quality.crap"],
             category: "correctness",
             subcategory: "risk",
             title: "Function Risk",
             description: "Combines function cyclomatic complexity with fresh executable-line coverage using the CRAP formula.",
-            output_file: "function_risk.json",
-            depends_on: vec!["quality.hotspots", "correctness.coverage"],
-            expensive: false,
         },
         TaskDefinition {
-            tool: "map",
+            tool: MeasureTool::Map,
             id: "map.architecture",
             aliases: vec![],
             category: "map",
             subcategory: "architecture",
             title: "Architecture Map",
             description: "Builds module health, dependency, and risk map data.",
-            output_file: "map.json",
-            depends_on: vec![
-                "quality.hotspots",
-                "correctness.catalog",
-                "quality.locality_dynamic",
-                "quality.locality_leverage",
-            ],
-            expensive: false,
         },
     ]
 }

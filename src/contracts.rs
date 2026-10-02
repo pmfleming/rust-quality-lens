@@ -11,6 +11,8 @@ pub(crate) use evidence::{
     ArtifactHeader, BenchmarkRecord, CoveragePayload, InputState, InputStatus,
     MeasurementConfidence, benchmark_index, benchmark_records,
 };
+mod current;
+pub(crate) use current::{ArtifactReadError, read_current};
 mod baseline;
 pub(crate) use baseline::{coverage_percent, read_baseline, validate_comparison_evidence};
 mod validation;
@@ -289,25 +291,8 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
-        MeasureTool::ArchitectureRules => object_schema(
-            "architecture_rules.json",
-            &["summary", "violations", "measurement_confidence"],
-            json!({
-                "summary": {"type": "object"},
-                "violations": {"type": "array", "items": {"type": "object"}},
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
-        ),
-        MeasureTool::TestQuality => object_schema(
-            "test_quality.json",
-            &["summary", "tests", "findings", "measurement_confidence"],
-            json!({
-                "summary": {"type": "object"},
-                "tests": {"type": "array", "items": {"type": "object"}},
-                "findings": {"type": "array", "items": {"type": "object"}},
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
-        ),
+        MeasureTool::ArchitectureRules => summary_arrays_schema(tool, &["violations"]),
+        MeasureTool::TestQuality => summary_arrays_schema(tool, &["tests", "findings"]),
         MeasureTool::ApiHealth => array_schema(
             "api_health.json",
             &[
@@ -422,41 +407,8 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "tests": {"type": "array", "items": {"type": "object"}},
             }),
         ),
-        MeasureTool::Locality => array_schema(
-            "locality_metrics.json",
-            &["module_key", "path", "locality_risk", "locality_score"],
-            json!({
-                "module_key": {"type": "string"},
-                "path": {"type": ["string", "object"]},
-                "target_kind": {"type": "string"},
-                "entrypoint_kind": {"type": ["string", "null"]},
-                "is_entrypoint": {"type": "boolean"},
-                "locality_risk": {"type": "number"},
-                "locality_score": {"type": "number"},
-            }),
-        ),
-        MeasureTool::Leverage => array_schema(
-            "leverage_metrics.json",
-            &["module_key", "path", "leverage_score", "pressure_score"],
-            json!({
-                "module_key": {"type": "string"},
-                "path": {"type": ["string", "object"]},
-                "target_kind": {"type": "string"},
-                "entrypoint_kind": {"type": ["string", "null"]},
-                "is_entrypoint": {"type": "boolean"},
-                "leverage_score": {"type": "number"},
-                "pressure_score": {"type": "number"},
-            }),
-        ),
-        MeasureTool::ModuleCohesion => object_schema(
-            "module_cohesion.json",
-            &["summary", "records", "measurement_confidence"],
-            json!({
-                "summary": {"type": "object"},
-                "records": {"type": "array", "items": {"type": "object"}},
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
-        ),
+        MeasureTool::Locality | MeasureTool::Leverage => topology_schema(tool),
+        MeasureTool::ModuleCohesion => summary_arrays_schema(tool, &["records"]),
         MeasureTool::Map => object_schema(
             "map.json",
             &["meta", "graph", "modules", "measurement_confidence"],
@@ -474,15 +426,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
-        MeasureTool::Coverage => object_schema(
-            "coverage.json",
-            &["summary", "files", "measurement_confidence"],
-            json!({
-                "summary": {"type": "object"},
-                "files": {"type": "array", "items": {"type": "object"}},
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
-        ),
+        MeasureTool::Coverage => summary_arrays_schema(tool, &["files"]),
         MeasureTool::FunctionRisk => object_schema(
             "function_risk.json",
             &["summary", "formula", "functions", "measurement_confidence"],
@@ -599,6 +543,43 @@ fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
         "properties": properties,
         "additionalProperties": false,
     })
+}
+
+fn summary_arrays_schema(tool: &MeasureTool, arrays: &[&str]) -> Value {
+    let mut required = vec!["summary"];
+    required.extend_from_slice(arrays);
+    required.push("measurement_confidence");
+    let mut properties = json!({
+        "summary": {"type": "object"},
+        "measurement_confidence": measurement_confidence_schema(),
+    });
+    for name in arrays {
+        properties[name] = json!({"type": "array", "items": {"type": "object"}});
+    }
+    object_schema(tool.output_file(), &required, properties)
+}
+
+fn topology_schema(tool: &MeasureTool) -> Value {
+    let fields = if matches!(tool, MeasureTool::Locality) {
+        ["locality_risk", "locality_score"]
+    } else {
+        ["leverage_score", "pressure_score"]
+    };
+    let mut properties = json!({
+        "module_key": {"type": "string"},
+        "path": {"type": ["string", "object"]},
+        "target_kind": {"type": "string"},
+        "entrypoint_kind": {"type": ["string", "null"]},
+        "is_entrypoint": {"type": "boolean"},
+    });
+    for field in fields {
+        properties[field] = json!({"type": "number"});
+    }
+    array_schema(
+        tool.output_file(),
+        &["module_key", "path", fields[0], fields[1]],
+        properties,
+    )
 }
 
 fn array_schema(title: &str, required: &[&str], properties: Value) -> Value {

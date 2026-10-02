@@ -91,18 +91,13 @@ fn visit(config: &LensConfig, value: &mut Value, occurrences: &mut BTreeMap<Stri
 #[cfg(test)]
 mod tests {
     use super::normalize;
-    use crate::config::LensConfig;
+    use crate::test_support::source_project;
     use serde_json::json;
     use std::fs;
     #[test]
     fn identity_survives_line_shifts_and_distinguishes_occurrences() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        fs::create_dir(root.path().join("src"))?;
+        let (root, config) = source_project(Some("fn f() { panic!(); }\nfn f() { panic!(); }\n"))?;
         let file = root.path().join("src/lib.rs");
-        fs::write(&file, "fn f() { panic!(); }\nfn f() { panic!(); }\n")?;
-        let config_path = root.path().join("rqlens.toml");
-        fs::write(&config_path, "source_roots = ['src']\n")?;
-        let config = LensConfig::load(Some(config_path))?;
         let finding = |line| json!({"rule_id": "rust.panic", "path": "src/lib.rs", "line": line});
         let mut before = json!([finding(1), finding(2)]);
         normalize(&config, &mut before);

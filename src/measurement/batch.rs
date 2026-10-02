@@ -100,17 +100,14 @@ impl ArtifactBatch {
 #[cfg(test)]
 mod tests {
     use super::ArtifactBatch;
-    use crate::{config::LensConfig, util::write_json};
+    use crate::{test_support::source_project, util::write_json};
     use anyhow::Result;
     use serde_json::json;
     use std::fs;
 
     #[test]
     fn competing_writers_and_escaping_names_are_rejected() -> Result<()> {
-        let root = tempfile::tempdir()?;
-        let path = root.path().join("rqlens.toml");
-        fs::write(&path, "source_roots = [\"src\"]\n")?;
-        let config = LensConfig::load(Some(path))?;
+        let (_root, config) = source_project(None)?;
         let mut batch = ArtifactBatch::new(&config)?;
         assert!(ArtifactBatch::new(&config).is_err());
         for name in [
@@ -129,13 +126,8 @@ mod tests {
 
     #[test]
     fn changed_inputs_leave_previous_artifacts_untouched() -> Result<()> {
-        let root = tempfile::tempdir()?;
-        fs::create_dir(root.path().join("src"))?;
+        let (root, config) = source_project(Some("pub fn before() {}"))?;
         let source = root.path().join("src/lib.rs");
-        fs::write(&source, "pub fn before() {}")?;
-        let path = root.path().join("rqlens.toml");
-        fs::write(&path, "source_roots = [\"src\"]\n")?;
-        let config = LensConfig::load(Some(path))?;
         let output = config.output_dir.join("hotspots.json");
         write_json(&output, &json!({"previous": true}))?;
         let snapshot = super::super::InputSnapshot::capture(&config);

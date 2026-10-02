@@ -1,9 +1,9 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::fs;
 
 use crate::config::LensConfig;
+use crate::contracts::{ArtifactReadError, read_current};
 use crate::facts::{FunctionFact, RunContext};
 use crate::measurement::project_relative_path;
 use crate::util::round2;
@@ -63,35 +63,27 @@ struct CoverageLoad {
 
 fn load_coverage(config: &LensConfig, current: &Value) -> CoverageLoad {
     let path = config.output_dir.join("coverage.json");
-    let Ok(contents) = fs::read_to_string(path) else {
-        return CoverageLoad {
-            document: None,
-            complete: false,
-            missing: vec!["coverage.json is missing".to_string()],
-            stale: Vec::new(),
-        };
+    let coverage = match read_current(&path, "coverage.json", current) {
+        Ok(coverage) => coverage,
+        Err(error) => {
+            return CoverageLoad {
+                document: None,
+                complete: false,
+                missing: vec![match error {
+                    ArtifactReadError::Missing => "coverage.json is missing".to_string(),
+                    ArtifactReadError::Malformed => "coverage.json is malformed".to_string(),
+                    ArtifactReadError::Incompatible(reason) => {
+                        format!("coverage.json is incompatible: {reason}")
+                    }
+                }],
+                stale: Vec::new(),
+            };
+        }
     };
-    let Ok(document) = serde_json::from_str::<Value>(&contents) else {
-        return CoverageLoad {
-            document: None,
-            complete: false,
-            missing: vec!["coverage.json is malformed".to_string()],
-            stale: Vec::new(),
-        };
-    };
-    if let Err(error) = crate::contracts::validate_artifact("coverage.json", &document) {
-        return CoverageLoad {
-            document: None,
-            complete: false,
-            missing: vec![format!("coverage.json is incompatible: {error}")],
-            stale: Vec::new(),
-        };
-    }
-    let stale =
-        crate::fingerprint::freshness(&document, current) != crate::fingerprint::Freshness::Current;
-    let coverage_complete = document["measurement_confidence"]["complete"] == true;
+    let stale = !coverage.current;
+    let coverage_complete = coverage.complete;
     CoverageLoad {
-        document: (!stale).then_some(document),
+        document: (!stale).then_some(coverage.document),
         complete: coverage_complete && !stale,
         missing: if coverage_complete {
             Vec::new()

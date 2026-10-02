@@ -1,5 +1,5 @@
 use super::{changed_line_coverage, diff, git_diff};
-use crate::{config::LensConfig, util::write_json};
+use crate::{test_support::source_project, util::write_json};
 use anyhow::Result;
 use serde_json::json;
 use std::{fs, process::Command};
@@ -39,12 +39,7 @@ fn git_quoted_unicode_filename_is_included_in_scope() -> Result<()> {
 
 #[test]
 fn covered_context_does_not_inflate_changed_line_coverage() -> Result<()> {
-    let root = tempfile::tempdir()?;
-    fs::create_dir(root.path().join("src"))?;
-    fs::write(root.path().join("src/lib.rs"), "pub fn value() {}\n")?;
-    let config_path = root.path().join("rqlens.toml");
-    fs::write(&config_path, "source_roots = [\"src\"]\n")?;
-    let config = LensConfig::load(Some(config_path))?;
+    let (_root, config) = source_project(Some("pub fn value() {}\n"))?;
     let coverage = json!({
         "schema_version": 3,
         "risk_model_version": crate::measurement::MODEL_VERSION,
@@ -65,6 +60,24 @@ fn covered_context_does_not_inflate_changed_line_coverage() -> Result<()> {
     assert_eq!(evidence["changed_executable_lines"], 1);
     assert_eq!(evidence["changed_covered_lines"], 0);
     assert_eq!(evidence["changed_line_coverage_percent"], 0.0);
+    let mut coverage = coverage;
+    coverage["measurement_confidence"] = json!({"complete": false, "partial": true});
+    write_json(&config.output_dir.join("coverage.json"), &coverage)?;
+    assert_eq!(
+        changed_line_coverage(&config, &scope.additions, &config.input_fingerprint())["status"],
+        "partial"
+    );
+    coverage["input_fingerprint"]["digest"] = json!("stale");
+    write_json(&config.output_dir.join("coverage.json"), &coverage)?;
+    assert_eq!(
+        changed_line_coverage(&config, &scope.additions, &config.input_fingerprint())["status"],
+        "stale"
+    );
+    fs::write(config.output_dir.join("coverage.json"), "invalid JSON")?;
+    assert_eq!(
+        changed_line_coverage(&config, &scope.additions, &config.input_fingerprint())["status"],
+        "unavailable"
+    );
     Ok(())
 }
 

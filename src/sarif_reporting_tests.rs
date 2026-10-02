@@ -1,15 +1,13 @@
 use super::{add_source_findings, annotate_result};
-use crate::config::{LensConfig, PolicyWaiver};
+use crate::config::PolicyWaiver;
+use crate::test_support::source_project;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, fs};
+use std::collections::BTreeMap;
 
 #[test]
 fn common_report_cases_preserve_disposition_and_waivers() -> Result<()> {
-    let root = tempfile::tempdir()?;
-    let file = root.path().join("rqlens.toml");
-    fs::write(&file, "source_roots = ['src']\n")?;
-    let mut config = LensConfig::load(Some(file))?;
+    let (_root, mut config) = source_project(None)?;
     let cases: Vec<Value> =
         serde_json::from_str(include_str!("../contracts/reporting-cases.json"))?;
     for case in cases {

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs;
@@ -243,19 +244,26 @@ pub(crate) fn comparisons(
     }).collect()
 }
 
+#[derive(serde::Deserialize)]
+struct ConfidenceInterval {
+    lower_bound: f64,
+    upper_bound: f64,
+    confidence_level: f64,
+}
+
 fn interval(record: &BenchmarkRecord) -> Option<(f64, f64, f64)> {
     if record.details.get("samples")?.as_u64()? < 3 {
         return None;
     }
-    let interval = record.details.get("confidence_interval")?;
-    let low = interval["lower_bound"].as_f64()?;
-    let high = interval["upper_bound"].as_f64()?;
-    let level = interval["confidence_level"].as_f64()?;
+    let ConfidenceInterval {
+        lower_bound: low,
+        upper_bound: high,
+        confidence_level: level,
+    } = ConfidenceInterval::deserialize(record.details.get("confidence_interval")?).ok()?;
     (low.is_finite()
         && high.is_finite()
         && low > 0.0
-        && low <= record.estimate_nanoseconds
-        && high >= record.estimate_nanoseconds
+        && (low..=high).contains(&record.estimate_nanoseconds)
         && (0.0..1.0).contains(&level)
         && level > 0.0)
         .then_some((low, high, level))
@@ -406,9 +414,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (120.0, 115.0, 125.0, "same", "regressed"),
             (102.0, 97.0, 107.0, "same", "within_noise"),
             (120.0, 115.0, 125.0, "other", "incomparable"),
+            (80.0, 75.0, 85.0, "same", "improved"),
+            (100.0, 100.0, 100.0, "same", "within_noise"),
+            (100.0, 0.0, 105.0, "same", "incomparable"),
+            (100.0, 110.0, 90.0, "same", "incomparable"),
         ] {
             let current = super::benchmark_records(&record(estimate, low, high, host))?;
             assert_eq!(comparisons(&current, &base)?[0]["direction"], expected);
+        }
+        for level in [json!(0), json!(1), json!(null), json!("0.95")] {
+            let mut value = record(100.0, 95.0, 105.0, "same");
+            value[0]["confidence_interval"]["confidence_level"] = level;
+            let current = super::benchmark_records(&value)?;
+            assert!(super::interval(&current[0]).is_none());
         }
         Ok(())
     }

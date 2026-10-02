@@ -1,5 +1,9 @@
 # Cross-lens upgrade execution
 
+## Current refactoring: self-measured quality
+
+Frozen-evaluator measurements reduce token-clone groups 111→88, duplicated lines 1,641→1,382, and measured source lines 22,492→22,462. Cyclomatic/cognitive sums fall 3,223→3,214 and 1,387→1,383; maxima remain 20/11. Shared fixture and current-artifact boundaries improve reuse and selected locality scores, with explicit per-module trade-offs. All 19 artifact schemas and catalog output are unchanged. See `docs/self-refactoring.md` and `acceptance/self-refactoring-results.json` for measurements, repeatability limits and validation. No calibrated effort estimate, T4 closure or release permission is claimed.
+
 ## Current research: compiler cfg/target contexts
 
 `acceptance/self_compiler_profile.py` instruments a fresh self-only Cargo check and records actual primary-unit rustc arguments and cfg probes. All 11 expected normal/test contexts compile and probe successfully without source changes. Four new Python regressions cover context coverage, mismatched/failed evidence, probe selection and unchanged delegated compiler arguments. This is a POSIX acceptance experiment, not production cfg evaluation, ownership resolution or T4 certification. See `docs/self-compiler-profile.md` and `acceptance/self-compiler-profile-results.json`.

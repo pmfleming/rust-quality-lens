@@ -1,0 +1,191 @@
+{
+  "parent_revision": "80d0798e7f4fbd5e3a5758f55479ed43540ef426",
+  "scope": [
+    "src",
+    "rust_helpers/src",
+    "tests/cli.rs"
+  ],
+  "fixed_evaluator_sha256": "2588473be3394c992ce9fc483aed6c78b63d74de34393145923b2828e46e8fb8",
+  "candidate_sha256": "49527c77f4997a244c57a692fc776f9879d156d2992b73e7f9306f6c1b72c049",
+  "before": {
+    "source_nonblank_lines": 22492.0,
+    "function_count": 991,
+    "cyclomatic_sum": 3223,
+    "cognitive_sum": 1387,
+    "cyclomatic_max": 20,
+    "cognitive_max": 11,
+    "maximum_function_hotspot": 69.55,
+    "token_clone_groups": 111,
+    "ast_clone_groups": 0,
+    "duplicated_lines": 1641,
+    "duplication_percent": 7.3
+  },
+  "after": {
+    "source_nonblank_lines": 22462.0,
+    "function_count": 997,
+    "cyclomatic_sum": 3214,
+    "cognitive_sum": 1383,
+    "cyclomatic_max": 20,
+    "cognitive_max": 11,
+    "maximum_function_hotspot": 69.5,
+    "token_clone_groups": 88,
+    "ast_clone_groups": 0,
+    "duplicated_lines": 1382,
+    "duplication_percent": 6.15
+  },
+  "functions": {
+    "before": {
+      "performance::interval": {
+        "score": 69.55,
+        "cyclomatic_complexity": 14,
+        "cognitive_complexity": 2,
+        "sloc": 17
+      },
+      "review::changed_line_coverage": {
+        "score": 68.6,
+        "cyclomatic_complexity": 8,
+        "cognitive_complexity": 10,
+        "sloc": 49
+      },
+      "semantic::detached_rust_project": {
+        "score": 67.82,
+        "cyclomatic_complexity": 10,
+        "cognitive_complexity": 11,
+        "sloc": 73
+      }
+    },
+    "final-frozen": {
+      "performance::interval": {
+        "score": 54.88,
+        "cyclomatic_complexity": 11,
+        "cognitive_complexity": 2,
+        "sloc": 17
+      },
+      "semantic::detached_rust_project": {
+        "score": 53.37,
+        "cyclomatic_complexity": 8,
+        "cognitive_complexity": 5,
+        "sloc": 67
+      },
+      "review::changed_line_coverage": {
+        "score": 49.17,
+        "cyclomatic_complexity": 10,
+        "cognitive_complexity": 5,
+        "sloc": 52
+      }
+    }
+  },
+  "topology": {
+    "locality_score": {
+      "module_counts": [
+        89,
+        91
+      ],
+      "all_module_means": [
+        97.48876404494382,
+        97.58516483516483
+      ],
+      "same_module_means": [
+        97.48876404494382,
+        97.53089887640449
+      ],
+      "changes": [
+        {
+          "module": "rust-quality-lens::rqlens::config",
+          "before": 70.75,
+          "after": 72.25
+        },
+        {
+          "module": "rust-quality-lens::rqlens::contracts::current",
+          "before": null,
+          "after": 100.0
+        },
+        {
+          "module": "rust-quality-lens::rqlens::policy::tests",
+          "before": 97.0,
+          "after": 94.0
+        },
+        {
+          "module": "rust-quality-lens::rqlens::producers::function_risk",
+          "before": 97.0,
+          "after": 100.0
+        },
+        {
+          "module": "rust-quality-lens::rqlens::review",
+          "before": 85.0,
+          "after": 88.0
+        },
+        {
+          "module": "rust-quality-lens::rqlens::test_support",
+          "before": null,
+          "after": 100.0
+        },
+        {
+          "module": "rust-quality-lens::rqlens::tool",
+          "before": 98.5,
+          "after": 97.75
+        }
+      ]
+    },
+    "leverage_score": {
+      "module_counts": [
+        89,
+        91
+      ],
+      "all_module_means": [
+        22.247191011235955,
+        22.63736263736264
+      ],
+      "same_module_means": [
+        22.247191011235955,
+        22.02247191011236
+      ],
+      "changes": [
+        {
+          "module": "rust-quality-lens::rqlens::contracts::current",
+          "before": null,
+          "after": 20.0
+        },
+        {
+          "module": "rust-quality-lens::rqlens::contracts::validation",
+          "before": 80.0,
+          "after": 70.0
+        },
+        {
+          "module": "rust-quality-lens::rqlens::fingerprint",
+          "before": 70.0,
+          "after": 60.0
+        },
+        {
+          "module": "rust-quality-lens::rqlens::test_support",
+          "before": null,
+          "after": 80.0
+        }
+      ]
+    }
+  },
+  "validation": {
+    "normal_workspace_tests": 193,
+    "live_tests": 2,
+    "python_tests": 14,
+    "format": true,
+    "strict_clippy": true,
+    "docs": true,
+    "package_smoke": true,
+    "unchanged_self_gates": true,
+    "unchanged_catalog": true,
+    "unchanged_artifact_schemas": 19,
+    "focused_repeated_commands": 8,
+    "focused_matching_comparisons": 4,
+    "fixed_and_candidate_metric_records_equal": true
+  },
+  "limitations": [
+    "No calibrated effort metric exists in these outputs; no effort estimate is claimed.",
+    "Cognitive and cyclomatic maxima remain 11 and 20; both sums decline, including added regression assertions.",
+    "Overall topology means include two new modules. Same-module leverage declines as duplicate direct callers move behind a shared boundary. Policy test locality and tool locality regress; see per-module changes.",
+    "Two measure-all runs are not identical: correctness-run duration/stdout and runtime coverage vary, propagating into map. Only the four focused requested metrics are claimed exactly repeatable; normalization removes generated_at/measured_at only.",
+    "Fixed/candidate differential metric comparison excludes command provenance because executable paths differ. The numeric records and confidence agree.",
+    "Syntax/semantic abstention remains; no T4 closure or release authorization. No source scope, scoring weights, clone thresholds, or budgets changed."
+  ],
+  "raw_evidence": "target/self-improve"
+}

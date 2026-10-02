@@ -1,15 +1,10 @@
 use super::RunContext;
-use crate::{config::LensConfig, tool::MeasureTool};
+use crate::{test_support::source_project, tool::MeasureTool};
 use serde_json::json;
 
 #[test]
 fn run_context_reuses_inventory_graph_and_artifact_fingerprint() -> anyhow::Result<()> {
-    let root = tempfile::tempdir()?;
-    std::fs::create_dir(root.path().join("src"))?;
-    std::fs::write(root.path().join("src/lib.rs"), "pub fn value() {}")?;
-    let path = root.path().join("rqlens.toml");
-    std::fs::write(&path, "source_roots = [\"src\"]\n")?;
-    let config = LensConfig::load(Some(path))?;
+    let (root, config) = source_project(Some("pub fn value() {}"))?;
     // No helper invocation is necessary to verify snapshot and lazy-cache behavior.
     let context = RunContext::new(&config, &[])?;
     assert_eq!(context.source_files.len(), 1);

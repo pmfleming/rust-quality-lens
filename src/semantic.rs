@@ -971,17 +971,11 @@ fn detached_rust_project(config: &LensConfig, facts: &[FileFacts]) -> Result<Opt
             let mut seen_packages = std::collections::BTreeSet::new();
             let deps = dependency_roots
                 .iter()
-                .filter(|(candidate, package, kind)| {
-                    if *candidate == index {
-                        return false;
-                    }
-                    if package == &fact.package_name {
-                        return fact.target_kind != "lib"
-                            && kind == "lib"
-                            && seen_packages.insert(package.clone());
-                    }
-                    seen_packages.insert(package.clone())
+                .filter(|(candidate, _, _)| *candidate != index)
+                .filter(|(_, package, kind)| {
+                    package != &fact.package_name || (fact.target_kind != "lib" && kind == "lib")
                 })
+                .filter(|(_, package, _)| seen_packages.insert(package.clone()))
                 .map(|(candidate, package, _)| {
                     json!({"crate": candidate, "name": package.replace('-', "_")})
                 })

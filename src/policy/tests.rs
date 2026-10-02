@@ -9,13 +9,7 @@ use std::{
 };
 
 fn fixture() -> anyhow::Result<(tempfile::TempDir, LensConfig)> {
-    let root = tempfile::tempdir()?;
-    fs::create_dir(root.path().join("src"))?;
-    fs::write(root.path().join("src/lib.rs"), "pub fn value() {}")?;
-    let path = root.path().join("rqlens.toml");
-    fs::write(&path, "source_roots = [\"src\"]\n")?;
-    let config = LensConfig::load(Some(path))?;
-    Ok((root, config))
+    crate::test_support::source_project(Some("pub fn value() {}"))
 }
 
 fn document(config: &LensConfig, tool: &str, data: Value) -> Value {

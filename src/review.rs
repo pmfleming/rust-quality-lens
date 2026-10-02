@@ -1,5 +1,7 @@
 use crate::config::LensConfig;
-use crate::contracts::{ReviewEntrypoint, ReviewMeasurement, ReviewOutput, ReviewScope};
+use crate::contracts::{
+    ArtifactReadError, ReviewEntrypoint, ReviewMeasurement, ReviewOutput, ReviewScope,
+};
 use crate::facts::FileFacts;
 use crate::facts::RunContext;
 use crate::producers::produce_measurement;
@@ -196,41 +198,44 @@ fn changed_line_coverage(
     current: &serde_json::Value,
 ) -> serde_json::Value {
     let path = config.output_dir.join("coverage.json");
-    let Ok(text) = fs::read_to_string(&path) else {
-        return serde_json::json!({"status": "unavailable", "reason": "coverage.json is missing"});
+    let coverage = match crate::contracts::read_current(&path, "coverage.json", current) {
+        Ok(coverage) => coverage,
+        Err(error) => {
+            let reason = match error {
+                ArtifactReadError::Missing => "coverage.json is missing".to_string(),
+                ArtifactReadError::Malformed => "coverage.json is invalid".to_string(),
+                ArtifactReadError::Incompatible(reason) => reason,
+            };
+            return serde_json::json!({"status": "unavailable", "reason": reason});
+        }
     };
-    let Ok(document) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return serde_json::json!({"status": "unavailable", "reason": "coverage.json is invalid"});
-    };
-    if let Err(error) = crate::contracts::validate_artifact("coverage.json", &document) {
-        return serde_json::json!({"status": "unavailable", "reason": error.to_string()});
-    }
-    if crate::fingerprint::freshness(&document, current) != crate::fingerprint::Freshness::Current {
+    if !coverage.current {
         return serde_json::json!({"status": "stale", "reason": "coverage inputs do not match the current source"});
     }
-    if document["measurement_confidence"]["complete"] != true {
+    if !coverage.complete {
         return serde_json::json!({"status": "partial", "reason": "coverage measurement is incomplete"});
     }
-    let data = &document["data"];
-    let mut executable = 0u64;
-    let mut covered = 0u64;
-    for file in data["files"].as_array().into_iter().flatten() {
-        let Some(file_ranges) = file["path"].as_str().and_then(|path| ranges.get(path)) else {
-            continue;
-        };
-        for hit in file["line_hits"].as_array().into_iter().flatten() {
-            let Some(line) = hit["line"].as_u64() else {
-                continue;
-            };
-            if file_ranges
-                .iter()
-                .any(|range| line >= range[0] && line <= range[1])
-            {
-                executable += 1;
-                covered += u64::from(hit["covered"] == true);
-            }
-        }
-    }
+    let changed_hits = coverage.document["data"]["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|file| Some((file, ranges.get(file["path"].as_str()?)?)))
+        .flat_map(|(file, ranges)| {
+            file["line_hits"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(move |hit| {
+                    hit["line"].as_u64().is_some_and(|line| {
+                        ranges
+                            .iter()
+                            .any(|range| (range[0]..=range[1]).contains(&line))
+                    })
+                })
+        });
+    let (executable, covered) = changed_hits.fold((0u64, 0u64), |(total, covered), hit| {
+        (total + 1, covered + u64::from(hit["covered"] == true))
+    });
     serde_json::json!({
         "status": "observed",
         "changed_executable_lines": executable,

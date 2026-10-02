@@ -33,6 +33,8 @@ mod risk_model;
 mod sarif;
 mod semantic;
 mod telemetry;
+#[cfg(test)]
+mod test_support;
 mod tool;
 mod toolchain;
 mod util;

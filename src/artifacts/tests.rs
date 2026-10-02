@@ -1,16 +1,11 @@
 use super::read_artifact;
-use crate::config::LensConfig;
+use crate::test_support::source_project;
 use serde_json::json;
 use std::fs;
 
 #[test]
 fn map_uses_content_fingerprints_instead_of_artifact_timestamps() -> anyhow::Result<()> {
-    let root = tempfile::tempdir()?;
-    fs::create_dir(root.path().join("src"))?;
-    fs::write(root.path().join("src/lib.rs"), "pub fn value() {}")?;
-    let config_path = root.path().join("rqlens.toml");
-    fs::write(&config_path, "source_roots = [\"src\"]\n")?;
-    let config = LensConfig::load(Some(config_path))?;
+    let (root, config) = source_project(Some("pub fn value() {}"))?;
     let fingerprint = config.input_fingerprint();
     let mut document = json!({
         "schema_version": 3, "risk_model_version": crate::measurement::MODEL_VERSION,
