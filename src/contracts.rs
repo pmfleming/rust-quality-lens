@@ -344,7 +344,27 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "summary": {"type": "object"},
                 "backend": {"const": "rust-analyzer/expandMacro"},
                 "scope": {"type": "string"},
-                "expansions": {"type": "array", "items": {"type": "object"}},
+                "expansions": {"type": "array", "items": {
+                    "type": "object", "required": ["generated_syntax"],
+                    "properties": {"generated_syntax": {
+                        "type": ["object", "null"], "additionalProperties": false,
+                        "required": ["parsed", "reason", "declarations"],
+                        "properties": {
+                            "parsed": {"type": "boolean"}, "reason": {"type": ["string", "null"]},
+                            "declarations": {"type": "array", "items": {
+                                "type": "object", "additionalProperties": false,
+                                "required": ["kind", "name", "start_byte", "end_byte", "observed_field_count"],
+                                "properties": {
+                                    "kind": {"enum": ["struct", "enum", "function", "impl-method", "trait-method"]},
+                                    "name": {"type": "string", "minLength": 1},
+                                    "start_byte": {"type": "integer", "minimum": 0},
+                                    "end_byte": {"type": "integer", "minimum": 0},
+                                    "observed_field_count": {"type": ["integer", "null"], "minimum": 0}
+                                }
+                            }}
+                        }
+                    }}
+                }},
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),

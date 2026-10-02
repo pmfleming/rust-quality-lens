@@ -1,6 +1,6 @@
 # Source expansion observations (experimental)
 
-This is the first implementation stage toward the required self-analysis scope,
+This implements expansion responses and bounded generated-syntax observations toward the required self-analysis scope,
 **not a completed compiler-backed fact pipeline or a T4 pass**.
 
 ```sh
@@ -24,12 +24,38 @@ from `measure all`. Ordinary measurements do not request these expansions.
   Cargo features, no-default-features and all-targets come from `[verification]`.
 - `identity_resolution = "disabled"` launches no analyzer. In `auto`, missing
   tools/replies remain explicit unavailable observations. `required` rejects an
-  incomplete request inventory or missing replies without replacing prior output.
+  incomplete request inventory, missing replies or unparsed fragments without
+  replacing prior output.
 - `identity_build_macros` remains the explicit opt-in for rust-analyzer build
   scripts/procedural macros. Declarative expansion does not enable that permission.
   This is not a project-code sandbox.
 - Empty expansion text is distinct from an absent/invalid response. Missing
   helper inventory metadata and recovered syntax cannot certify an empty scope.
+
+## Generated syntax observations
+
+Each successful reply now contains `generated_syntax`. `parsed: true` means `syn`
+accepted the complete fragment in its item or impl-item context. Declarations
+record struct/enum names, observed field counts, free functions, impl methods and
+trait methods. They are **observations**, not a compiled inventory or lower bound.
+Unions, aliases and macro token bodies are not declaration records in this view.
+
+`start_byte`/`end_byte` are half-open UTF-8 ranges in **expanded_source**, including
+any declaration attributes. They are never offsets in the authored file. The impl
+parser uses a synthetic enclosing impl, subtracts its prefix from ranges and never
+exports that artificial owner. Text cannot escape this wrapper into sibling items.
+Native validation reparses the text and rejects changed observations or ranges.
+
+Parsing is bounded to 65,536 bytes and 128 conservative lexical chunks (an
+alphanumeric run or a non-whitespace punctuation character). Comments and literals
+also count: this deliberately rejects some valid large expansions. `parsed: false`
+retains an explicit syntax/budget reason and empty observations mean **unknown**,
+not zero declarations. Missing backend text instead has `generated_syntax: null`.
+A valid empty expansion is distinct: it parses successfully with no declarations.
+
+No ownership joins, source safety rationales or pressure scores are inferred from
+this text. The existing type-health artifact remains untouched. Remeasure older
+successful source-expansion artifacts: they lack required syntax observations.
 
 ## What the result does NOT establish
 
@@ -43,7 +69,7 @@ populate authoritative type-health totals/scores. Existing artifacts are not
 rewritten using the returned text. There is no expansion cache or reuse contract.
 
 Expression/statement, attribute and derive requests are not comprehensively
-inventoried by this first stage. A zero request count therefore says nothing
+inventoried by this profile. A zero request count therefore says nothing
 about their absence. `syntax_target` is a syntax inventory label, not verified
 compiler ownership. Backend configuration is not proof of effective cfg values.
 
@@ -51,8 +77,9 @@ compiler ownership. Backend configuration is not proof of effective cfg values.
 
 1. Establish effective cfg and target/feature contexts, including test variants
    and build-script cfg; preserve inactive versus unsupported scope explicitly.
-2. Parse/validate expansions with hygiene and generated-source provenance rather
-   than treating pretty-printed text as an ordinary source file.
+2. Extend bounded syntactic observations to compiler-backed hygiene and origin
+   maps; handle recursive and currently declined expansions without treating
+   pretty-printed text as an ordinary authored source file.
 3. Resolve impl owners and merge generated/authored facts without double counting,
    changing score meaning, or inventing source locations/safety documentation.
 4. Promote completeness only when all required evidence is covered. Then rerun

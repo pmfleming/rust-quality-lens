@@ -67,6 +67,10 @@ fn response_success_cannot_certify_semantic_inventory() -> Result<()> {
     };
     let mut wire = serde_json::to_value(report)?;
     validate(&wire)?;
+    let original = wire["expansions"][0]["generated_syntax"].clone();
+    wire["expansions"][0]["generated_syntax"]["declarations"][0]["name"] = json!("Invented");
+    assert!(validate(&wire).is_err());
+    wire["expansions"][0]["generated_syntax"] = original;
     wire["summary"]["semantic_inventory_complete"] = json!(true);
     assert!(validate(&wire).is_err());
     wire["summary"]["semantic_inventory_complete"] = json!(false);
@@ -84,6 +88,38 @@ fn missing_or_recovered_inventory_is_not_known_empty() {
     assert!(!inventory_complete(std::slice::from_ref(&fact), 2));
     fact.parse_status = "recovered".into();
     assert!(!inventory_complete(&[fact], 1));
+}
+
+#[test]
+fn generated_fragments_are_context_checked() -> Result<()> {
+    for (kind, text, parsed) in [
+        (MacroContext::Item, "", true),
+        (MacroContext::Item, "struct Broken {", false),
+        (MacroContext::Impl, "pub fn answer(&self) {}", true),
+        (MacroContext::Impl, "struct NotAnImplItem;", false),
+        (MacroContext::Impl, "} struct Escaped; impl Other {", false),
+    ] {
+        let syntax = serde_json::to_value(super::generated::parse(text, &kind))?;
+        assert_eq!(syntax["parsed"], parsed);
+        if !parsed {
+            assert_eq!(syntax["declarations"], json!([]));
+        }
+    }
+    let text = "/* é😀 */ struct Café { a: u8 }";
+    let syntax = serde_json::to_value(super::generated::parse(text, &MacroContext::Item))?;
+    assert_eq!(syntax["declarations"][0]["start_byte"], "/* é😀 */ ".len());
+    assert_eq!(syntax["declarations"][0]["end_byte"], text.len());
+    assert_eq!(syntax["declarations"][0]["observed_field_count"], 1);
+    for text in [
+        " ".repeat(65_537),
+        format!("fn f() {{ {}0; }}", "return ".repeat(128)),
+    ] {
+        let syntax = serde_json::to_value(super::generated::parse(&text, &MacroContext::Item))?;
+        assert_eq!(syntax["parsed"], false);
+        assert_eq!(syntax["reason"], "fragment parser budget exceeded");
+        assert_eq!(syntax["declarations"], json!([]));
+    }
+    Ok(())
 }
 
 #[test]

@@ -1,0 +1,146 @@
+{
+  "stage": "bounded generated-syntax observations; T4 remains failed",
+  "provenance": {
+    "lens": {
+      "head": "5fb23e677cc52af2e2445b35d5f153b0a4910755",
+      "dirty": true,
+      "files_sha256": "00483474efa0f138f19d43dc1ca8f3c03c108a19cdecbbb96a75593a477ade7e"
+    },
+    "binary_sha256": "12777609355d5cff9f62e73a189aa1e8b9c45abc8bbe6dae69a7f29fd7caa6f1",
+    "normalization": [
+      "generated_at",
+      "measured_at"
+    ],
+    "tools": [
+      "hotspots",
+      "clones",
+      "escape-hatches",
+      "type-health",
+      "reliability",
+      "test-quality",
+      "api-health",
+      "correctness",
+      "locality",
+      "leverage",
+      "module-cohesion",
+      "architecture-rules",
+      "map",
+      "source-expansion"
+    ]
+  },
+  "normal_tests": 193,
+  "live_tests": 2,
+  "python_tests": 10,
+  "commands_passed": 196,
+  "comparisons_passed": 98,
+  "t3_partial_rows": 978,
+  "self_expanded_sites": 9,
+  "self_parsed_sites": 9,
+  "self_generated_declarations": 9,
+  "self_repeatable": true,
+  "daemon_syntax": [
+    {
+      "project": "app-daemon",
+      "expanded_sites": 5,
+      "parsed_sites": 2,
+      "declarations": 2,
+      "declined_reasons": [
+        "fragment parser budget exceeded"
+      ]
+    },
+    {
+      "project": "bar-daemon",
+      "expanded_sites": 8,
+      "parsed_sites": 1,
+      "declarations": 1,
+      "declined_reasons": [
+        "fragment parser budget exceeded"
+      ]
+    },
+    {
+      "project": "bt-daemon",
+      "expanded_sites": 7,
+      "parsed_sites": 2,
+      "declarations": 2,
+      "declined_reasons": [
+        "fragment parser budget exceeded"
+      ]
+    },
+    {
+      "project": "clip-daemon",
+      "expanded_sites": 5,
+      "parsed_sites": 3,
+      "declarations": 3,
+      "declined_reasons": [
+        "fragment parser budget exceeded"
+      ]
+    },
+    {
+      "project": "nm-daemon",
+      "expanded_sites": 8,
+      "parsed_sites": 3,
+      "declarations": 4,
+      "declined_reasons": [
+        "fragment parser budget exceeded",
+        "invalid item/impl fragment syntax"
+      ]
+    },
+    {
+      "project": "update-daemon",
+      "expanded_sites": 0,
+      "parsed_sites": 0,
+      "declarations": 0,
+      "declined_reasons": []
+    },
+    {
+      "project": "daemon-framework",
+      "expanded_sites": 0,
+      "parsed_sites": 0,
+      "declarations": 0,
+      "declined_reasons": []
+    }
+  ],
+  "self_metrics": {
+    "score": 69.55,
+    "cyclomatic_complexity": 20,
+    "cognitive_complexity": 11
+  },
+  "source_lines": 22492.0,
+  "policy": {
+    "passed": false,
+    "failed_policies": [
+      "configured-rules",
+      "partial",
+      "reliability-finding",
+      "test-failure"
+    ],
+    "stale_artifacts": [],
+    "test_failures": [],
+    "practice_failures": []
+  },
+  "helper_refactor_parity": {
+    "unchanged_fixture_files": 16,
+    "unchanged_error_and_recovery_cases": 2
+  },
+  "notes": [
+    "Compiler cfg/target ownership, hygiene and metric integration remain unsupported. No confidence promotion or budget/scope changes.",
+    "Larger valid daemon expansions remain unparsed under the conservative parser budget; missing observations are not known zero.",
+    "T3 auditor now accepts optional tools only in addition to all thirteen required tools, with exactly two successful measurements of each. Historical campaign still passes.",
+    "Source inventory is the frozen working implementation on 5fb23e6; later acceptance script/report/docs changes are not executable inputs."
+  ],
+  "raw_evidence": "target/trust-t4-generated",
+  "passed_native_checks": [
+    "format",
+    "helper parity",
+    "workspace tests",
+    "strict Clippy",
+    "live expansion fixture",
+    "live identity fixture",
+    "docs",
+    "packaged external fixture",
+    "verify",
+    "measure all",
+    "unchanged self-metric gates"
+  ],
+  "t4_passed": false
+}

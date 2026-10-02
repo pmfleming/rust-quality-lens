@@ -1,6 +1,14 @@
 # Cross-lens upgrade execution
 
-## Current implementation: source-expansion observations
+## Current implementation: bounded generated syntax
+
+Expansion replies now yield context-checked declaration observations with UTF-8 ranges in the returned text. All nine self visitor fragments parse; native validation rejects altered observations and synthetic impl-wrapper escapes. Larger/deeper text is explicitly declined under a conservative parser budget, not counted as empty. No generated observations enter authoritative type-health totals or scores yet.
+
+Validation: 193 normal tests, two live fixtures, ten Python tests, package smoke and unchanged self-metric gates pass (22,492/22,500 source lines). The seven-project campaign passes 196 commands and 98 comparisons; all 978 T3 partial type rows retain abstention and all project sources remain unchanged. Helper serialization refactoring preserves 16 fixture outputs and both read-error/recovery cases. See `acceptance/generated-syntax-results.json`.
+
+**T4 remains failed.** Compiler cfg/target binding, hygiene, owner joins and metric integration are still missing. Strict policy rejects partial evidence; declared clean/platform CI is not certified. This milestone grants no release permission.
+
+## Previous implementation: source-expansion observations
 
 The opt-in `measure source-expansion` producer captures rust-analyzer item/impl macro text with invocation provenance and explicit unavailable/disabled states. All nine self-analysis visitor sites return expansions; 14 daemon/framework runs cover 33 sites with matching repeated artifacts and unchanged project sources. Native validation passes 192 normal tests plus both live macro fixtures; unchanged self-metric gates pass.
 

@@ -138,6 +138,20 @@ fn live_item_and_impl_expansions_preserve_origins_and_abstention() -> Result<()>
         .context("missing expansions")?;
     assert_eq!(entries[0]["source"]["kind"], "item");
     assert_eq!(entries[1]["source"]["kind"], "impl");
+    for (entry, name, kind) in [
+        (&entries[0], "Generated", "struct"),
+        (&entries[1], "answer", "impl-method"),
+    ] {
+        assert_eq!(entry["generated_syntax"]["parsed"], true);
+        let declaration = &entry["generated_syntax"]["declarations"][0];
+        assert_eq!(declaration["name"], name);
+        assert_eq!(declaration["kind"], kind);
+        let text = entry["expanded_source"].as_str().context("text")?;
+        let start = declaration["start_byte"].as_u64().context("start")? as usize;
+        let end = declaration["end_byte"].as_u64().context("end")? as usize;
+        assert!(text.get(start..end).is_some_and(|body| body.contains(name)));
+        assert!(!entry.to_string().contains("__RqlensFragment"));
+    }
     assert!(
         entries[0]["expanded_source"]
             .as_str()

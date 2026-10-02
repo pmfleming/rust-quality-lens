@@ -8,8 +8,9 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from collections import Counter
 
-from trust_campaign import PROJECTS, TOOLS, normalize
+from trust_campaign import PROJECTS, TOOLS, ALL_TOOLS, normalize
 
 UNKNOWN = ('method_count', 'impl_block_count', 'impl_file_count', 'structural_risk', 'structural_score')
 OBSERVED = ('observed_method_count', 'observed_impl_block_count', 'observed_impl_file_count')
@@ -52,6 +53,17 @@ def validate_semantics(document):
             require(partial(nested), 'payload contradicts partial semantic envelope')
 
 
+def validated_tools(commands):
+    measured = Counter()
+    for entry in commands:
+        command = entry['command']
+        require(entry['exit_code'] == 0 and len(command) >= 3 and command[1] == 'measure', 'missing/failed measurement command')
+        measured[command[2]] += 1
+    require(set(TOOLS) <= set(measured) <= set(ALL_TOOLS), 'missing required or unknown tools')
+    require(all(count == 2 for count in measured.values()), 'each selected tool must run exactly twice')
+    return {tool: filename for tool, filename in ALL_TOOLS.items() if tool in measured}
+
+
 def check(campaign):
     load = lambda path: json.loads(path.read_text())
     provenance = load(campaign / 'provenance.json')
@@ -63,8 +75,8 @@ def check(campaign):
         directory = campaign / project
         summary = load(directory / 'summary.json')
         require(summary['passed'] and summary['before'] == summary['after'], f'{project}: failed/changed inputs')
-        require(len(summary['commands']) == 2 * len(TOOLS) and all(c['exit_code'] == 0 for c in summary['commands']), f'{project}: missing/failed commands')
-        for filename in TOOLS.values():
+        tools = validated_tools(summary['commands'])
+        for filename in tools.values():
             first, second = (load(directory / f'run-{n}' / filename) for n in (1, 2))
             require(normalize(first) == normalize(second), f'{project}: nondeterministic {filename}')
             for document in (first, second):
@@ -77,7 +89,7 @@ def check(campaign):
             reasons = document['measurement_confidence']['unsupported_pattern']
             require(any('unexpanded item macro usage_fields!' in reason for reason in reasons), 'app macro omission lost its explicit reason')
             require(GENERATED.isdisjoint(row['type_name'] for row in document['records']), 'update expectations for newly expanded generated types')
-        results.append({'project': project, 'revision': summary['before']['head'], 'source_sha256': summary['before']['files_sha256'], 'source_stable': True, 'commands_passed': len(summary['commands']), 'artifacts_equal': len(TOOLS), 'partial_type_rows': len(document['records']), 'type_abstention_reasons': len(document['measurement_confidence']['unsupported_pattern'])})
+        results.append({'project': project, 'revision': summary['before']['head'], 'source_sha256': summary['before']['files_sha256'], 'source_stable': True, 'commands_passed': len(summary['commands']), 'artifacts_equal': len(tools), 'partial_type_rows': len(document['records']), 'type_abstention_reasons': len(document['measurement_confidence']['unsupported_pattern'])})
     return {'status': 'passed', 'binary_sha256': provenance['binary_sha256'], 'analyzer_source': provenance['lens'], 'results': results}
 
 

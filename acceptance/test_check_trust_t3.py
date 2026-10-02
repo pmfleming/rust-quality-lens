@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from check_trust_t3 import OBSERVED, UNKNOWN, validate_semantics, validate_types
+from check_trust_t3 import OBSERVED, UNKNOWN, TOOLS, ALL_TOOLS, validate_semantics, validate_types, validated_tools
 
 
 class AbstentionChecks(unittest.TestCase):
@@ -19,6 +19,21 @@ class AbstentionChecks(unittest.TestCase):
         del document['records'][0]['method_count']
         with self.assertRaises(KeyError):
             validate_types(document)
+
+    def test_optional_tools_cannot_replace_or_duplicate_required_runs(self):
+        def commands(tools):
+            return [{'command': ['rqlens', 'measure', tool], 'exit_code': 0} for tool in tools for _ in range(2)]
+        self.assertEqual(validated_tools(commands(TOOLS)), TOOLS)
+        full = commands(ALL_TOOLS)
+        self.assertEqual(validated_tools(full), ALL_TOOLS)
+        for invalid in (full[2:], full[:-1], full + full[:1], commands(['source-expansion'])):
+            with self.assertRaises(ValueError):
+                validated_tools(invalid)
+        for field, value in [('exit_code', 1), ('command', ['rqlens', 'review', 'hotspots']), ('command', ['rqlens', 'measure', 'unknown'])]:
+            invalid = copy.deepcopy(full)
+            invalid[0][field] = value
+            with self.assertRaises(ValueError):
+                validated_tools(invalid)
 
     def test_capability_cannot_claim_completion(self):
         document = self.fixture()

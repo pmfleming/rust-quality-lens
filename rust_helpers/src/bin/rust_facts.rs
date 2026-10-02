@@ -18,40 +18,9 @@ use syn::{
     ItemUse, ReturnType, Type, TypePath, UseTree,
 };
 
-#[derive(Serialize)]
-struct FileFacts {
-    path: String,
-    module_key: String,
-    target_kind: String,
-    entrypoint_kind: Option<String>,
-    is_entrypoint: bool,
-    parse_status: String,
-    syntax_backend: String,
-    syntax_error_count: usize,
-    source_metrics_available: bool,
-    dependencies: Vec<String>,
-    dependency_references: Vec<DependencyReferenceFact>,
-    child_modules: Vec<String>,
-    module_files: Vec<ModuleFileFact>,
-    unsupported_patterns: Vec<String>,
-    type_identity_limitations: Vec<String>,
-    macro_invocations: Vec<MacroInvocation>,
-    public_api_count: usize,
-    documented_public_api_count: usize,
-    has_crate_docs: bool,
-    has_inline_tests: bool,
-    source_line_count: usize,
-    source_nonblank_line_count: usize,
-    source_comment_line_count: usize,
-    function_count: usize,
-    types: Vec<TypeFact>,
-    impls: Vec<ImplFact>,
-    tests: Vec<TestFact>,
-    functions: Vec<FunctionFact>,
-    escape_counts: BTreeMap<String, usize>,
-    escape_locations: Vec<LocationFact>,
-    quality_findings: Vec<QualityFinding>,
-}
+// One representation for collection and finalized wire facts; traversal-only
+// state is skipped by serialization and released when collection finishes.
+type FileFacts = FactVisitor;
 
 #[derive(Serialize)]
 struct MacroInvocation {
@@ -146,9 +115,17 @@ struct QualityFinding {
     test_code: bool,
 }
 
+#[derive(Default, Serialize)]
 struct FactVisitor {
     path: String,
     module_key: String,
+    target_kind: String,
+    entrypoint_kind: Option<String>,
+    is_entrypoint: bool,
+    parse_status: String,
+    syntax_backend: String,
+    syntax_error_count: usize,
+    source_metrics_available: bool,
     dependencies: Vec<String>,
     dependency_references: Vec<DependencyReferenceFact>,
     child_modules: Vec<String>,
@@ -156,6 +133,7 @@ struct FactVisitor {
     unsupported_patterns: Vec<String>,
     type_identity_limitations: Vec<String>,
     macro_invocations: Vec<MacroInvocation>,
+    #[serde(skip)]
     module_stack: Vec<String>,
     public_api_count: usize,
     documented_public_api_count: usize,
@@ -172,8 +150,11 @@ struct FactVisitor {
     escape_counts: BTreeMap<String, usize>,
     escape_locations: Vec<LocationFact>,
     quality_findings: Vec<QualityFinding>,
+    #[serde(skip)]
     source_lines: Vec<String>,
+    #[serde(skip)]
     test_scope_depth: usize,
+    #[serde(skip)]
     block_depth: usize,
 }
 
@@ -191,34 +172,14 @@ impl FactVisitor {
         Self {
             path: normalize_path(path),
             module_key: module_key_for_path(path),
-            dependencies: Vec::new(),
-            dependency_references: Vec::new(),
-            child_modules: Vec::new(),
-            module_files: Vec::new(),
-            unsupported_patterns: Vec::new(),
-            type_identity_limitations: Vec::new(),
-            macro_invocations: Vec::new(),
-            module_stack: Vec::new(),
-            public_api_count: 0,
-            documented_public_api_count: 0,
             has_crate_docs: content
                 .lines()
                 .any(|line| line.trim_start().starts_with("//!")),
-            has_inline_tests: false,
             source_line_count,
             source_nonblank_line_count,
             source_comment_line_count,
-            function_count: 0,
-            types: Vec::new(),
-            impls: Vec::new(),
-            tests: Vec::new(),
-            functions: Vec::new(),
-            escape_counts: BTreeMap::new(),
-            escape_locations: Vec::new(),
-            quality_findings: Vec::new(),
             source_lines: content.lines().map(str::to_string).collect(),
-            test_scope_depth: 0,
-            block_depth: 0,
+            ..Self::default()
         }
     }
 
@@ -227,9 +188,9 @@ impl FactVisitor {
     }
 
     fn into_facts_with_status(mut self, parse_status: String) -> FileFacts {
-        let target_kind = target_kind_for_path(&self.path).to_string();
-        let entrypoint_kind = entrypoint_kind_for_path(&self.path).map(str::to_string);
-        let is_entrypoint = entrypoint_kind.is_some();
+        self.target_kind = target_kind_for_path(&self.path).to_string();
+        self.entrypoint_kind = entrypoint_kind_for_path(&self.path).map(str::to_string);
+        self.is_entrypoint = self.entrypoint_kind.is_some();
         self.dependencies.sort();
         self.dependencies.dedup();
         self.dependency_references.sort_by(|left, right| {
@@ -252,39 +213,12 @@ impl FactVisitor {
         self.unsupported_patterns.dedup();
         self.type_identity_limitations.sort();
         self.type_identity_limitations.dedup();
-        FileFacts {
-            path: self.path,
-            module_key: self.module_key,
-            target_kind,
-            entrypoint_kind,
-            is_entrypoint,
-            syntax_backend: if parse_status == "ok" { "syn" } else { "text" }.to_string(),
-            syntax_error_count: 0,
-            parse_status,
-            source_metrics_available: true,
-            dependencies: self.dependencies,
-            dependency_references: self.dependency_references,
-            child_modules: self.child_modules,
-            module_files: self.module_files,
-            unsupported_patterns: self.unsupported_patterns,
-            type_identity_limitations: self.type_identity_limitations,
-            macro_invocations: self.macro_invocations,
-            public_api_count: self.public_api_count,
-            documented_public_api_count: self.documented_public_api_count,
-            has_crate_docs: self.has_crate_docs,
-            has_inline_tests: self.has_inline_tests,
-            source_line_count: self.source_line_count,
-            source_nonblank_line_count: self.source_nonblank_line_count,
-            source_comment_line_count: self.source_comment_line_count,
-            function_count: self.function_count,
-            types: self.types,
-            impls: self.impls,
-            tests: self.tests,
-            functions: self.functions,
-            escape_counts: self.escape_counts,
-            escape_locations: self.escape_locations,
-            quality_findings: self.quality_findings,
-        }
+        self.syntax_backend = if parse_status == "ok" { "syn" } else { "text" }.to_string();
+        self.parse_status = parse_status;
+        self.source_metrics_available = true;
+        self.source_lines = Vec::new();
+        self.module_stack = Vec::new();
+        self
     }
 
     fn bump_escape(&mut self, kind: &str, span: Span) {
@@ -1603,39 +1537,10 @@ fn tree_sitter_logical_sequence(node: tree_sitter::Node<'_>) -> usize {
 }
 
 fn failed_record(path: &str, parse_status: String) -> FileFacts {
-    FileFacts {
-        path: normalize_path(path),
-        module_key: module_key_for_path(path),
-        target_kind: target_kind_for_path(path).to_string(),
-        entrypoint_kind: entrypoint_kind_for_path(path).map(str::to_string),
-        is_entrypoint: entrypoint_kind_for_path(path).is_some(),
-        parse_status,
-        syntax_backend: "none".to_string(),
-        syntax_error_count: 0,
-        source_metrics_available: false,
-        dependencies: Vec::new(),
-        dependency_references: Vec::new(),
-        child_modules: Vec::new(),
-        module_files: Vec::new(),
-        unsupported_patterns: Vec::new(),
-        type_identity_limitations: Vec::new(),
-        macro_invocations: Vec::new(),
-        public_api_count: 0,
-        documented_public_api_count: 0,
-        has_crate_docs: false,
-        has_inline_tests: false,
-        source_line_count: 0,
-        source_nonblank_line_count: 0,
-        source_comment_line_count: 0,
-        function_count: 0,
-        types: Vec::new(),
-        impls: Vec::new(),
-        tests: Vec::new(),
-        functions: Vec::new(),
-        escape_counts: BTreeMap::new(),
-        escape_locations: Vec::new(),
-        quality_findings: Vec::new(),
-    }
+    let mut facts = FactVisitor::new(path, "").into_facts_with_status(parse_status);
+    facts.syntax_backend = "none".to_string();
+    facts.source_metrics_available = false;
+    facts
 }
 
 fn target_kind_for_path(path: &str) -> &'static str {

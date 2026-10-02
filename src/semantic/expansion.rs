@@ -9,6 +9,7 @@ use super::{LspClient, absolute_path, analyzer_configuration, analyzer_version, 
 use crate::config::{LensConfig, SemanticIdentityMode};
 use crate::contracts::MeasurementConfidence;
 use crate::facts::{FileFacts, MacroInvocation, RunContext};
+mod generated;
 
 #[derive(Deserialize, Serialize)]
 struct SourceSite {
@@ -33,6 +34,7 @@ struct Expansion {
     status: Status,
     backend_macro: Option<String>,
     expanded_source: Option<String>,
+    generated_syntax: Option<generated::GeneratedSyntax>,
     reason: Option<String>,
 }
 
@@ -43,6 +45,7 @@ impl Expansion {
             status,
             backend_macro: None,
             expanded_source: None,
+            generated_syntax: None,
             reason: Some(reason.to_string()),
         }
     }
@@ -58,6 +61,7 @@ impl Expansion {
             macro_name(name) == macro_name(&self.source.invocation.macro_path),
             "expansion name does not match the requested macro"
         );
+        self.generated_syntax = Some(generated::parse(text, &self.source.invocation.kind));
         self.status = Status::Expanded;
         self.backend_macro = Some(name.to_string());
         self.expanded_source = Some(text.to_string()); // Empty expansion is valid, unlike null.
@@ -111,13 +115,17 @@ pub(crate) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         .count();
     let response_complete = inventory_complete && expanded == expansions.len();
     ensure!(
-        config.identity_resolution != SemanticIdentityMode::Required || response_complete,
-        "required source-expansion responses are incomplete"
+        config.identity_resolution != SemanticIdentityMode::Required
+            || (response_complete
+                && expansions
+                    .iter()
+                    .all(|e| e.generated_syntax.as_ref().is_some_and(|s| s.parsed))),
+        "required source-expansion responses or syntax are incomplete"
     );
     let mut confidence: MeasurementConfidence =
         serde_json::from_value(context.source_confidence())?;
     confidence.insert("confidence_scope", json!("macro_expansion_observations"));
-    confidence.mark_partial("Expansion observations do not yet establish effective cfg, compiler target ownership or generated-code facts");
+    confidence.mark_partial("Expansion observations do not yet establish effective cfg, compiler target ownership or compiler-verified generated facts");
     if !inventory_complete {
         confidence
             .mark_partial("Macro call-site inventory is incomplete or missing helper metadata");
@@ -126,7 +134,7 @@ pub(crate) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         summary: Summary { inventory_complete, observed_sites: expansions.len(), expanded_sites: expanded, response_complete, semantic_inventory_complete: false },
         backend: "rust-analyzer/expandMacro".into(), analyzer_version: version,
         backend_configuration: profile,
-        scope: "Explicit item/impl macro call sites only; excludes expression/attribute/derive requests. Source coordinates are invocation anchors, not generated-code spans. Syntax target labels are not compiler ownership evidence.".into(),
+        scope: "Explicit item/impl macro call sites only; excludes expression/attribute/derive requests. Source coordinates are invocation anchors, not generated-code spans. Syntax target labels are not compiler ownership evidence. Generated syntax contains observed struct/enum/function declarations, with UTF-8 byte ranges in expanded_source only; cfg, hygiene, nested macros and declaration owners remain unresolved.".into(),
         expansions, measurement_confidence: confidence,
     })?)
 }
@@ -279,13 +287,20 @@ fn validate_expansion(expansion: Expansion) -> Result<()> {
                 macro_name(name) == macro_name(&expansion.source.invocation.macro_path),
                 "macro identity mismatch"
             );
+            let text = expansion
+                .expanded_source
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("missing expanded source"))?;
             ensure!(
-                expansion.expanded_source.is_some() && expansion.reason.is_none(),
-                "invalid expanded observation"
+                expansion.reason.is_none()
+                    && expansion.generated_syntax
+                        == Some(generated::parse(text, &expansion.source.invocation.kind)),
+                "generated observations do not match expansion text/context"
             );
         }
         _ => ensure!(
             expansion.expanded_source.is_none()
+                && expansion.generated_syntax.is_none()
                 && expansion.backend_macro.is_none()
                 && expansion.reason.as_deref().is_some_and(|r| !r.is_empty()),
             "unavailable expansion masquerades as source"
