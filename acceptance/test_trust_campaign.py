@@ -4,6 +4,10 @@ import trust_campaign as campaign
 
 
 class TrustComparison(unittest.TestCase):
+    def test_expensive_expansion_is_opt_in(self):
+        self.assertNotIn('source-expansion', campaign.TOOLS)
+        self.assertEqual(campaign.ALL_TOOLS['source-expansion'], 'source_expansion.json')
+
     def test_only_declared_timestamps_are_ignored(self):
         a = {'generated_at': 'before', 'records': [{'measured_at': 'before', 'value': 1}], 'complete': True}
         b = {'generated_at': 'after', 'records': [{'measured_at': 'after', 'value': 1}], 'complete': True}

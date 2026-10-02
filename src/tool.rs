@@ -19,6 +19,9 @@ pub(crate) enum MeasureTool {
     ApiHealth,
     #[value(name = "semantic-api")]
     SemanticApi,
+    /// Opt-in expansion observations; deliberately not part of measure all.
+    #[value(name = "source-expansion")]
+    SourceExpansion,
     Correctness,
     #[value(name = "correctness-run")]
     CorrectnessRun,
@@ -58,6 +61,7 @@ impl MeasureTool {
     pub(crate) fn schema_tools() -> Vec<Self> {
         let mut tools = Self::all_tools();
         tools.push(Self::Practices);
+        tools.push(Self::SourceExpansion);
         tools
     }
 
@@ -83,28 +87,10 @@ impl MeasureTool {
         )
     }
 
-    pub(crate) fn name(&self) -> &'static str {
-        match self {
-            Self::All => "all",
-            Self::Hotspots => "hotspots",
-            Self::Clones => "clones",
-            Self::EscapeHatches => "escape-hatches",
-            Self::TypeHealth => "type-health",
-            Self::Reliability => "reliability",
-            Self::ArchitectureRules => "architecture-rules",
-            Self::TestQuality => "test-quality",
-            Self::ApiHealth => "api-health",
-            Self::SemanticApi => "semantic-api",
-            Self::Correctness => "correctness",
-            Self::CorrectnessRun => "correctness-run",
-            Self::Locality => "locality",
-            Self::Leverage => "leverage",
-            Self::ModuleCohesion => "module-cohesion",
-            Self::Map => "map",
-            Self::Coverage => "coverage",
-            Self::FunctionRisk => "function-risk",
-            Self::Practices => "practices",
-        }
+    pub(crate) fn name(&self) -> String {
+        // Use the CLI vocabulary rather than maintaining a second name table.
+        self.to_possible_value()
+            .map_or_else(|| format!("{self:?}"), |value| value.get_name().to_string())
     }
 
     pub(crate) fn output_file(&self) -> &'static str {
@@ -118,6 +104,7 @@ impl MeasureTool {
             Self::TestQuality => "test_quality.json",
             Self::ApiHealth => "api_health.json",
             Self::SemanticApi => "semantic_api.json",
+            Self::SourceExpansion => "source_expansion.json",
             Self::Correctness | Self::CorrectnessRun => "correctness_review.json",
             Self::Locality => "locality_metrics.json",
             Self::Leverage => "leverage_metrics.json",

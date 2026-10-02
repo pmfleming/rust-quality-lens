@@ -47,8 +47,10 @@ pub(crate) fn produce_measurement(
         MeasureTool::TestQuality => test_quality::produce(config, context),
         MeasureTool::ApiHealth => api_health::produce(config, context),
         MeasureTool::SemanticApi => semantic_api::produce(config),
-        MeasureTool::Correctness => correctness::produce(config, context, false),
-        MeasureTool::CorrectnessRun => correctness::produce(config, context, true),
+        MeasureTool::SourceExpansion => crate::semantic::expansion::produce(config, context),
+        MeasureTool::Correctness | MeasureTool::CorrectnessRun => {
+            correctness::produce(config, context, matches!(tool, MeasureTool::CorrectnessRun))
+        }
         MeasureTool::Locality => topology::locality(context),
         MeasureTool::Leverage => topology::leverage(context),
         MeasureTool::ModuleCohesion => cohesion::produce(config, context),

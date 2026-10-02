@@ -42,6 +42,9 @@ jobs:
       - name: Generated-symbol identity (trusted local macro fixture)
         run: cargo test --locked semantic::macro_tests -- --ignored
 
+      - name: Macro expansion observations (trusted local fixture)
+        run: cargo test --locked --test source_expansion -- --ignored
+
       - name: Documentation
         env:
           RUSTDOCFLAGS: -D warnings

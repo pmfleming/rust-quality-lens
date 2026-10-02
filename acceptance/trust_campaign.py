@@ -30,6 +30,9 @@ TOOLS = {
     'module-cohesion': 'module_cohesion.json', 'architecture-rules': 'architecture_rules.json',
     'map': 'map.json',
 }
+OPTIONAL_TOOLS = {'source-expansion': 'source_expansion.json'}
+ALL_TOOLS = TOOLS | OPTIONAL_TOOLS
+
 spec = importlib.util.spec_from_file_location('daemon_campaign', ROOT / 'scripts/daemon-campaign.py')
 helper = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(helper)
@@ -102,7 +105,7 @@ def worker(args):
         save(dest / 'commands.json', commands)
     comparisons = {}
     for tool in args.tools:
-        name = TOOLS[tool]
+        name = ALL_TOOLS[tool]
         paths = [dest / f'run-{i}' / name for i in (1, 2)]
         if not all(p.is_file() for p in paths):
             comparisons[name] = {'equal': False, 'reason': 'missing output'}
@@ -123,7 +126,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--binary', type=Path, default=ROOT / 'target/debug/rqlens')
     parser.add_argument('--projects', nargs='+', choices=PROJECTS, default=PROJECTS)
-    parser.add_argument('--tools', nargs='+', choices=TOOLS, default=list(TOOLS))
+    parser.add_argument('--tools', nargs='+', choices=ALL_TOOLS, default=list(TOOLS))
     parser.add_argument('--inside', choices=PROJECTS, help=argparse.SUPPRESS)
     args = parser.parse_args()
     args.output, args.binary = args.output.resolve(), args.binary.resolve()

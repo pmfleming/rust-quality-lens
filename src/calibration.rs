@@ -199,7 +199,7 @@ fn calibration_config(
 fn calibration_payloads(
     config: &LensConfig,
     context: &RunContext,
-) -> Result<BTreeMap<&'static str, Value>> {
+) -> Result<BTreeMap<String, Value>> {
     fs::create_dir_all(&config.output_dir)?;
     let _lock = crate::util::lock_file(&config.output_dir.join("rqlens"))?;
     let mut batch = crate::measurement::ArtifactBatch::new(config)?;

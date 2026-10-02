@@ -18,7 +18,8 @@ pub(crate) fn validate_artifact(file: &str, value: &Value) -> Result<super::Arti
     let tool = MeasureTool::schema_tools()
         .into_iter()
         .find(|tool| tool.output_file() == file);
-    let expected_tool = auxiliary.or_else(|| tool.as_ref().map(MeasureTool::name));
+    let tool_name = tool.as_ref().map(MeasureTool::name);
+    let expected_tool = auxiliary.or(tool_name.as_deref());
     ensure!(expected_tool.is_some(), "unknown artifact {file}");
     ensure!(
         header.schema_version == if auxiliary.is_some() { 1 } else { 3 },
@@ -91,6 +92,13 @@ fn validate_policy_payload(
         "architecture_rules.json" => each(&payload["violations"], finding),
         "test_quality.json" => each(&payload["findings"], finding),
         "map.json" => each(&payload["graph"]["nodes"], map_node),
+        "source_expansion.json" => {
+            ensure!(
+                !header.measurement_confidence.is_complete(),
+                "expansion observations cannot certify complete source inputs"
+            );
+            crate::semantic::expansion::validate(payload)
+        }
         "type_health.json" => {
             type_health_rows(payload, header.measurement_confidence.is_complete())
         }

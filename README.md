@@ -290,6 +290,11 @@ remains numeric when the syntax inventory is complete. Confidence propagates to
 rows, envelopes, capabilities and policy; conservative abstention can therefore
 fail the strict partial-evidence gate. See [Semantic abstention](contracts/semantic-abstention.md).
 
+`rqlens measure source-expansion` provides opt-in item/impl macro expansion
+observations. It is excluded from `measure all` and does **not** clear partial
+flags or populate compiler-verified type counts. See
+[Source expansion](docs/source-expansion.md) for implemented scope and remaining integration.
+
 ### Complexity and clones
 
 `hotspots.json` reports versioned cyclomatic and cognitive complexity.

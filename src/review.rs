@@ -126,7 +126,7 @@ fn scoped_measurements(
         .iter()
         .zip(measurements)
         .map(|(tool, payload)| ReviewMeasurement {
-            tool: tool.name().to_string(),
+            tool: tool.name(),
             output_file: tool.output_file().to_string(),
             payload: filter_payload(project_root, payload, files),
         })

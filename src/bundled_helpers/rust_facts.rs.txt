@@ -35,6 +35,7 @@ struct FileFacts {
     module_files: Vec<ModuleFileFact>,
     unsupported_patterns: Vec<String>,
     type_identity_limitations: Vec<String>,
+    macro_invocations: Vec<MacroInvocation>,
     public_api_count: usize,
     documented_public_api_count: usize,
     has_crate_docs: bool,
@@ -50,6 +51,15 @@ struct FileFacts {
     escape_counts: BTreeMap<String, usize>,
     escape_locations: Vec<LocationFact>,
     quality_findings: Vec<QualityFinding>,
+}
+
+#[derive(Serialize)]
+struct MacroInvocation {
+    kind: String,
+    macro_path: String,
+    module_key: String,
+    line: usize,
+    column_utf16: usize,
 }
 
 #[derive(Serialize)]
@@ -145,6 +155,7 @@ struct FactVisitor {
     module_files: Vec<ModuleFileFact>,
     unsupported_patterns: Vec<String>,
     type_identity_limitations: Vec<String>,
+    macro_invocations: Vec<MacroInvocation>,
     module_stack: Vec<String>,
     public_api_count: usize,
     documented_public_api_count: usize,
@@ -186,6 +197,7 @@ impl FactVisitor {
             module_files: Vec::new(),
             unsupported_patterns: Vec::new(),
             type_identity_limitations: Vec::new(),
+            macro_invocations: Vec::new(),
             module_stack: Vec::new(),
             public_api_count: 0,
             documented_public_api_count: 0,
@@ -256,6 +268,7 @@ impl FactVisitor {
             module_files: self.module_files,
             unsupported_patterns: self.unsupported_patterns,
             type_identity_limitations: self.type_identity_limitations,
+            macro_invocations: self.macro_invocations,
             public_api_count: self.public_api_count,
             documented_public_api_count: self.documented_public_api_count,
             has_crate_docs: self.has_crate_docs,
@@ -1113,6 +1126,25 @@ impl FactVisitor {
     }
 
     fn note_unexpanded_macro(&mut self, mac: &syn::Macro, kind: &str) {
+        let start = mac
+            .path
+            .segments
+            .last()
+            .map_or(mac.path.span(), |part| part.ident.span())
+            .start();
+        let column_utf16 = self
+            .source_lines
+            .get(start.line.saturating_sub(1))
+            .map_or(start.column, |line| {
+                line.chars().take(start.column).map(char::len_utf16).sum()
+            });
+        self.macro_invocations.push(MacroInvocation {
+            kind: kind.to_string(),
+            macro_path: path_to_string(&mac.path),
+            module_key: self.current_module_key(),
+            line: start.line,
+            column_utf16,
+        });
         self.unsupported_patterns.push(format!(
             "{}:{}: unexpanded {kind} macro {}!; generated items/methods are not inventoried",
             self.path,
@@ -1587,6 +1619,7 @@ fn failed_record(path: &str, parse_status: String) -> FileFacts {
         module_files: Vec::new(),
         unsupported_patterns: Vec::new(),
         type_identity_limitations: Vec::new(),
+        macro_invocations: Vec::new(),
         public_api_count: 0,
         documented_public_api_count: 0,
         has_crate_docs: false,
@@ -1944,6 +1977,20 @@ mod tests {
         let mut visitor = FactVisitor::new("src/lib.rs", source);
         visitor.visit_file(&file);
         visitor.into_facts()
+    }
+
+    #[test]
+    fn macro_sites_keep_context_and_utf16_invocation_positions() {
+        let parsed = facts(
+            "macro_rules! make { () => {} }\n/* é😀 */ make!();\nstruct Owner; impl Owner { make!(); }\n",
+        );
+        assert_eq!(parsed.macro_invocations.len(), 2);
+        let item = &parsed.macro_invocations[0];
+        assert_eq!(item.kind, "item");
+        assert_eq!(item.macro_path, "make");
+        assert_eq!(item.line, 2);
+        assert_eq!(item.column_utf16, "/* é😀 */ ".encode_utf16().count());
+        assert_eq!(parsed.macro_invocations[1].kind, "impl");
     }
 
     #[test]

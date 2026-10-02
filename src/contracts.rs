@@ -45,7 +45,7 @@ pub(crate) fn artifact_document(
         confidence.mark_partial("quality input fingerprint is incomplete");
     }
     let capability = crate::capability_evidence::CapabilityEvidence::inputs(
-        tool.name(),
+        &tool.name(),
         confidence.is_complete(),
     );
     anyhow::ensure!(capability.validate(), "invalid capability evidence");
@@ -328,6 +328,23 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "documentation_percent": {"type": "number"},
                 "crate_level_documentation": {"type": ["boolean", "null"]},
                 "signals": {"type": "array", "items": {"type": "string"}},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
+        ),
+        MeasureTool::SourceExpansion => object_schema(
+            "source_expansion.json",
+            &[
+                "summary",
+                "backend",
+                "scope",
+                "expansions",
+                "measurement_confidence",
+            ],
+            json!({
+                "summary": {"type": "object"},
+                "backend": {"const": "rust-analyzer/expandMacro"},
+                "scope": {"type": "string"},
+                "expansions": {"type": "array", "items": {"type": "object"}},
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),

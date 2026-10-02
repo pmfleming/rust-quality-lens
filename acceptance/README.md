@@ -19,6 +19,7 @@ python3 acceptance/calibration.py --release  # intentionally blocked pending ind
 python3 acceptance/profile.py               # after native build/helper prewarming
 python3 acceptance/trust_campaign.py --output target/trust-new  # fresh directory; built rqlens required
 python3 acceptance/check_trust_t3.py target/trust-new            # current incomplete syntax profiles
+python3 acceptance/trust_campaign.py --output target/expansion-new --tools source-expansion  # experimental, opt-in
 ```
 
 `resource-budgets.json` fixes the sampled workload ceilings; `resource-results.json` retains all three repetitions and source-snapshot identifiers. These synthetic observations are not a cross-language benchmark or a universal memory guarantee. The structural gate also rejects deleted criteria and remains active under `python -O`.

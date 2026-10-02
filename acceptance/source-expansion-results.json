@@ -1,0 +1,170 @@
+{
+  "stage": "source-expansion observations, not T4 completion",
+  "revision": {
+    "head": "e8af5f8330b37723d4d3fe201d40f56720d3cbed",
+    "dirty": true,
+    "files_sha256": "3304f3bc5e609ebd78b51533e9bd09cf58ef95733754eefa23976569135cd9da"
+  },
+  "binary_sha256": "a8462b905abbb097886ddece5c5ff676e06734046b0ad22839885e7e8b82b6cf",
+  "normal_tests_passed": 192,
+  "live_tests_passed": 2,
+  "daemon_results": [
+    {
+      "project": "app-daemon",
+      "revision": "5ca88f0f8b56f7e236be58566e67bc0a7681b42b",
+      "source_sha256": "d2ba43e7ebaa4eb24ab53a53d8434bbf80c40722e9a33958c1cc25711da77cbd",
+      "commands_passed": 2,
+      "repeatable": true,
+      "source_stable": true,
+      "summary": {
+        "expanded_sites": 5,
+        "inventory_complete": true,
+        "observed_sites": 5,
+        "response_complete": true,
+        "semantic_inventory_complete": false
+      }
+    },
+    {
+      "project": "bar-daemon",
+      "revision": "61b81513031f468be6303ec053bee6869228374a",
+      "source_sha256": "a8edf8155533a94caf84a1d38adf358da7a1c2bbe9a6c1ec9af0455ea181ae80",
+      "commands_passed": 2,
+      "repeatable": true,
+      "source_stable": true,
+      "summary": {
+        "expanded_sites": 8,
+        "inventory_complete": true,
+        "observed_sites": 8,
+        "response_complete": true,
+        "semantic_inventory_complete": false
+      }
+    },
+    {
+      "project": "bt-daemon",
+      "revision": "9628f765ac23df9768a5fad090cf8204e2eb67c4",
+      "source_sha256": "b143d9d3327b595d68157b4042b296163cb07fe284ecbc146faa3bcfbdefe4c6",
+      "commands_passed": 2,
+      "repeatable": true,
+      "source_stable": true,
+      "summary": {
+        "expanded_sites": 7,
+        "inventory_complete": true,
+        "observed_sites": 7,
+        "response_complete": true,
+        "semantic_inventory_complete": false
+      }
+    },
+    {
+      "project": "clip-daemon",
+      "revision": "3e2f319455e77f786d7760dea327c52d4c0e60de",
+      "source_sha256": "4d3e3219095c410c3fcf1f1e64eacbc3014ce8ba119b17597c2c87ebd903bd50",
+      "commands_passed": 2,
+      "repeatable": true,
+      "source_stable": true,
+      "summary": {
+        "expanded_sites": 5,
+        "inventory_complete": true,
+        "observed_sites": 5,
+        "response_complete": true,
+        "semantic_inventory_complete": false
+      }
+    },
+    {
+      "project": "nm-daemon",
+      "revision": "cf09351fdac35df4b24754a7c01e8e2dcaaac632",
+      "source_sha256": "32752f7a2844e0ca94048a2f574942e3009c60458698c0d6be01d7dbe487f466",
+      "commands_passed": 2,
+      "repeatable": true,
+      "source_stable": true,
+      "summary": {
+        "expanded_sites": 8,
+        "inventory_complete": true,
+        "observed_sites": 8,
+        "response_complete": true,
+        "semantic_inventory_complete": false
+      }
+    },
+    {
+      "project": "update-daemon",
+      "revision": "918127d45c04cbc33633615b5826ca5e27e86329",
+      "source_sha256": "2f7338b0582c2488098f72f57e5adb296f7ff0aa1808cab46841ab40c086bd48",
+      "commands_passed": 2,
+      "repeatable": true,
+      "source_stable": true,
+      "summary": {
+        "expanded_sites": 0,
+        "inventory_complete": true,
+        "observed_sites": 0,
+        "response_complete": true,
+        "semantic_inventory_complete": false
+      }
+    },
+    {
+      "project": "daemon-framework",
+      "revision": "c13f27d0dbbbc040a9ccc0f8997dbcc1ab348f3b",
+      "source_sha256": "92f04eadc61b9cb6638529e22dc3035f7716b51408c4a58eb7ca0bd5e4610e5e",
+      "commands_passed": 2,
+      "repeatable": true,
+      "source_stable": true,
+      "summary": {
+        "expanded_sites": 0,
+        "inventory_complete": true,
+        "observed_sites": 0,
+        "response_complete": true,
+        "semantic_inventory_complete": false
+      }
+    }
+  ],
+  "self_expansion": {
+    "expanded_sites": 9,
+    "inventory_complete": true,
+    "observed_sites": 9,
+    "response_complete": true,
+    "semantic_inventory_complete": false
+  },
+  "self_repeatable": true,
+  "self_metrics": {
+    "score": 69.55,
+    "cyclomatic_complexity": 20,
+    "cognitive_complexity": 11,
+    "source_lines": 22405.0
+  },
+  "strict_policy": {
+    "passed": false,
+    "failed_policies": [
+      "configured-rules",
+      "partial",
+      "reliability-finding",
+      "test-failure"
+    ],
+    "stale_artifacts": [],
+    "observed_test_failures": [],
+    "observed_practice_failures": []
+  },
+  "normalization": [
+    "generated_at",
+    "measured_at"
+  ],
+  "scope": "Explicit item/impl macro response text; no cfg/owner/generated-fact promotion, no scoring or policy relaxation. Zero sites is only empty in this narrow request scope.",
+  "raw_evidence": "target/source-expansion/final-*.log; target/source-expansion/final-daemons/; target/source-expansion/final-self-{1,2}.json",
+  "investigated_attempts": [
+    "The session interruption left a publication guard in target/source-expansion/self. It was not bypassed; resumed validation used a fresh output directory.",
+    "Self-metric validation caught a glob import in the new test module. Replaced it with explicit imports; final native measurement and unchanged self-metric gates pass."
+  ],
+  "source_note": "Implementation on e8af5f8; frozen binary and working-tree inventory recorded above. Later report/README edits are not executable inputs.",
+  "commands": [
+    "cargo test --workspace --locked",
+    "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "cargo test --locked --test source_expansion -- --ignored",
+    "cargo test --locked semantic::macro_tests -- --ignored",
+    "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --locked --no-deps",
+    "cargo run --locked --bin rqlens -- measure all",
+    "bash scripts/check-self-metrics.sh",
+    "cargo run --locked --bin rqlens -- verify",
+    "python3 acceptance/trust_campaign.py --output target/source-expansion/final-daemons --tools source-expansion",
+    "bash scripts/check-package.sh"
+  ],
+  "python_tests_passed": 9,
+  "native_environment": "Pinned repository nix develop --offline --no-write-lock-file; Rust 1.95.0, rust-analyzer 2026-06-01; daemon environments preserved, update-daemon inherits repository shell.",
+  "t4_passed": false
+}

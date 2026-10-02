@@ -13,6 +13,8 @@ use crate::config::{LensConfig, SemanticIdentityMode};
 use crate::facts::{DependencyReferenceFact, FileFacts, ResolvedDependencyFact};
 use crate::util::{lock_file, normalize_slashes, write_json};
 
+pub(crate) mod expansion;
+
 const CACHE_VERSION: u64 = 13;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -635,8 +637,19 @@ impl LspClient {
         linked_project: Option<&Path>,
         deadline: Instant,
     ) -> Result<Self> {
+        Self::start_configured(
+            config,
+            analyzer_configuration(config, linked_project),
+            deadline,
+        )
+    }
+
+    fn start_configured(
+        config: &LensConfig,
+        configuration: Value,
+        deadline: Instant,
+    ) -> Result<Self> {
         let (child, stdin, receiver) = lsp_transport(config)?;
-        let configuration = analyzer_configuration(config, linked_project);
         let mut client = Self {
             child,
             stdin,

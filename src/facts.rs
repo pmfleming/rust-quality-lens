@@ -158,6 +158,8 @@ pub(crate) struct SourceMetrics {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct FileItems {
     pub(crate) type_identity_limitations: Vec<String>,
+    #[serde(default)]
+    pub(crate) macro_invocations: Option<Vec<MacroInvocation>>,
     pub(crate) types: Vec<TypeFact>,
     pub(crate) impls: Vec<ImplFact>,
     pub(crate) tests: Vec<TestFact>,
@@ -165,6 +167,22 @@ pub(crate) struct FileItems {
     pub(crate) functions: Vec<FunctionFact>,
     #[serde(default)]
     pub(crate) quality_findings: Vec<QualityFindingFact>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum MacroContext {
+    Item,
+    Impl,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct MacroInvocation {
+    pub(crate) kind: MacroContext,
+    pub(crate) macro_path: String,
+    pub(crate) module_key: String,
+    pub(crate) line: usize,
+    pub(crate) column_utf16: usize,
 }
 
 #[derive(Clone, Debug, Deserialize)]

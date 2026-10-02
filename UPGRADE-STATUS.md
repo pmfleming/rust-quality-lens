@@ -1,6 +1,12 @@
 # Cross-lens upgrade execution
 
-## Latest: trust acceptance T1–T3; T4 remains unmet
+## Current implementation: source-expansion observations
+
+The opt-in `measure source-expansion` producer captures rust-analyzer item/impl macro text with invocation provenance and explicit unavailable/disabled states. All nine self-analysis visitor sites return expansions; 14 daemon/framework runs cover 33 sites with matching repeated artifacts and unchanged project sources. Native validation passes 192 normal tests plus both live macro fixtures; unchanged self-metric gates pass.
+
+This is **foundation work, not T4 closure**: effective cfg, compiler target/owner binding, generated origins and fact integration remain unimplemented. Expansion replies never clear measurement abstention or supply authoritative scores. Strict self-policy still fails on partial evidence. See `docs/source-expansion.md` and `acceptance/source-expansion-results.json`. No acceptance status or release permission changes.
+
+## Trust acceptance T1–T3; T4 remains unmet
 
 T1's scoped package/target and SARIF regressions are reconfirmed. T2 has deterministic edges/semantic evidence and a virtual-workspace correctness regression. T3 now abstains on unresolved type owners, opaque macros/attributes, cfg and unavailable semantics; unknown totals/scores are null rather than zero. Positive controls retain known zero and package/target isolation.
 

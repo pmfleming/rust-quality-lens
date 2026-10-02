@@ -158,6 +158,18 @@ fn task_definitions() -> Vec<TaskDefinition> {
             expensive: true,
         },
         TaskDefinition {
+            tool: "source-expansion",
+            id: "quality.source_expansion",
+            aliases: vec![],
+            category: "quality",
+            subcategory: "semantics",
+            title: "Source Expansion Observations",
+            description: "Opt-in item/impl macro expansion evidence; does not certify cfg, generated facts or compiler ownership. Not included in measure all.",
+            output_file: "source_expansion.json",
+            depends_on: vec![],
+            expensive: true,
+        },
+        TaskDefinition {
             tool: "type-health",
             id: "quality.type_health",
             aliases: vec!["quality.type-health"],
