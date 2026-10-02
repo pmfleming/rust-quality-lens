@@ -1,5 +1,9 @@
 # Cross-lens upgrade execution
 
+## Current research: compiler cfg/target contexts
+
+`acceptance/self_compiler_profile.py` instruments a fresh self-only Cargo check and records actual primary-unit rustc arguments and cfg probes. All 11 expected normal/test contexts compile and probe successfully without source changes. Four new Python regressions cover context coverage, mismatched/failed evidence, probe selection and unchanged delegated compiler arguments. This is a POSIX acceptance experiment, not production cfg evaluation, ownership resolution or T4 certification. See `docs/self-compiler-profile.md` and `acceptance/self-compiler-profile-results.json`.
+
 ## Current implementation: bounded generated syntax
 
 Expansion replies now yield context-checked declaration observations with UTF-8 ranges in the returned text. All nine self visitor fragments parse; native validation rejects altered observations and synthetic impl-wrapper escapes. Larger/deeper text is explicitly declined under a conservative parser budget, not counted as empty. No generated observations enter authoritative type-health totals or scores yet.

@@ -75,8 +75,11 @@ compiler ownership. Backend configuration is not proof of effective cfg values.
 
 ## Remaining integration
 
-1. Establish effective cfg and target/feature contexts, including test variants
+1. Integrate effective cfg and target/feature contexts, including test variants
    and build-script cfg; preserve inactive versus unsupported scope explicitly.
+   The [self compiler-profile experiment](self-compiler-profile.md) now captures
+   actual compiler cfg for 11 self compilation contexts, but is not a production
+   input or proof of complete source coverage.
 2. Extend bounded syntactic observations to compiler-backed hygiene and origin
    maps; handle recursive and currently declined expansions without treating
    pretty-printed text as an ordinary authored source file.
