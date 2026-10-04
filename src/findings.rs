@@ -1,4 +1,5 @@
 //! Stable source anchors shared by artifacts, review and exporters.
+pub(crate) mod practices;
 use crate::config::LensConfig;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs};

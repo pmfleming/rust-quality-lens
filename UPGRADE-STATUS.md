@@ -1,8 +1,12 @@
 # Cross-lens upgrade execution
 
-## Current evidence contracts: initial E2/E3 boundary
+## Current reporter agreement: shared practice projection
 
-The catalog now exposes 39 native rule IDs and draft family/gate contracts, explicitly retaining missing per-rule cases. Configured rules abstain on unsupported, disabled or unusable evaluation inputs rather than reporting verified-zero counts. All 28 native ingestion cases and 28 policy replays pass; CLI stdout matches published JSON. A separate probe confirms the remaining E4/E6 nested-diagnostic projection/corroboration gap. See `contracts/blocking-rule-coverage.md` and `acceptance/evidence-contracts-results.json`. **E2, E3, E4 and E6 remain open**; no release or T4 closure is claimed.
+Policy and SARIF now share nested-diagnostic projection and retain all contributing observations and invocation context. Nineteen native cases verify identity, evidence, disposition, waivers/exclusions and exact input reconstruction; 38 reporter replays match byte-for-byte. Ten malformed-input cases reject without replacing the prior SARIF. The original 28 ingestion cases still pass. See `contracts/practice-projection.md` and `acceptance/reporter-agreement-results.json`. Unknown negative coverage and compatible-engine scope remain explicit; **E2/E3/E4/E6 remain open** outside these bounded cases. Self gates pass at 22,492 source lines with no scope/budget/weight changes.
+
+## Initial evidence contracts: E2/E3 boundary
+
+The catalog now exposes 39 native rule IDs and draft family/gate contracts, explicitly retaining missing per-rule cases. Configured rules abstain on unsupported, disabled or unusable evaluation inputs rather than reporting verified-zero counts. All 28 native ingestion cases and 28 policy replays pass; CLI stdout matches published JSON. The initial probe recorded the E4/E6 nested-diagnostic projection/corroboration gap subsequently repaired for practices above. See `contracts/blocking-rule-coverage.md` and `acceptance/evidence-contracts-results.json`. **E2, E3, E4 and E6 remain open**; no release or T4 closure is claimed.
 
 ## Current refactoring: self-measured quality
 

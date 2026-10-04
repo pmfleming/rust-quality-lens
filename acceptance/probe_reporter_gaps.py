@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture the still-open E4/E6 nested-diagnostic projection gap (not certification)."""
+"""Probe nested-diagnostic agreement and evidence retention (not E4/E6 certification)."""
 import argparse
 import copy
 import json
@@ -9,7 +9,13 @@ import subprocess
 from evidence_contract_campaign import FILES
 
 
-def probe(binary, output):
+def projection_agrees(policy_rows, sarif_rows):
+    return (len(policy_rows) == len(sarif_rows) and all(row is not None for row in sarif_rows)
+            and sorted(policy_rows, key=lambda row: row.get("id", ""))
+            == sorted(sarif_rows, key=lambda row: row.get("id", "")))
+
+
+def probe(binary, output, *, checks=None, extra_config=""):
     binary = binary.resolve(strict=True)
     output.mkdir(parents=True, exist_ok=False)
     (output / "src").mkdir()
@@ -17,7 +23,7 @@ def probe(binary, output):
     (output / "Cargo.toml").write_text('[package]\nname="reporter-probe"\nversion="0.1.0"\nedition="2024"\n')
     (output / "rqlens.toml").write_text(
         'source_roots=["src"]\noutput_dir="analysis"\n[rust]\nidentity_resolution="disabled"\n'
-        '[policy.rules."rust.compiler.diagnostic"]\nlevel="error"\nmax=0\n')
+        '[policy.rules."rust.compiler.diagnostic"]\nlevel="error"\nmax=0\n' + extra_config)
     with (output / "measure.log").open("w") as log:
         subprocess.run([str(binary), "measure", "reliability"], cwd=output, stdout=log,
                        stderr=subprocess.STDOUT, timeout=120, check=True)
@@ -29,7 +35,7 @@ def probe(binary, output):
                     "tool": tool, "input_fingerprint": seed["input_fingerprint"],
                     "measurement_confidence": {"complete": True, "partial": False}, key: copy.deepcopy(payload)}
         if file == "rust_practices.json":
-            document[key]["checks"] = [
+            document[key]["checks"] = checks if checks is not None else [
                 {"rule_id": f"rust.official.{engine}", "title": engine, "status": "failed", "severity": "error",
                  "tool": "cargo", "tool_version": "fixture-1", "diagnostics": [diagnostic],
                  "evidence": {"command": ["cargo", engine], "scope": "same fixture"}}
@@ -44,15 +50,22 @@ def probe(binary, output):
     policy = json.loads((output / "analysis/policy_report.json").read_text())
     sarif = json.loads((output / "analysis/rqlens.sarif").read_text())
     rows = [row for row in sarif["runs"][0]["results"] if row["ruleId"] == diagnostic["rule_id"]]
+    policy_rows = (policy["practice_failures"] + policy["practice_warnings"]
+                   + [item["finding"] for item in policy["waived_findings"]])
+    diagnostic_rows = [row for row in policy_rows if row.get("rule_id") == diagnostic["rule_id"]]
+    sarif_rows = [row.get("properties", {}).get("rqlens_finding") for row in rows]
     result = {
-        "scope": "Synthetic repeated diagnostic through two invocation records; not an engine-accuracy or same-scope disagreement test",
-        "input_observations": 2,
+        "scope": "Synthetic nested diagnostics; not engine accuracy, applicability or same-scope disagreement certification",
+        "projection_agreement": projection_agrees(diagnostic_rows, sarif_rows),
+        "invocation_evidence_agreement": policy.get("practice_evidence") is not None and policy.get("practice_evidence") == sarif["runs"][0]["properties"].get("practice_evidence"),
+        "retained_observations": sum(len(row.get("observations", [])) for row in diagnostic_rows),
+        "input_observations": sum(len(check.get("diagnostics", [])) for check in checks) if checks is not None else 2,
         "policy_evaluation": policy["policy_rule_evaluations"][0],
         "sarif_diagnostic_results": rows,
         "criterion_status": {"E4": "open", "E6": "open"},
-        "limitations": ["Nested compiler observations are not counted by configured policy rules",
-                        "SARIF deduplicates the two observations without retaining both invocation records",
-                        "Missing output alone would not establish engine disagreement; scope compatibility is not inferred"],
+        "limitations": ["Per-rule compiler enablement/negative coverage remains unsupported",
+                        "Exact observation equality does not establish independent corroboration or compatible scopes",
+                        "Missing output alone does not establish engine disagreement"],
     }
     (output / "results.json").write_text(json.dumps(result, indent=2) + "\n")
     return result

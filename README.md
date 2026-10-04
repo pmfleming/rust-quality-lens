@@ -204,6 +204,11 @@ rqlens sarif
 ```
 
 This writes `target/analysis/rqlens.sarif` by default for code-scanning tools.
+Practice diagnostics share policy's projection, with contributing observations
+and invocation evidence preserved. Projected diagnostic fingerprints use the new
+`rqlens/exact-diagnostic-v1` namespace; original IDs remain in observations.
+See [the projection contract](contracts/practice-projection.md) for identity,
+waiver/exclusion, scope and remaining reporter limitations.
 
 ## Other workflows
 

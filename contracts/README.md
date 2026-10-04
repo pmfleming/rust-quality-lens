@@ -12,6 +12,6 @@ Quality verdict, severity and policy disposition remain distinct from capability
 
 The capability contract is additive to existing artifact envelopes. Existing native contracts still carry run identities, findings and measurements; they are not asserted to be wire-compatible across languages. Consumers must check native schema/version and input freshness before interpreting findings.
 
-Rust's initial blocking-rule inventory and configured-policy incompleteness boundary are documented in `blocking-rule-coverage.md`; `blocking-rules.json` is exposed by `catalog`. E2/E3 remain open pending exhaustive per-rule and consumer cases; E4/E6 retain a native reporter counterexample.
+Rust's initial blocking-rule inventory and configured-policy incompleteness boundary are documented in `blocking-rule-coverage.md`; `blocking-rules.json` is exposed by `catalog`. E2/E3 remain open pending exhaustive per-rule and consumer cases. `practice-projection.md` repairs the practice-specific reporter counterexample while preserving explicit unknown scope; product-wide E4/E6 remain open.
 
 Current granularity: TS/Rust expose project-input capabilities; QML additionally exposes per-rule evaluation. Fine-grained applicability for every TS/Rust rule family is still an explicit follow-up, not implied by a project-input result.

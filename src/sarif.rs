@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
-use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -14,22 +14,14 @@ mod reporting_tests;
 pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<PathBuf> {
     let mut rules = BTreeMap::<String, Value>::new();
     let mut results = Vec::new();
-    add_reliability_results(config, &mut rules, &mut results)?;
-    add_finding_document(
-        config,
-        "architecture_rules.json",
-        "violations",
-        &mut rules,
-        &mut results,
-    )?;
-    add_finding_document(
-        config,
-        "test_quality.json",
-        "findings",
-        &mut rules,
-        &mut results,
-    )?;
-    add_practice_results(config, &mut rules, &mut results)?;
+    for (file, key) in [
+        ("reliability_findings.json", None),
+        ("architecture_rules.json", Some("violations")),
+        ("test_quality.json", Some("findings")),
+    ] {
+        add_finding_document(config, file, key, &mut rules, &mut results)?;
+    }
+    let practice_evidence = add_practice_results(config, &mut rules, &mut results)?;
     let (external, external_reasons) = crate::external::current_findings(config);
     add_source_findings(config, external.iter(), &mut rules, &mut results);
     let document = json!({
@@ -44,7 +36,7 @@ pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<Path
                 }
             },
             "results": results,
-            "properties": {"external_evidence_reasons": external_reasons},
+            "properties": {"external_evidence_reasons": external_reasons, "practice_evidence": practice_evidence},
         }]
     });
     let output = output.unwrap_or_else(|| config.output_dir.join("rqlens.sarif"));
@@ -52,39 +44,21 @@ pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<Path
     Ok(output)
 }
 
-fn add_reliability_results(
-    config: &LensConfig,
-    rules: &mut BTreeMap<String, Value>,
-    results: &mut Vec<Value>,
-) -> Result<()> {
-    let Some(document) = read_optional(config, "reliability_findings.json")? else {
-        return Ok(());
-    };
-    add_source_findings(
-        config,
-        payload(&document).as_array().into_iter().flatten(),
-        rules,
-        results,
-    );
-    Ok(())
-}
-
 fn add_finding_document(
     config: &LensConfig,
     file_name: &str,
-    payload_key: &str,
+    payload_key: Option<&str>,
     rules: &mut BTreeMap<String, Value>,
     results: &mut Vec<Value>,
 ) -> Result<()> {
     let Some(document) = read_optional(config, file_name)? else {
         return Ok(());
     };
+    let payload = payload(&document);
+    let findings = payload_key.map_or(payload, |key| &payload[key]);
     add_source_findings(
         config,
-        payload(&document)[payload_key]
-            .as_array()
-            .into_iter()
-            .flatten(),
+        findings.as_array().into_iter().flatten(),
         rules,
         results,
     );
@@ -103,160 +77,54 @@ fn add_source_findings<'a>(
         };
         let message = finding["message"].as_str().unwrap_or(rule_id);
         rules.entry(rule_id.to_string()).or_insert_with(|| {
-            json!({
+            let mut rule = json!({
                 "id": rule_id,
                 "name": rule_id.replace(['.', '-'], "_"),
                 "shortDescription": {"text": message},
-                "helpUri": finding["source"],
-            })
+            });
+            if let Some(source) = finding["source"].as_str() {
+                rule["helpUri"] = json!(source);
+            }
+            rule
         });
-        let mut result = Map::new();
-        result.insert("ruleId".to_string(), json!(rule_id));
-        result.insert(
-            "level".to_string(),
-            json!(crate::findings::finding_level(finding)),
-        );
-        result.insert("message".to_string(), json!({"text": message}));
-        if let Some(path) = finding["path"].as_str() {
-            result.insert(
-                "locations".to_string(),
-                json!([{
-                    "physicalLocation": {
-                        "artifactLocation": {"uri": path.replace('\\', "/")},
-                        "region": {"startLine": finding["line"].as_u64().unwrap_or(1).max(1)}
-                    }
-                }]),
-            );
+        let mut result = json!({"ruleId": rule_id, "level": crate::findings::finding_level(finding), "message": {"text": message}});
+        if let Some(path) = finding["path"].as_str().filter(|path| !path.is_empty()) {
+            result["locations"] = json!([{"physicalLocation": physical_location(path, finding)}]);
         }
-        let mut result = Value::Object(result);
         annotate_result(config, finding, &mut result);
         results.push(result);
     }
+}
+
+fn physical_location(path: &str, finding: &Value) -> Value {
+    let mut location = json!({"artifactLocation": {"uri": path.replace('\\', "/")}});
+    if let Some(line) = finding["line"].as_u64().filter(|line| *line > 0) {
+        location["region"] = json!({"startLine": line});
+        if let Some(column) = finding["column"].as_u64().filter(|column| *column > 0) {
+            location["region"]["startColumn"] = json!(column);
+        }
+    }
+    location
 }
 
 fn add_practice_results(
     config: &LensConfig,
     rules: &mut BTreeMap<String, Value>,
     results: &mut Vec<Value>,
-) -> Result<()> {
-    let Some(document) = read_optional(config, "rust_practices.json")? else {
-        return Ok(());
-    };
-    let mut seen_diagnostics = BTreeSet::new();
-    for check in payload(&document)["checks"]
-        .as_array()
-        .into_iter()
-        .flatten()
-    {
-        for diagnostic in check["diagnostics"].as_array().into_iter().flatten() {
-            add_compiler_diagnostic(
-                config,
-                check,
-                diagnostic,
-                &mut seen_diagnostics,
-                rules,
-                results,
-            );
-        }
-        add_failed_practice(config, check, rules, results);
-    }
-    Ok(())
-}
-
-fn add_compiler_diagnostic(
-    config: &LensConfig,
-    check: &Value,
-    diagnostic: &Value,
-    seen: &mut BTreeSet<(String, String, u64, u64, String)>,
-    rules: &mut BTreeMap<String, Value>,
-    results: &mut Vec<Value>,
-) {
-    let Some(rule_id) = diagnostic["rule_id"].as_str() else {
-        return;
-    };
-    let path = diagnostic["path"].as_str();
-    let key = (
-        rule_id.to_string(),
-        path.unwrap_or_default().to_string(),
-        diagnostic["line"].as_u64().unwrap_or_default(),
-        diagnostic["column"].as_u64().unwrap_or_default(),
-        diagnostic["message"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
-    );
-    if !seen.insert(key) {
-        return;
-    }
-    rules.entry(rule_id.to_string()).or_insert_with(|| {
-        json!({
-            "id": rule_id,
-            "name": rule_id.replace(['.', '-'], "_"),
-            "shortDescription": {"text": diagnostic["message"]},
-            "helpUri": check["source"],
-        })
-    });
-    let mut result = json!({
-        "ruleId": rule_id,
-        "level": crate::findings::finding_level(diagnostic),
-        "message": {"text": diagnostic["message"]},
-    });
-    if let (Some(path), Some(line)) = (path, diagnostic["line"].as_u64())
-        && let Some(object) = result.as_object_mut()
-    {
-        object.insert(
-            "locations".to_string(),
-            json!([{
-                "physicalLocation": {
-                    "artifactLocation": {"uri": path},
-                    "region": {
-                        "startLine": line,
-                        "startColumn": diagnostic["column"].as_u64().unwrap_or(1),
-                    }
-                }
-            }]),
-        );
-    }
-    annotate_result(config, diagnostic, &mut result);
-    results.push(result);
-}
-
-fn add_failed_practice(
-    config: &LensConfig,
-    check: &Value,
-    rules: &mut BTreeMap<String, Value>,
-    results: &mut Vec<Value>,
-) {
-    if !matches!(
-        check["status"].as_str(),
-        Some("failed" | "unavailable" | "timed-out")
-    ) {
-        return;
-    }
-    let Some(rule_id) = check["rule_id"].as_str() else {
-        return;
-    };
-    let title = check["title"].as_str().unwrap_or(rule_id);
-    rules.entry(rule_id.to_string()).or_insert_with(|| {
-        json!({
-            "id": rule_id,
-            "name": rule_id.replace(['.', '-'], "_"),
-            "shortDescription": {"text": title},
-            "helpUri": check["source"],
-        })
-    });
-    let mut result = json!({
-        "ruleId": rule_id,
-        "level": crate::findings::finding_level(check),
-        "message": {"text": format!("{}: {}", title, check["status"].as_str().unwrap_or("failed"))},
-    });
-    annotate_result(config, check, &mut result);
-    results.push(result);
+) -> Result<Value> {
+    let document = read_optional(config, "rust_practices.json")?;
+    let projection = crate::findings::practices::project(config, document.as_ref());
+    add_source_findings(config, projection.findings.iter(), rules, results);
+    Ok(projection.evidence)
 }
 
 fn annotate_result(config: &LensConfig, finding: &Value, result: &mut Value) {
+    result["properties"]["rqlens_finding"] = finding.clone();
     if let Some(id) = finding["id"].as_str() {
-        result["partialFingerprints"] = json!({"rqlens/source-anchor-v1": id});
+        let version = finding["identity_version"]
+            .as_str()
+            .unwrap_or("source-anchor-v1");
+        result["partialFingerprints"] = json!({format!("rqlens/{version}"): id});
     }
     let rule = finding["rule_id"].as_str().unwrap_or_default();
     if crate::findings::is_waivable(finding)
@@ -286,7 +154,9 @@ fn read_optional(config: &LensConfig, file: &str) -> Result<Option<Value>> {
             == crate::fingerprint::Freshness::Current,
         "SARIF input {file} is stale or has incomplete provenance; rerun measurement"
     );
-    crate::findings::normalize(config, &mut document);
+    if file != "rust_practices.json" {
+        crate::findings::normalize(config, &mut document);
+    }
     Ok(Some(document))
 }
 
@@ -337,8 +207,13 @@ mod tests {
             anyhow::bail!("compiler diagnostic result was not emitted");
         };
         assert_eq!(
-            diagnostic["locations"][0]["physicalLocation"]["region"]["startLine"],
-            8
+            (
+                diagnostic["locations"][0]["physicalLocation"]["region"].clone(),
+                diagnostic["properties"]["rqlens_finding"]["observations"]
+                    .as_array()
+                    .map(Vec::len)
+            ),
+            (json!({"startLine": 8, "startColumn": 4}), Some(2))
         );
         std::fs::write(source, "pub fn changed() {}\n")?;
         assert!(

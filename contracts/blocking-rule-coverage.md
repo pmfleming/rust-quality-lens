@@ -59,13 +59,17 @@ normalization. This is **policy-ingestion** evidence, not proof that every backe
 correctly detects its positive/negative source cases. Baseline results are retained
 separately; missing new report fields must not be described as preexisting bugs.
 
-## Remaining E4/E6 counterexample
+## Baseline E4/E6 counterexample (`8d61005`)
+
+The practice-specific gap below is now repaired by the shared projection described
+in `practice-projection.md`. The original baseline evidence remains retained;
+product-wide E4/E6 and compatible-engine scope semantics remain open.
 
 `acceptance/probe_reporter_gaps.py` supplies the same nested diagnostic through two
-invocation records. Policy does not count the nested diagnostic. SARIF emits one
-result but drops the second invocation's corroborating evidence. The policy rule
-now correctly abstains instead of claiming zero verified findings, but projection
-agreement and multi-engine semantics are **not fixed**.
+invocation records. On the baseline, policy did not count the nested diagnostic. SARIF emitted one
+result but dropped the second invocation's corroborating evidence. At this initial milestone the policy rule
+correctly abstained instead of claiming zero verified findings, but projection
+agreement and multi-engine semantics were **not fixed**.
 
 Next: a shared typed observation/projection boundary that retains producer/run,
 rule identity, subject, scope, exclusions, evidence and disposition. Deduplication

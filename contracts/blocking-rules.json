@@ -91,9 +91,9 @@
       "applicability": "Diagnostic observations are retained, but an arbitrary diagnostic rule cannot be certified from its absence.",
       "scope": "Individual compiler/linter invocation and configuration.",
       "rationale": "Prevent an unsupported or disabled lint from becoming a clean configured rule.",
-      "limitations": ["Policy does not yet project nested compiler diagnostics consistently with SARIF", "Per-rule negative coverage is unavailable"],
-      "cases": {"positive": [], "negative": [], "unavailable": []},
-      "case_coverage": "Unsupported for complete configured-rule evaluation"
+      "limitations": ["Shared practice projection preserves observed diagnostics and invocation context but does not establish compatible engine scopes", "Per-rule negative coverage is unavailable"],
+      "cases": {"positive": ["acceptance/reporter_campaign.py#corroborating-observations"], "negative": [], "unavailable": ["acceptance/reporter_campaign.py#empty-observations"]},
+      "case_coverage": "Projection cases only; unsupported for complete configured-rule evaluation"
     },
     "external.<adapter>.<rule>": {
       "prerequisites": ["Source-linked current imported evidence", "Explicit producer version, evaluated rules, applicability and exclusion scope"],

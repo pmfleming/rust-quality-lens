@@ -43,7 +43,9 @@ pub(crate) fn run_check(
     let documents = &inputs.documents;
     let partial_artifacts = partial_artifacts(documents, &stale_artifacts);
     let test_failures = test_failures(documents);
-    let practices = classify_findings(config, practice_findings(documents));
+    let practice_projection =
+        crate::findings::practices::project(config, documents.get("rust_practices.json"));
+    let practices = classify_findings(config, practice_projection.findings);
     let reliability = classify_findings(config, reliability_findings(documents));
     let architecture = classify_findings(
         config,
@@ -153,6 +155,7 @@ pub(crate) fn run_check(
         "test_failures": test_failures,
         "practice_failures": practices.errors,
         "practice_warnings": practices.warnings,
+        "practice_evidence": practice_projection.evidence,
         "reliability_findings": reliability.errors,
         "reliability_warnings": reliability.warnings,
         "architecture_violations": architecture.errors,
@@ -335,23 +338,6 @@ fn test_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
     } else {
         Vec::new()
     }
-}
-
-fn practice_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
-    documents
-        .get("rust_practices.json")
-        .map(artifact_payload)
-        .and_then(|data| data["checks"].as_array())
-        .into_iter()
-        .flatten()
-        .filter(|check| {
-            matches!(
-                check["status"].as_str(),
-                Some("failed" | "unavailable" | "timed-out")
-            )
-        })
-        .cloned()
-        .collect()
 }
 
 fn operational_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {

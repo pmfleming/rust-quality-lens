@@ -180,7 +180,30 @@ fn practice(value: &Value) -> Result<()> {
         &value["status"],
         &["passed", "failed", "unavailable", "timed-out", "skipped"],
         "invalid practice check status",
-    )
+    )?;
+    if let Some(diagnostics) = value.get("diagnostics") {
+        each(diagnostics, diagnostic)?;
+    }
+    Ok(())
+}
+
+fn diagnostic(value: &Value) -> Result<()> {
+    finding(value)?;
+    ensure!(
+        value["message"].is_string(),
+        "diagnostic requires a message"
+    );
+    for field in ["line", "column"] {
+        ensure!(
+            value[field].is_null() || value[field].as_u64().is_some_and(|number| number > 0),
+            "invalid diagnostic {field}"
+        );
+    }
+    ensure!(
+        value["path"].is_null() || value["path"].is_string(),
+        "invalid diagnostic path"
+    );
+    Ok(())
 }
 
 fn reliability(value: &Value) -> Result<()> {
@@ -229,13 +252,22 @@ fn array(value: &Value) -> Result<&Vec<Value>> {
 }
 
 fn finding(value: &Value) -> Result<()> {
-    if !value["rule_id"].is_string()
+    if value["rule_id"]
+        .as_str()
+        .is_none_or(|rule| rule.trim().is_empty())
         || !matches!(
             value["severity"].as_str(),
             Some("error" | "warning" | "advisory")
         )
     {
         bail!("finding requires a rule ID and a valid severity");
+    }
+    if let Some(disposition) = value.get("disposition") {
+        one_of(
+            disposition,
+            &["block", "warn", "review", "info"],
+            "invalid finding disposition",
+        )?;
     }
     Ok(())
 }

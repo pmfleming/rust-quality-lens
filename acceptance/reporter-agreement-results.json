@@ -1,0 +1,330 @@
+{
+  "parent_revision": "8d6100554cc9daba820a9e1cc46170442b6ae13f",
+  "criterion_status": {
+    "E2": "open",
+    "E3": "open",
+    "E4": "open",
+    "E6": "open"
+  },
+  "scope": "Shared practice projection and lossless invocation/diagnostic retention; not product-wide reporter or compatible-engine certification",
+  "baseline": {
+    "binary_sha256": "c2d86723d2e8073682d445859f02e144fff7909cfb52230756a6397b704f11f5",
+    "probe": {
+      "scope": "Synthetic nested diagnostics; not engine accuracy, applicability or same-scope disagreement certification",
+      "projection_agreement": false,
+      "invocation_evidence_agreement": false,
+      "retained_observations": 0,
+      "input_observations": 2,
+      "policy_evaluation": {
+        "evaluation_complete": false,
+        "excess": null,
+        "excluded": 0,
+        "level": "error",
+        "maximum": 0,
+        "observed": null,
+        "observed_findings": 0,
+        "reason": "No supported per-rule evaluation coverage; finding absence is not a negative result",
+        "rule_id": "rust.compiler.diagnostic",
+        "status": "incomplete"
+      },
+      "sarif_diagnostic_results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/lib.rs"
+                },
+                "region": {
+                  "startColumn": 1,
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "shared observation"
+          },
+          "partialFingerprints": {
+            "rqlens/source-anchor-v1": "rqlens:6ebd4a95160e0be1:1"
+          },
+          "ruleId": "rust.compiler.diagnostic"
+        }
+      ],
+      "criterion_status": {
+        "E4": "open",
+        "E6": "open"
+      },
+      "limitations": [
+        "Per-rule compiler enablement/negative coverage remains unsupported",
+        "Exact observation equality does not establish independent corroboration or compatible scopes",
+        "Missing output alone does not establish engine disagreement"
+      ]
+    }
+  },
+  "candidate": {
+    "binary_sha256": "a948d8c8a5925e56c1d97145ba2eb5d0a124be3671dbedf79a7ebe7cb1b4204d",
+    "cases": [
+      {
+        "case": "corroborating-observations",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "different-severity",
+        "groups": 2,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "different-disposition",
+        "groups": 2,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "different-message",
+        "groups": 2,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "different-package_name",
+        "groups": 2,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "different-scope",
+        "groups": 2,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "passed-with-warning",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "blocking-disposition",
+        "groups": 2,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "no-diagnostic",
+        "groups": 1,
+        "observations": 1,
+        "passed": true
+      },
+      {
+        "case": "no-inventory",
+        "groups": 1,
+        "observations": 1,
+        "passed": true
+      },
+      {
+        "case": "unlocated",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "unknown-region",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "waived",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "expired",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "path-exclusion",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "package-exclusion",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "empty-observations",
+        "groups": 0,
+        "observations": 0,
+        "passed": true
+      },
+      {
+        "case": "incomplete-invocation",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      },
+      {
+        "case": "reversed-invocations",
+        "groups": 1,
+        "observations": 2,
+        "passed": true
+      }
+    ],
+    "malformed_rejections": [
+      "message",
+      "rule_id",
+      "severity",
+      "disposition",
+      "path",
+      "line",
+      "column",
+      "inventory-null",
+      "inventory-object",
+      "inventory-non-object"
+    ],
+    "same_input_exact_replays": 38,
+    "scope": "Practice projection only; unknown negative coverage and scope compatibility still abstain",
+    "passed": true
+  },
+  "candidate_probe": {
+    "scope": "Synthetic nested diagnostics; not engine accuracy, applicability or same-scope disagreement certification",
+    "projection_agreement": true,
+    "invocation_evidence_agreement": true,
+    "retained_observations": 2,
+    "input_observations": 2,
+    "policy_evaluation": {
+      "evaluation_complete": false,
+      "excess": null,
+      "excluded": 0,
+      "level": "error",
+      "maximum": 0,
+      "observed": null,
+      "observed_findings": 1,
+      "reason": "No supported per-rule evaluation coverage; finding absence is not a negative result",
+      "rule_id": "rust.compiler.diagnostic",
+      "status": "incomplete"
+    },
+    "sarif_diagnostic_results": [
+      {
+        "level": "error",
+        "locations": [
+          {
+            "physicalLocation": {
+              "artifactLocation": {
+                "uri": "src/lib.rs"
+              },
+              "region": {
+                "startColumn": 1,
+                "startLine": 1
+              }
+            }
+          }
+        ],
+        "message": {
+          "text": "shared observation"
+        },
+        "partialFingerprints": {
+          "rqlens/exact-diagnostic-v1": "rqlens:diagnostic:e4fb78c91f2a4cc1"
+        },
+        "properties": {
+          "rqlens_finding": {
+            "column": 1,
+            "id": "rqlens:diagnostic:e4fb78c91f2a4cc1",
+            "identity_version": "exact-diagnostic-v1",
+            "line": 1,
+            "message": "shared observation",
+            "observations": [
+              {
+                "check_index": 0,
+                "diagnostic": {
+                  "column": 1,
+                  "id": "origin-0",
+                  "line": 1,
+                  "message": "shared observation",
+                  "package_name": "fixture",
+                  "path": "src/lib.rs",
+                  "rule_id": "rust.compiler.diagnostic",
+                  "severity": "error"
+                },
+                "diagnostic_index": 0
+              },
+              {
+                "check_index": 1,
+                "diagnostic": {
+                  "column": 1,
+                  "id": "origin-1",
+                  "line": 1,
+                  "message": "shared observation",
+                  "package_name": "fixture",
+                  "path": "src/lib.rs",
+                  "rule_id": "rust.compiler.diagnostic",
+                  "severity": "error"
+                },
+                "diagnostic_index": 0
+              }
+            ],
+            "package_name": "fixture",
+            "path": "src/lib.rs",
+            "policy_scope": {
+              "configuration": {
+                "exclude_packages": [],
+                "exclude_paths": [],
+                "level": "error",
+                "max": 0
+              },
+              "included": true
+            },
+            "rule_id": "rust.compiler.diagnostic",
+            "severity": "error"
+          }
+        },
+        "ruleId": "rust.compiler.diagnostic"
+      }
+    ],
+    "criterion_status": {
+      "E4": "open",
+      "E6": "open"
+    },
+    "limitations": [
+      "Per-rule compiler enablement/negative coverage remains unsupported",
+      "Exact observation equality does not establish independent corroboration or compatible scopes",
+      "Missing output alone does not establish engine disagreement"
+    ]
+  },
+  "ingestion_cases": 28,
+  "validation": {
+    "normal_workspace_tests": 193,
+    "live_fixtures": 2,
+    "python_tests": 22,
+    "strict_clippy": true,
+    "rustdoc": true,
+    "package_smoke": true,
+    "bundled_helper_parity": true,
+    "unchanged_self_gates": true
+  },
+  "self_metrics": {
+    "source_nonblank_lines": 22492,
+    "maximum_hotspot": 69.22,
+    "cyclomatic_max": 20,
+    "cognitive_max": 11
+  },
+  "limits": [
+    "Projection IDs use a new exact-diagnostic-v1 namespace; original IDs remain in observations. Payload/line changes may change projected IDs.",
+    "Equality of payloads does not prove independent corroboration or compatible scope. Source evidence and supplied exclusions remain unverified producer claims.",
+    "Compiler-rule authoritative counts remain null/incomplete; no new negative-coverage or confidence promotion.",
+    "Other source/external/review projections, product-wide disposition parity and explicit semantic disagreement remain open.",
+    "No quality budgets, thresholds, scoring weights or measured scope changed; no T4 or release certification."
+  ],
+  "raw_evidence": "target/reporter-agreement"
+}
