@@ -51,12 +51,17 @@ fn read_document(path: impl AsRef<Path>) -> Value {
         .expect("json should parse")
 }
 
-fn write_clone_fixture(name: &str) -> PathBuf {
-    let root = repo_root().join("target").join("test-fixtures").join(name);
+fn fixture_root(name: &str) -> PathBuf {
+    let root = repo_root().join("target/test-fixtures").join(name);
     if root.exists() {
         fs::remove_dir_all(&root).expect("old test fixture should be removable");
     }
     fs::create_dir_all(root.join("src")).expect("test fixture src should be created");
+    root
+}
+
+fn write_clone_fixture(name: &str) -> PathBuf {
+    let root = fixture_root(name);
     fs::create_dir_all(root.join("tests")).expect("test fixture tests should be created");
     fs::write(
         root.join("Cargo.toml"),
@@ -180,11 +185,7 @@ fn duplicated_setup() {{
 }
 
 fn write_architecture_fixture(name: &str, artifacts: bool) -> PathBuf {
-    let root = repo_root().join("target").join("test-fixtures").join(name);
-    if root.exists() {
-        fs::remove_dir_all(&root).expect("old test fixture should be removable");
-    }
-    fs::create_dir_all(root.join("src")).expect("test fixture src should be created");
+    let root = fixture_root(name);
     fs::write(
         root.join("rqlens.toml"),
         format!(
@@ -280,11 +281,7 @@ fn wrap_fixture_artifacts(root: &Path) {
 }
 
 fn write_syntax_error_fixture(name: &str) -> PathBuf {
-    let root = repo_root().join("target").join("test-fixtures").join(name);
-    if root.exists() {
-        fs::remove_dir_all(&root).expect("old syntax-error fixture should be removable");
-    }
-    fs::create_dir_all(root.join("src")).expect("syntax-error fixture src should be created");
+    let root = fixture_root(name);
     fs::write(
         root.join("Cargo.toml"),
         "[package]\nname = \"syntax-error-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
@@ -308,11 +305,7 @@ output_dir = "target/analysis"
 }
 
 fn write_entrypoint_fixture(name: &str) -> PathBuf {
-    let root = repo_root().join("target").join("test-fixtures").join(name);
-    if root.exists() {
-        fs::remove_dir_all(&root).expect("old entrypoint fixture should be removable");
-    }
-    fs::create_dir_all(root.join("src")).expect("entrypoint src should be created");
+    let root = fixture_root(name);
     fs::create_dir_all(root.join("tools/custom")).expect("entrypoint tools should be created");
     fs::write(
         root.join("rqlens.toml"),
@@ -354,9 +347,7 @@ path = "tools/custom.rs"
         "use crate::domain::value;\npub fn run() -> i32 { value() }\n",
     )
     .expect("entrypoint service should be written");
-    fs::write(
-        root.join("src").join("main.rs"),
-        r#"
+    let entrypoint = r#"
 use crate::domain::value;
 use crate::service::run;
 
@@ -377,35 +368,11 @@ fn execute() -> i32 {
 fn report(value: i32) {
     println!("{}", value);
 }
-"#,
-    )
-    .expect("default bin should be written");
+"#;
+    fs::write(root.join("src/main.rs"), entrypoint).expect("default bin should be written");
     fs::write(
-        root.join("tools").join("custom.rs"),
-        r#"
-mod child;
-
-use crate::domain::value;
-use crate::service::run;
-
-fn main() {
-    let first = parse();
-    let second = execute();
-    report(first + second);
-}
-
-fn parse() -> i32 {
-    value()
-}
-
-fn execute() -> i32 {
-    run()
-}
-
-fn report(value: i32) {
-    println!("{}", value);
-}
-"#,
+        root.join("tools/custom.rs"),
+        format!("\nmod child;\n{entrypoint}"),
     )
     .expect("custom bin should be written");
     fs::write(
@@ -448,7 +415,8 @@ fn catalog_lists_board_compatible_tasks() {
 }
 
 #[test]
-fn config_schema_prints_machine_readable_schema() {
+fn config_and_artifact_schemas_are_machine_readable() {
+    artifact_schema_prints_known_output_contracts();
     let output = run(&["config-schema"]);
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["title"], "rust-quality-lens config");
@@ -484,7 +452,6 @@ fn config_schema_prints_machine_readable_schema() {
     );
 }
 
-#[test]
 fn artifact_schema_prints_known_output_contracts() {
     let output = run(&["artifact-schema"]);
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -606,8 +573,64 @@ fn review_uses_diff_file_scope() {
 }
 
 #[test]
-fn generated_artifacts_keep_expected_top_level_shapes() {
+fn measurement_bundle_preserves_contracts_scores_and_attribution() {
     let analysis = measure_fixture("all", "tests/fixtures/mini_rust_project/rqlens.toml");
+    generated_artifacts_keep_expected_top_level_shapes(&analysis);
+    generated_artifacts_match_envelope_conformance_snapshot(&analysis);
+    normalized_measurements_match_golden_snapshot(&analysis);
+    map_captures_direct_module_path_dependency(&analysis);
+    correctness_writes_review_and_test_catalog(&analysis);
+    hotspots_report_syntax_fact_confidence(&analysis);
+    function_risk_uses_current_coverage(&analysis);
+}
+
+fn function_risk_uses_current_coverage(analysis: &Path) {
+    // A fresh synthetic coverage artifact, not whatever a previous run left behind.
+    let mut document = read_document(analysis.join("hotspots.json"));
+    let function = document["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "function")
+        .unwrap()
+        .clone();
+    let root = repo_root().join("tests/fixtures/mini_rust_project");
+    let path = Path::new(function["path"].as_str().unwrap())
+        .strip_prefix(&root)
+        .unwrap()
+        .to_string_lossy()
+        .replace('\\', "/");
+    document.as_object_mut().unwrap().remove("records");
+    document["tool"] = serde_json::json!("coverage");
+    document["generated_from"] = serde_json::json!("test-fixture");
+    document["capabilities"] = serde_json::json!([]);
+    document["measurement_confidence"] = serde_json::json!({"complete": true, "partial": false});
+    document["data"] = serde_json::json!({
+        "summary": {"lines": {"count": 1, "covered": 1, "percent": 100.0}},
+        "files": [{"path": path, "line_hits": [{"line": function["start_line"], "covered": true}]}]
+    });
+    fs::write(
+        analysis.join("coverage.json"),
+        serde_json::to_vec(&document).unwrap(),
+    )
+    .unwrap();
+    measure_fixture("function-risk", root.join("rqlens.toml").to_str().unwrap());
+    let report = read_json(analysis.join("function_risk.json"));
+    assert_eq!(report["measurement_confidence"]["complete"], true);
+    let measured = report["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["name"] == function["name"])
+        .unwrap();
+    assert_eq!(measured["coverage_percent"], 100.0);
+    assert_eq!(
+        measured["crap"].as_f64().unwrap(),
+        function["cyclomatic_complexity"].as_f64().unwrap()
+    );
+}
+
+fn generated_artifacts_keep_expected_top_level_shapes(analysis: &Path) {
     let hotspots = read_json(analysis.join("hotspots.json"));
     assert!(hotspots.as_array().unwrap().iter().all(|row| {
         row.get("module_key").is_some()
@@ -648,9 +671,7 @@ fn generated_artifacts_keep_expected_top_level_shapes() {
     assert!(map["graph"]["edges"].as_array().is_some());
 }
 
-#[test]
-fn generated_artifacts_match_envelope_conformance_snapshot() {
-    let analysis = measure_fixture("all", "tests/fixtures/mini_rust_project/rqlens.toml");
+fn generated_artifacts_match_envelope_conformance_snapshot(analysis: &Path) {
     let expected: Value = serde_json::from_str(include_str!("snapshots/artifact_envelopes.json"))
         .expect("snapshot should parse");
     for (file, expected_keys) in expected.as_object().unwrap() {
@@ -676,11 +697,7 @@ fn generated_artifacts_match_envelope_conformance_snapshot() {
     }
 }
 
-#[test]
-fn normalized_measurements_match_golden_snapshot() {
-    let config = "tests/fixtures/mini_rust_project/rqlens.toml";
-    run(&["measure", "all", "--config", config]);
-    let analysis = repo_root().join("tests/fixtures/mini_rust_project/target/analysis");
+fn normalized_measurements_match_golden_snapshot(analysis: &Path) {
     let hotspots = read_json(analysis.join("hotspots.json"));
     let map = read_json(analysis.join("map.json"));
     let normalized = serde_json::json!({
@@ -706,11 +723,11 @@ fn normalized_measurements_match_golden_snapshot() {
 }
 
 #[test]
-fn type_health_keeps_same_named_types_separate() {
-    let analysis = measure_fixture(
-        "type-health",
-        "tests/fixtures/golden_rust_project/rqlens.toml",
-    );
+fn golden_fixture_preserves_type_ownership_and_test_attribution() {
+    let config = "tests/fixtures/golden_rust_project/rqlens.toml";
+    let analysis = measure_fixture("type-health", config);
+    measure_fixture("correctness", config);
+    correctness_attributes_inline_tests_to_production_modules(&analysis);
     let payload = read_json(analysis.join("type_health.json"));
     let rows = payload.as_array().unwrap();
     let alpha = rows
@@ -746,9 +763,7 @@ fn type_health_keeps_same_named_types_separate() {
     );
 }
 
-#[test]
-fn map_captures_direct_module_path_dependency() {
-    let analysis = measure_fixture("map", "tests/fixtures/mini_rust_project/rqlens.toml");
+fn map_captures_direct_module_path_dependency(analysis: &Path) {
     let payload = read_json(analysis.join("map.json"));
     assert_eq!(payload["meta"]["project_name"], "mini-rust-project");
     assert_eq!(payload["meta"]["risk_model_id"], "rqlens.architecture_risk");
@@ -764,17 +779,29 @@ fn map_captures_direct_module_path_dependency() {
 }
 
 #[test]
-fn map_reports_missing_artifacts_as_unknown_metrics() {
-    let fixture = write_architecture_fixture("arch-missing-artifacts", false);
-    let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
-    run(&["measure", "map", "--config", &config]);
-    let payload = read_json(fixture.join("target/analysis/map.json"));
+fn map_distinguishes_missing_and_complete_artifact_evidence() {
+    for (name, complete) in [
+        ("arch-missing-artifacts", false),
+        ("arch-complete-artifacts", true),
+    ] {
+        let fixture = write_architecture_fixture(name, complete);
+        let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
+        let payload = read_json(measure_fixture("map", &config).join("map.json"));
+        if complete {
+            map_scores_git_cycles_and_layer_violations(&payload);
+        } else {
+            map_reports_missing_artifacts_as_unknown_metrics(&payload);
+        }
+    }
+}
+
+fn map_reports_missing_artifacts_as_unknown_metrics(payload: &Value) {
     assert_eq!(
         payload["meta"]["summary"]["artifact_status"]["hotspots.json"]["status"],
         "missing"
     );
     assert_eq!(payload["measurement_confidence"]["partial"], true);
-    let service = node_data(&payload, "service");
+    let service = node_data(payload, "service");
     assert!(service["total_score"].is_null());
     assert!(
         service["unknown_metrics"]
@@ -785,17 +812,12 @@ fn map_reports_missing_artifacts_as_unknown_metrics() {
     );
 }
 
-#[test]
-fn map_scores_git_cycles_and_layer_violations() {
-    let fixture = write_architecture_fixture("arch-complete-artifacts", true);
-    let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
-    run(&["measure", "map", "--config", &config]);
-    let payload = read_json(fixture.join("target/analysis/map.json"));
+fn map_scores_git_cycles_and_layer_violations(payload: &Value) {
     assert_eq!(
         payload["meta"]["summary"]["artifact_status"]["hotspots.json"]["status"],
         "available"
     );
-    let domain = node_data(&payload, "domain");
+    let domain = node_data(payload, "domain");
     assert_eq!(domain["layer_violation_count"], 1);
     assert_eq!(domain["cycle_member"], true);
     assert!(domain["architectural_risk"].as_f64().unwrap() >= 140.0);
@@ -805,7 +827,7 @@ fn map_scores_git_cycles_and_layer_violations() {
             .as_u64()
             .is_some()
     );
-    let service = node_data(&payload, "service");
+    let service = node_data(payload, "service");
     assert!(service["total_score"].as_f64().is_some());
     assert!(service["unknown_metrics"].as_array().unwrap().is_empty());
 }
@@ -903,24 +925,14 @@ fn entrypoints_are_visible_and_discounted_in_outputs() {
     );
 }
 
-#[test]
-fn correctness_writes_review_and_test_catalog() {
-    let root = measure_fixture(
-        "correctness",
-        "tests/fixtures/mini_rust_project/rqlens.toml",
-    );
+fn correctness_writes_review_and_test_catalog(root: &Path) {
     let review = read_json(root.join("correctness_review.json"));
     let catalog = read_json(root.join("test_catalog.json"));
     assert_eq!(review["summary"]["test_count"], 0);
     assert!(catalog.as_array().unwrap().is_empty());
 }
 
-#[test]
-fn correctness_attributes_inline_tests_to_production_modules() {
-    let analysis = measure_fixture(
-        "correctness",
-        "tests/fixtures/golden_rust_project/rqlens.toml",
-    );
+fn correctness_attributes_inline_tests_to_production_modules(analysis: &Path) {
     let review = read_json(analysis.join("correctness_review.json"));
     let domain_test = review["tests"]
         .as_array()
@@ -1053,15 +1065,11 @@ fn telemetry_command_preserves_observed_operational_evidence() {
 }
 
 #[test]
-fn outcomes_command_separates_inferred_history() {
+fn evidence_commands_preserve_provenance_and_missing_evidence() {
     run(&["outcomes", "--config", "rqlens.toml"]);
     let document = read_document(repo_root().join("target/analysis/repository_outcomes.json"));
     assert_eq!(document["tool"], "repository-outcomes");
     assert!(document["data"]["records"].is_array());
-}
-
-#[test]
-fn performance_command_writes_explicit_missing_evidence() {
     run(&[
         "performance",
         "--no-run",
@@ -1075,9 +1083,7 @@ fn performance_command_writes_explicit_missing_evidence() {
     assert_eq!(document["measurement_confidence"]["partial"], true);
 }
 
-#[test]
-fn hotspots_report_syntax_fact_confidence() {
-    let analysis = measure_fixture("hotspots", "tests/fixtures/mini_rust_project/rqlens.toml");
+fn hotspots_report_syntax_fact_confidence(analysis: &Path) {
     let payload = read_json(analysis.join("hotspots.json"));
     let rows = payload.as_array().unwrap();
     assert!(!rows.is_empty());

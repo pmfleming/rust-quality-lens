@@ -13,7 +13,7 @@ class EvidenceContracts(unittest.TestCase):
     def setUp(self):
         self.contracts = json.loads((ROOT / "contracts/blocking-rules.json").read_text())
 
-    def test_explicit_scope_and_incomplete_case_coverage(self):
+    def test_inventory_covers_rules_gates_and_explicit_limitations(self):
         self.assertEqual(self.contracts["schema_version"], 1)
         self.assertNotEqual(self.contracts["coverage_status"], "passed")
         for group in ["families", "dynamic_families", "gates", "automatic_gates"]:
@@ -28,7 +28,6 @@ class EvidenceContracts(unittest.TestCase):
         for family in self.contracts["rules"].values():
             self.assertIn(self.contracts["families"][family]["artifact"], FILES)
 
-    def test_all_literal_rules_and_generated_reliability_rules_are_inventoried(self):
         paths = ["rust_helpers/src/bin/rust_facts.rs", "src/producers/practices.rs",
                  "src/producers/test_quality.rs", "src/toolchain.rs"]
         for path in paths:
@@ -42,7 +41,6 @@ class EvidenceContracts(unittest.TestCase):
                 self.assertIn(f"rust.reliability.{suffix}", self.contracts["rules"])
         self.assertNotIn("rust.reliability.unreachable", self.contracts["rules"])
 
-    def test_all_cli_gate_names_are_inventoried(self):
         source = (ROOT / "src/policy.rs").read_text()
         names = re.findall(r'Self::\w+ => "([a-z-]+)"', source)
         self.assertEqual(set(names), set(self.contracts["gates"]))

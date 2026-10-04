@@ -32,14 +32,13 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         .collect::<HashSet<_>>();
     let source_ast_facts = all_ast_facts
         .iter()
-        .filter(|fact| source_files.contains(&normalize_slashes(&fact.file)))
-        .cloned()
-        .collect::<Vec<_>>();
+        .filter(|fact| source_files.contains(&normalize_slashes(&fact.file)));
     let source_fact_confidence = context.source_confidence();
     rows.extend(ast_clone_rows(
         config,
-        &source_ast_facts,
+        source_ast_facts,
         source_fact_confidence.clone(),
+        false,
     ));
     rows.extend(module_responsibility_rows(
         &context.source_facts,
@@ -287,14 +286,19 @@ fn declaration_only_instance(instance: &CloneInstance) -> bool {
         })
 }
 
-fn ast_clone_rows(config: &LensConfig, facts: &[AstCloneFact], confidence: Value) -> Vec<Value> {
+fn ast_clone_rows<'a>(
+    config: &LensConfig,
+    facts: impl Iterator<Item = &'a AstCloneFact>,
+    confidence: Value,
+    is_test: bool,
+) -> Vec<Value> {
     let mut groups: BTreeMap<String, Vec<&AstCloneFact>> = BTreeMap::new();
     for fact in facts {
         groups.entry(fact.ast_hash.clone()).or_default().push(fact);
     }
     groups
         .into_iter()
-        .filter_map(|(hash, facts)| ast_clone_row(config, hash, facts, &confidence))
+        .filter_map(|(hash, facts)| ast_clone_row(config, hash, facts, &confidence, is_test))
         .collect()
 }
 
@@ -303,6 +307,7 @@ fn ast_clone_row(
     hash: String,
     facts: Vec<&AstCloneFact>,
     confidence: &Value,
+    is_test: bool,
 ) -> Option<Value> {
     if facts.len() < 2 {
         return None;
@@ -321,24 +326,50 @@ fn ast_clone_row(
         return None;
     }
     let max_node_count = facts.iter().map(|fact| fact.node_count).max().unwrap_or(0);
-    let score =
-        round2(facts.len() as f64 * max_line_span as f64 * ast_cross_file_factor(file_count));
+    let base = facts.len() as f64 * max_line_span as f64;
+    let (engine, score, signals, components, calibration) = if is_test {
+        let score = round2(base * 2.0);
+        (
+            "test-ast",
+            score,
+            if file_count >= 2 {
+                format!("duplicated test body shape x{file_count}")
+            } else {
+                "same-file duplicated test body shape".to_string()
+            },
+            json!([{"signal": "test_instances_x_span", "raw": {"instances": facts.len(), "max_line_span": max_line_span}, "weight": 2.0, "contribution": score}]),
+            "clones_test_ast",
+        )
+    } else {
+        let score = round2(base * ast_cross_file_factor(file_count));
+        (
+            "ast",
+            score,
+            if file_count >= 2 {
+                format!("ast cross-file x{file_count}")
+            } else {
+                "ast same-file repeat".to_string()
+            },
+            json!([
+                {"signal": "instances_x_span", "raw": {"instances": facts.len(), "max_line_span": max_line_span}, "contribution": round2(base)},
+                {"signal": "cross_file_factor", "raw": file_count, "contribution": round2(score - base)},
+            ]),
+            "clones_ast",
+        )
+    };
     Some(json!({
-        "engine": "ast",
+        "engine": engine,
         "hash": hash,
         "node_count": max_node_count,
         "instance_count": facts.len(),
         "file_count": file_count,
         "max_line_span": max_line_span,
         "score": score,
-        "signals": if file_count >= 2 { format!("ast cross-file x{file_count}") } else { "ast same-file repeat".to_string() },
-        "score_components": [
-            {"signal": "instances_x_span", "raw": {"instances": facts.len(), "max_line_span": max_line_span}, "contribution": round2(facts.len() as f64 * max_line_span as f64)},
-            {"signal": "cross_file_factor", "raw": file_count, "contribution": round2(score - facts.len() as f64 * max_line_span as f64)},
-        ],
+        "signals": signals,
+        "score_components": components,
         "risk_model_id": MODEL_ID,
         "risk_model_version": MODEL_VERSION,
-        "risk_calibration": "clones_ast",
+        "risk_calibration": calibration,
         "instances": facts.into_iter().map(|fact| json!({
             "file_path": normalize_slashes(&fact.file),
             "module_path": project_relative_path(&config.project_root, &fact.file),
@@ -522,67 +553,14 @@ fn test_ast_clone_rows(
             tests.insert((normalize_slashes(&test.path), test.name.clone()));
         }
     }
-    let mut groups: BTreeMap<String, Vec<&AstCloneFact>> = BTreeMap::new();
-    for fact in ast_facts
-        .iter()
-        .filter(|fact| tests.contains(&(normalize_slashes(&fact.file), fact.name.clone())))
-    {
-        groups.entry(fact.ast_hash.clone()).or_default().push(fact);
-    }
-    groups
-        .into_iter()
-        .filter_map(|(hash, facts)| test_ast_clone_row(config, hash, facts, &confidence))
-        .collect()
-}
-
-fn test_ast_clone_row(
-    config: &LensConfig,
-    hash: String,
-    facts: Vec<&AstCloneFact>,
-    confidence: &Value,
-) -> Option<Value> {
-    if facts.len() < 2 {
-        return None;
-    }
-    let file_count = facts
-        .iter()
-        .map(|fact| normalize_slashes(&fact.file))
-        .collect::<HashSet<_>>()
-        .len();
-    let max_line_span = facts
-        .iter()
-        .map(|fact| fact.end_line.saturating_sub(fact.start_line) + 1)
-        .max()
-        .unwrap_or(0);
-    if max_line_span < MIN_CLONE_LINE_SPAN {
-        return None;
-    }
-    let max_node_count = facts.iter().map(|fact| fact.node_count).max().unwrap_or(0);
-    Some(json!({
-        "engine": "test-ast",
-        "hash": hash,
-        "node_count": max_node_count,
-        "instance_count": facts.len(),
-        "file_count": file_count,
-        "max_line_span": max_line_span,
-        "score": round2(facts.len() as f64 * max_line_span as f64 * 2.0),
-        "signals": if file_count >= 2 { format!("duplicated test body shape x{file_count}") } else { "same-file duplicated test body shape".to_string() },
-        "score_components": [{"signal": "test_instances_x_span", "raw": {"instances": facts.len(), "max_line_span": max_line_span}, "weight": 2.0, "contribution": round2(facts.len() as f64 * max_line_span as f64 * 2.0)}],
-        "risk_model_id": MODEL_ID,
-        "risk_model_version": MODEL_VERSION,
-        "risk_calibration": "clones_test_ast",
-        "instances": facts.into_iter().map(|fact| json!({
-            "file_path": normalize_slashes(&fact.file),
-            "module_path": project_relative_path(&config.project_root, &fact.file),
-            "name": fact.name,
-            "qualified_name": fact.qualified_name,
-            "start_line": fact.start_line,
-            "end_line": fact.end_line,
-            "node_count": fact.node_count,
-            "snippet": snippet_for_range(&fact.file, fact.start_line, fact.end_line),
-        })).collect::<Vec<_>>(),
-        "measurement_confidence": confidence,
-    }))
+    ast_clone_rows(
+        config,
+        ast_facts
+            .iter()
+            .filter(|fact| tests.contains(&(normalize_slashes(&fact.file), fact.name.clone()))),
+        confidence,
+        true,
+    )
 }
 
 fn snippet_for_range(path: &str, start_line: usize, end_line: usize) -> String {
@@ -626,7 +604,7 @@ mod tests {
     use std::{collections::HashMap, path::Path};
 
     #[test]
-    fn declaration_only_windows_are_not_reported_as_code_clones() {
+    fn token_clones_require_executable_function_spans() -> anyhow::Result<()> {
         let declaration = CloneInstance {
             file_path: "src/lib.rs".to_string(),
             start_line: 1,
@@ -641,10 +619,6 @@ mod tests {
         };
         assert!(declaration_only_instance(&declaration));
         assert!(!declaration_only_instance(&executable));
-    }
-
-    #[test]
-    fn token_windows_are_limited_to_function_spans() -> anyhow::Result<()> {
         let source = r#"fn calculate(input: usize) -> usize {
     let one = input + 1;
     let two = one + 2;

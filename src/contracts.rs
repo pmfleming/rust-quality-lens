@@ -12,7 +12,7 @@ pub(crate) use evidence::{
     MeasurementConfidence, benchmark_index, benchmark_records,
 };
 mod current;
-pub(crate) use current::{ArtifactReadError, read_current};
+pub(crate) use current::{ArtifactReadError, read_current, validated_current};
 mod baseline;
 pub(crate) use baseline::{coverage_percent, read_baseline, validate_comparison_evidence};
 mod validation;

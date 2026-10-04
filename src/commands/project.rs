@@ -15,7 +15,7 @@ pub(super) fn run(command: Commands) -> Result<()> {
             LensConfig::load(args.config)?,
         ),
         Commands::Sarif(args) => write_report(
-            sarif::write(&LensConfig::load(args.config)?, args.output)?,
+            sarif::write(&LensConfig::load(args.config)?, args.output),
             "SARIF report",
         ),
         Commands::Review(args) => write_report(
@@ -24,7 +24,7 @@ pub(super) fn run(command: Commands) -> Result<()> {
                 args.changed_since,
                 args.diff_file,
                 args.baseline_review,
-            )?,
+            ),
             "review data",
         ),
         Commands::Check(args) => policy::run_check(

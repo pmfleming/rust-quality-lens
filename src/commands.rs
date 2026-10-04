@@ -28,7 +28,8 @@ fn print_json(value: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
-fn write_report(path: PathBuf, label: &str) -> Result<()> {
+fn write_report(result: Result<PathBuf>, label: &str) -> Result<()> {
+    let path = result?;
     println!("Wrote {label} to {}", path.display());
     Ok(())
 }

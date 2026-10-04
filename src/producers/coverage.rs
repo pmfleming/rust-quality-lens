@@ -265,31 +265,14 @@ fn unavailable(reason: &str, field: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::{coverage_file, coverage_summary};
-    use crate::config::{LensConfig, SemanticIdentityMode};
+    use crate::config::LensConfig;
     use crate::facts::FileFacts;
     use serde_json::json;
-    use std::path::PathBuf;
+    use std::path::Path;
 
     #[test]
     fn parses_llvm_coverage_metrics() {
-        let config = LensConfig {
-            project_name: "demo".to_string(),
-            project_root: PathBuf::from("/project"),
-            source_roots: vec!["/project/src".to_string()],
-            fingerprint_inputs: Vec::new(),
-            cargo_metadata: None,
-            helper_metadata: None,
-            output_dir: PathBuf::from("/project/target/analysis"),
-            helper_manifest: PathBuf::from("unused"),
-            identity_resolution: SemanticIdentityMode::Disabled,
-            rust_analyzer: PathBuf::from("rust-analyzer"),
-            identity_timeout_seconds: 1,
-            identity_offline: true,
-            identity_build_macros: false,
-            verification: Default::default(),
-            architecture: Default::default(),
-            policy: Default::default(),
-        };
+        let config = LensConfig::test_config("demo", Path::new("/project"));
         let mut fact = FileFacts::test_fact("/project/src/domain.rs", "domain");
         fact.module_id = "demo::demo::domain".to_string();
         let Ok(file) = coverage_file(

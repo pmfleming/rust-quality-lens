@@ -27,6 +27,9 @@ fn observation() -> Expansion {
 
 #[test]
 fn empty_expansion_is_not_missing_expansion() -> Result<()> {
+    let mut forged = observation();
+    forged.expanded_source = Some("struct Invented;".into());
+    assert!(validate_expansion(forged).is_err());
     let mut site = observation();
     assert!(site.apply(Value::Null).is_err());
     assert!(
@@ -46,6 +49,13 @@ fn empty_expansion_is_not_missing_expansion() -> Result<()> {
 
 #[test]
 fn response_success_cannot_certify_semantic_inventory() -> Result<()> {
+    let mut fact = FileFacts::test_fact("src/lib.rs", "lib");
+    assert!(!inventory_complete(std::slice::from_ref(&fact), 1));
+    fact.items.macro_invocations = Some(vec![]);
+    assert!(inventory_complete(std::slice::from_ref(&fact), 1));
+    assert!(!inventory_complete(std::slice::from_ref(&fact), 2));
+    fact.parse_status = "recovered".into();
+    assert!(!inventory_complete(&[fact], 1));
     let mut site = observation();
     site.apply(json!({"name": "make", "expansion": "struct Generated;"}))?;
     let report = Report {
@@ -80,17 +90,6 @@ fn response_success_cannot_certify_semantic_inventory() -> Result<()> {
 }
 
 #[test]
-fn missing_or_recovered_inventory_is_not_known_empty() {
-    let mut fact = FileFacts::test_fact("src/lib.rs", "lib");
-    assert!(!inventory_complete(std::slice::from_ref(&fact), 1));
-    fact.items.macro_invocations = Some(vec![]);
-    assert!(inventory_complete(std::slice::from_ref(&fact), 1));
-    assert!(!inventory_complete(std::slice::from_ref(&fact), 2));
-    fact.parse_status = "recovered".into();
-    assert!(!inventory_complete(&[fact], 1));
-}
-
-#[test]
 fn generated_fragments_are_context_checked() -> Result<()> {
     for (kind, text, parsed) in [
         (MacroContext::Item, "", true),
@@ -120,11 +119,4 @@ fn generated_fragments_are_context_checked() -> Result<()> {
         assert_eq!(syntax["declarations"], json!([]));
     }
     Ok(())
-}
-
-#[test]
-fn unavailable_expansion_cannot_carry_generated_source() {
-    let mut site = observation();
-    site.expanded_source = Some("struct Invented;".into());
-    assert!(validate_expansion(site).is_err());
 }

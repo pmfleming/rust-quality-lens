@@ -123,14 +123,13 @@ fn read_optional(config: &LensConfig, file: &str) -> Result<Option<Value>> {
         .with_context(|| format!("reading SARIF input {}", path.display()))?;
     let document: Value = serde_json::from_str(&contents)
         .with_context(|| format!("parsing SARIF input {}", path.display()))?;
-    crate::contracts::validate_artifact(file, &document)
+    let artifact = crate::contracts::validated_current(document, file, &config.input_fingerprint())
         .with_context(|| format!("invalid SARIF input {file}"))?;
     ensure!(
-        crate::fingerprint::freshness(&document, &config.input_fingerprint())
-            == crate::fingerprint::Freshness::Current,
+        artifact.current,
         "SARIF input {file} is stale or has incomplete provenance; rerun measurement"
     );
-    Ok(Some(document))
+    Ok(Some(artifact.document))
 }
 
 #[cfg(test)]

@@ -1,6 +1,8 @@
+import copy
 import unittest
 
 import trust_campaign as campaign
+from self_refactor_campaign import normalized
 
 
 class TrustComparison(unittest.TestCase):
@@ -8,18 +10,19 @@ class TrustComparison(unittest.TestCase):
         self.assertNotIn('source-expansion', campaign.TOOLS)
         self.assertEqual(campaign.ALL_TOOLS['source-expansion'], 'source_expansion.json')
 
-    def test_only_declared_timestamps_are_ignored(self):
+    def test_comparison_ignores_only_declared_timestamps_without_mutation(self):
         a = {'generated_at': 'before', 'records': [{'measured_at': 'before', 'value': 1}], 'complete': True}
         b = {'generated_at': 'after', 'records': [{'measured_at': 'after', 'value': 1}], 'complete': True}
-        self.assertEqual(campaign.normalize(a), campaign.normalize(b))
-        for key, value in [('complete', False), ('duration_ms', 2), ('cache_hit', True)]:
-            changed = {**b, key: value}
-            self.assertNotEqual(campaign.normalize(a), campaign.normalize(changed))
-
-    def test_order_missing_results_and_semantic_changes_are_not_hidden(self):
-        a = {'edges': [{'target': 'a'}, {'target': 'b'}]}
-        b = {'edges': list(reversed(a['edges']))}
-        self.assertTrue(campaign.differences(campaign.normalize(a), campaign.normalize(b)))
-        self.assertTrue(campaign.differences(a, {}))
-        self.assertTrue(campaign.differences({'value': None}, {'value': 0}))
-        self.assertTrue(campaign.differences({'value': True}, {'value': 1}))
+        for normalize in [campaign.normalize, normalized]:
+            with self.subTest(normalizer=normalize.__module__):
+                saved = copy.deepcopy(a)
+                self.assertEqual(normalize(a), normalize(b))
+                for key, value in [('complete', False), ('duration_ms', 2), ('cache_hit', True)]:
+                    self.assertNotEqual(normalize(a), normalize({**b, key: value}))
+                edges = {'edges': [{'target': 'a', 'value': None}, {'target': 'b', 'scope': 'unknown'}]}
+                self.assertEqual(normalize(edges), edges)
+                self.assertNotEqual(normalize(edges), normalize({'edges': list(reversed(edges['edges']))}))
+                self.assertTrue(campaign.differences(normalize(edges), {}))
+                self.assertTrue(campaign.differences(normalize({'value': None}), normalize({'value': 0})))
+                self.assertTrue(campaign.differences(normalize({'value': True}), normalize({'value': 1})))
+                self.assertEqual(a, saved)

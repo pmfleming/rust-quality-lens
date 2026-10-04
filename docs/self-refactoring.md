@@ -1,5 +1,8 @@
 # Self-measured refactoring
 
+This is the earlier baseline. See [the subsequent self-review](self-refactoring-2.md)
+for the measured refactoring after source/imported reporter agreement.
+
 Baseline: `80d0798`. Evidence: `acceptance/self-refactoring-results.json` and
 `target/self-improve/`. This is quality refactoring, **not T4 closure**.
 

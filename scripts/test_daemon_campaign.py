@@ -23,15 +23,10 @@ class CampaignTests(unittest.TestCase):
         self.assertTrue(config["verification"]["audit"])
         self.assertEqual(config["architecture"]["rules"][0]["deny"], ["b"])
 
-    def test_new_verification_table_is_valid(self):
+        # An absent table must be created without nesting it under [rust].
         config = tomllib.loads(campaign.override('project_root = "."\n[rust]\nidentity_resolution = "auto"\n', "verification", "locked", True))
         self.assertTrue(config["verification"]["locked"])
         self.assertNotIn("locked", config["rust"])
-
-    def test_missing_numeric_evidence_does_not_become_zero(self):
-        self.assertIsNone(campaign.distribution([], "score"))
-        self.assertIsNone(campaign.distribution([{"score": None}], "score"))
-        self.assertEqual(campaign.distribution([{"score": 0}], "score")["max"], 0)
 
     def test_default_build_uses_cargos_reported_executable(self):
         message = campaign.json.dumps({"reason": "compiler-artifact", "target": {"name": "rqlens"},
@@ -62,7 +57,7 @@ class CampaignTests(unittest.TestCase):
             self.assertEqual((destination / "rqlens").read_bytes(), b"original executable")
             self.assertEqual(provenance["binary_sha256"], campaign.hashlib.sha256(b"original executable").hexdigest())
 
-    def test_profile_output_is_isolated_from_source(self):
+        # Actual command execution must isolate profiling side effects too.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             result = campaign.command(
@@ -73,12 +68,11 @@ class CampaignTests(unittest.TestCase):
             self.assertEqual((root / "verify.log").read_text().strip(), str(root / "profiles/%m_%p.profraw"))
             self.assertTrue((root / "profiles").is_dir())
 
-    def test_unstable_capture_cannot_be_compared(self):
+    def test_unstable_sources_or_changed_policy_cannot_be_compared(self):
         with patch.object(campaign, "summarize", return_value={"run": {"source_stable": False}}):
             with self.assertRaisesRegex(RuntimeError, "source changed"):
                 campaign.compare(Path("before"), Path("after"))
 
-    def test_changed_policy_cannot_be_compared(self):
         with tempfile.TemporaryDirectory() as directory:
             before, after = [Path(directory) / name for name in ["before", "after"]]
             for root, enabled in [(before, "true"), (after, "false")]:
@@ -89,6 +83,9 @@ class CampaignTests(unittest.TestCase):
                     campaign.compare(before, after)
 
     def test_missing_evidence_and_verification_make_comparison_provisional(self):
+        self.assertIsNone(campaign.distribution([], "score"))
+        self.assertIsNone(campaign.distribution([{"score": None}], "score"))
+        self.assertEqual(campaign.distribution([{"score": 0}], "score")["max"], 0)
         with tempfile.TemporaryDirectory() as directory:
             roots = [Path(directory) / name for name in ["before", "after"]]
             for root in roots:

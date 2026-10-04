@@ -150,28 +150,21 @@ fn required_string<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::{normalize_signal, telemetry_age_hours, telemetry_expired, validate_freshness};
-    use chrono::{TimeZone, Utc};
+    use chrono::Utc;
     use serde_json::json;
-
-    #[test]
-    fn future_telemetry_windows_are_rejected_beyond_clock_skew() {
-        let Some(now) = Utc.with_ymd_and_hms(2026, 8, 20, 12, 0, 0).single() else {
-            panic!("fixed UTC timestamp should be valid");
-        };
-        assert_eq!(
-            telemetry_age_hours(now + chrono::Duration::minutes(4), now).ok(),
-            Some(0)
-        );
-        assert!(telemetry_age_hours(now + chrono::Duration::minutes(6), now).is_err());
-        assert_eq!(
-            telemetry_age_hours(now - chrono::Duration::hours(25), now).ok(),
-            Some(25)
-        );
-    }
 
     #[test]
     fn freshness_is_exact_and_rechecked_at_consumption() -> anyhow::Result<()> {
         let end = chrono::DateTime::parse_from_rfc3339("2026-08-20T12:00:00Z")?.with_timezone(&Utc);
+        assert_eq!(
+            telemetry_age_hours(end + chrono::Duration::minutes(4), end).ok(),
+            Some(0)
+        );
+        assert!(telemetry_age_hours(end + chrono::Duration::minutes(6), end).is_err());
+        assert_eq!(
+            telemetry_age_hours(end - chrono::Duration::hours(25), end).ok(),
+            Some(25)
+        );
         let document = json!({"telemetry_input": {
             "window": {"end": end.to_rfc3339()}, "max_age_hours": 24
         }});

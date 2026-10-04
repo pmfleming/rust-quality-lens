@@ -309,10 +309,6 @@ mod tests {
             resolve_dependency("super::domain::model", "service::worker", &modules),
             None
         );
-    }
-
-    #[test]
-    fn semantic_module_path_probes_are_not_dependencies() {
         assert!(is_module_path_probe(Some("crate::module::use")));
         assert!(is_module_path_probe(Some("crate::module::self")));
         assert!(!is_module_path_probe(Some("crate::module::function")));

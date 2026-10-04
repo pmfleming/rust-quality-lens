@@ -14,10 +14,15 @@ The initial E2/E3 milestone inventories rule families and fixes configured-polic
 
 Source/imported reporter agreement adds six native agreement fixtures, 30 rejection/abstention cases, twelve exact replays and an actual 127-finding self comparison. Source/import provenance is retained without changing reliability selection or inventing engine-scope completeness. See `source-reporters-results.json` and `../contracts/source-projection.md`.
 
+The subsequent self-review uses the frozen `13889de` evaluator: source/complexity/duplication decrease, correctness locality and shared evidence reuse improve, and average leverage declines slightly. See `self-refactoring-2-results.json` and `../docs/self-refactoring-2.md`. Five static producer replays and three clone-fixture differentials preserve all content except timestamps; no effort, dead-code completeness or release claim is implied.
+
+The following test consolidation reaches 155 registrations from 231, including both live fixtures. All retained suites and native evidence-contract campaigns pass; the unchanged-source coverage comparison loses no previously covered function spans or code regions. See `test-reduction-results.json` and `../docs/test-reduction.md` for counting scope, consolidation/removal rationale, coverage limitations and reproduction. This is not a permanent cap on new tests or a criterion closure.
+
 Additional checks:
 
 ```sh
 python3 -m unittest discover -s acceptance -p 'test_*.py'
+python3 -m unittest discover -s scripts -p 'test_*.py'
 python3 acceptance/calibration.py
 python3 acceptance/calibration.py --release  # intentionally blocked pending independent study
 python3 acceptance/profile.py               # after native build/helper prewarming

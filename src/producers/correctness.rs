@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs;
 
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext, TestFact, TestStatus, resolve_dependency, run_tests};
@@ -67,29 +66,27 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> R
         })
         .collect::<Vec<_>>();
     for test in &mut tests {
-        let observed = test["tested_modules"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .filter(|module| covered_modules.contains(module))
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        if let Some(object) = test.as_object_mut() {
-            object.insert("coverage_observed_modules".to_string(), json!(observed));
-            let observed_ids = object
-                .get("tested_module_ids")
-                .and_then(Value::as_array)
+        for (input, output, covered) in [
+            (
+                "tested_modules",
+                "coverage_observed_modules",
+                &covered_modules,
+            ),
+            (
+                "tested_module_ids",
+                "coverage_observed_module_ids",
+                &covered_module_ids,
+            ),
+        ] {
+            let observed = test[input]
+                .as_array()
                 .into_iter()
                 .flatten()
                 .filter_map(Value::as_str)
-                .filter(|module| covered_module_ids.contains(module))
+                .filter(|module| covered.contains(module))
                 .map(str::to_string)
                 .collect::<Vec<_>>();
-            object.insert(
-                "coverage_observed_module_ids".to_string(),
-                json!(observed_ids),
-            );
+            test[output] = json!(observed);
         }
     }
     let layers = layer_rows(&tests);
@@ -121,29 +118,20 @@ struct CoverageEvidence {
 
 fn coverage_evidence(config: &LensConfig, fingerprint: &Value) -> CoverageEvidence {
     let path = config.output_dir.join("coverage.json");
-    let Ok(text) = fs::read_to_string(path) else {
+    let Ok(artifact) = crate::contracts::read_current(&path, "coverage.json", fingerprint) else {
         return CoverageEvidence::default();
     };
-    let Ok(document) = serde_json::from_str::<Value>(&text) else {
-        return CoverageEvidence::default();
-    };
-    if crate::contracts::validate_artifact("coverage.json", &document).is_err() {
+    if !artifact.complete {
         return CoverageEvidence::default();
     }
-    coverage_from_document(&document, fingerprint)
-}
-
-fn coverage_from_document(document: &Value, current: &Value) -> CoverageEvidence {
-    if document["measurement_confidence"]["complete"] != true {
-        return CoverageEvidence::default();
-    }
-    if crate::fingerprint::freshness(document, current) != crate::fingerprint::Freshness::Current {
+    if !artifact.current {
         return CoverageEvidence {
             records: Vec::new(),
             stale: true,
         };
     }
-    let data = document.get("data").unwrap_or(document);
+    let document = artifact.document;
+    let data = document.get("data").unwrap_or(&document);
     let records = data["files"]
         .as_array()
         .into_iter()
@@ -374,10 +362,9 @@ fn status_for_test<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{coverage_from_document, status_for_test};
+    use super::{coverage_evidence, status_for_test};
     use crate::facts::TestStatus;
     use serde_json::json;
-    use std::collections::HashMap;
 
     fn status(status: &str) -> TestStatus {
         TestStatus {
@@ -389,45 +376,56 @@ mod tests {
     }
 
     #[test]
-    fn status_lookup_uses_exact_key_first() {
-        let mut statuses = HashMap::new();
-        statuses.insert("tests::case".to_string(), status("passed"));
-        statuses.insert("module::tests::case".to_string(), status("failed"));
-
-        let found = status_for_test(&statuses, &["tests::case".to_string()], "tests::case");
-
-        assert_eq!(found.map(|status| status.status.as_str()), Some("passed"));
+    fn status_lookup_requires_an_exact_or_unambiguous_match() {
+        for (entries, key, expected) in [
+            (
+                vec![("tests::case", "passed"), ("module::tests::case", "failed")],
+                "tests::case",
+                Some("passed"),
+            ),
+            (
+                vec![("module::tests::case", "passed")],
+                "other.rs::tests::case",
+                Some("passed"),
+            ),
+            (
+                vec![
+                    ("one::tests::case", "passed"),
+                    ("two::tests::case", "failed"),
+                ],
+                "",
+                None,
+            ),
+        ] {
+            let statuses = entries
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), status(value)))
+                .collect();
+            let keys = if key.is_empty() {
+                vec![]
+            } else {
+                vec![key.to_string()]
+            };
+            let found = status_for_test(&statuses, &keys, "tests::case");
+            assert_eq!(
+                found.map(|status| status.status.as_str()),
+                expected,
+                "lookup keys: {keys:?}"
+            );
+        }
     }
 
     #[test]
-    fn status_lookup_uses_unambiguous_qualified_suffix() {
-        let mut statuses = HashMap::new();
-        statuses.insert("module::tests::case".to_string(), status("passed"));
-
-        let found = status_for_test(
-            &statuses,
-            &["other.rs::tests::case".to_string()],
-            "tests::case",
-        );
-
-        assert_eq!(found.map(|status| status.status.as_str()), Some("passed"));
-    }
-
-    #[test]
-    fn status_lookup_ignores_ambiguous_suffix_matches() {
-        let mut statuses = HashMap::new();
-        statuses.insert("one::tests::case".to_string(), status("passed"));
-        statuses.insert("two::tests::case".to_string(), status("failed"));
-
-        assert!(status_for_test(&statuses, &[], "tests::case").is_none());
-    }
-
-    #[test]
-    fn stale_coverage_is_not_attributed_to_current_sources() {
-        let document = json!({
+    fn stale_coverage_is_not_attributed_to_current_sources() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        let config = crate::config::LensConfig::test_config("coverage", root.path());
+        std::fs::create_dir_all(&config.output_dir)?;
+        let path = config.output_dir.join("coverage.json");
+        let mut document = json!({
+            "schema_version": 3, "tool": "coverage", "risk_model_version": crate::measurement::MODEL_VERSION,
             "input_fingerprint": {"digest": "old", "algorithm": "test", "complete": true},
-            "measurement_confidence": {"complete": true},
-            "data": {"files": [{
+            "measurement_confidence": {"complete": true, "partial": false},
+            "data": {"summary": {"lines": {"percent": 100.0}}, "files": [{
                 "module_key": "domain",
                 "module_id": "app::lib::domain",
                 "path": "src/domain.rs",
@@ -435,15 +433,38 @@ mod tests {
             }]}
         });
 
-        let stale = coverage_from_document(
-            &document,
+        std::fs::write(&path, serde_json::to_vec(&document)?)?;
+        let stale = coverage_evidence(
+            &config,
             &json!({"digest": "current", "algorithm": "test", "complete": true}),
         );
         assert!(stale.stale);
         assert!(stale.records.is_empty());
-
-        let fresh = coverage_from_document(&document, &document["input_fingerprint"]);
+        let fresh = coverage_evidence(&config, &document["input_fingerprint"]);
         assert!(!fresh.stale);
         assert_eq!(fresh.records.len(), 1);
+        for payload in [
+            {
+                document["measurement_confidence"] = json!({"complete": false, "partial": true});
+                serde_json::to_string(&document)?
+            },
+            {
+                document["schema_version"] = json!(0);
+                serde_json::to_string(&document)?
+            },
+            "{".into(),
+        ] {
+            std::fs::write(&path, payload)?;
+            let absent = coverage_evidence(&config, &document["input_fingerprint"]);
+            assert!(!absent.stale);
+            assert!(absent.records.is_empty());
+        }
+        std::fs::remove_file(path)?;
+        assert!(
+            coverage_evidence(&config, &document["input_fingerprint"])
+                .records
+                .is_empty()
+        );
+        Ok(())
     }
 }

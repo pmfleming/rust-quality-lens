@@ -274,7 +274,6 @@ mod tests {
     use super::{benchmark_confidence, comparisons, run_benchmarks};
     use serde_json::json;
 
-    #[test]
     fn comparison_confidence_keeps_the_actual_incompatibility_reason() {
         let confidence = benchmark_confidence(
             false,
@@ -404,6 +403,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[test]
     fn benchmark_comparison_requires_matching_environment_and_nonoverlapping_intervals()
     -> anyhow::Result<()> {
+        comparison_confidence_keeps_the_actual_incompatibility_reason();
+        benchmark_comparisons_report_relative_regressions()?;
         let record = |estimate, low, high, host| {
             json!([{ "id": "parse", "estimate_nanoseconds": estimate,
             "samples": 10, "environment": {"host": host},
@@ -431,7 +432,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
-    #[test]
     fn benchmark_comparisons_report_relative_regressions() -> anyhow::Result<()> {
         let current =
             super::benchmark_records(&json!([{"id": "parse", "estimate_nanoseconds": 120.0}]))?;

@@ -181,7 +181,7 @@ fn pinned_channel(project_root: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_version, pinned_channel, quality_checks, snapshot};
+    use super::{parse_version, pinned_channel};
 
     #[test]
     fn versions_accept_release_and_channel_forms() {
@@ -195,6 +195,25 @@ mod tests {
             Some((1, 95, 0))
         );
         assert_eq!(parse_version("stable"), None);
+        for (release, expected) in [
+            (Some("1.95.0"), "passed"),
+            (Some("1.94.9"), "failed"),
+            (None, "skipped"),
+            (Some("stable"), "failed"),
+        ] {
+            let snapshot = super::ToolchainSnapshot {
+                rustc_version: None,
+                rustc_release: release.map(str::to_string),
+                cargo_version: None,
+                host: None,
+                llvm_version: None,
+                declared_rust_version: Some("1.95".into()),
+                pinned_channel: Some("1.95".into()),
+            };
+            let checks = super::quality_checks(&snapshot);
+            assert_eq!(checks[0]["status"], expected, "{release:?}");
+            assert_eq!(checks[1]["status"], "passed");
+        }
     }
 
     #[test]
@@ -206,12 +225,5 @@ mod tests {
         )?;
         assert_eq!(pinned_channel(root.path()).as_deref(), Some("1.95.0"));
         Ok(())
-    }
-
-    #[test]
-    fn current_project_toolchain_is_compatible() {
-        let snapshot = snapshot(std::path::Path::new(env!("CARGO_MANIFEST_DIR")));
-        let checks = quality_checks(&snapshot);
-        assert!(checks.iter().all(|check| check["status"] == "passed"));
     }
 }

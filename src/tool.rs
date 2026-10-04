@@ -123,16 +123,12 @@ mod tests {
     use super::MeasureTool;
 
     #[test]
-    fn measure_all_includes_escape_hatches() {
+    fn tool_scope_and_backend_requirements_are_explicit() {
         assert!(
             MeasureTool::all_tools()
                 .iter()
                 .any(|tool| matches!(tool, MeasureTool::EscapeHatches))
         );
-    }
-
-    #[test]
-    fn tool_requirements_select_only_needed_fact_backends() {
         assert!(MeasureTool::Hotspots.requires_source_facts());
         assert!(MeasureTool::Clones.requires_correctness_facts());
         assert!(MeasureTool::Map.requires_semantic_identity());

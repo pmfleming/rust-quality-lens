@@ -1,5 +1,13 @@
 # Cross-lens upgrade execution
 
+## Latest test consolidation: 231→155 registrations
+
+The rounded 67% target is met: 135 Rust registrations (including both live fixtures), 14 Python acceptance tests and six script tests. Related scenarios share setup/assertions; redundant and repository-version-pinned checks are removed without dropping native failure-mode campaigns. All retained tests pass, with no previously covered function spans or code regions lost in the unchanged comparison scope. Self gates pass at 22,373 measured source lines; cognitive sum rises to 1,398, an explicit consolidation trade-off. See `docs/test-reduction.md` and `acceptance/test-reduction-results.json`. This is not a permanent test-count cap or a release/trust certification.
+
+## Prior self-review: unchanged frozen evaluator
+
+From `13889de`, measured source lines fall 22,499→22,457, token-clone groups 83→72 and duplication 5.82%→4.66%. Cyclomatic/cognitive sums fall 3,211→3,209 and 1,396→1,383. Correctness locality improves 91→94; current-artifact reuse leverage improves 20→40, while average leverage declines slightly as direct dependencies disappear. Effort is uncalibrated; no exhaustive dead-code claim is made, and detected escape hatches remain zero. See `docs/self-refactoring-2.md` and `acceptance/self-refactoring-2-results.json` for explicit regressions, frozen/candidate parity and 194 Rust/two live/25 Python tests. All unchanged self gates pass. Trust/release status is unchanged.
+
 ## Current reporter agreement: source and imported findings
 
 Source and imported projections now share identity, policy-context and waiver interpretation. Original evidence is retained, reliability selection remains unchanged and out-of-scope observations stay visible. Six native agreement fixtures, 30 rejection/abstention cases and twelve exact reporter replays pass; actual self-analysis agrees on 127 source findings, including 125 outside reliability policy selection. Unsafe adapter names and malformed imports cannot replace prior valid reports. See `contracts/source-projection.md` and `acceptance/source-reporters-results.json`. Review/change snapshots and broader E2/E3/E4/E6 scope remain open. Self gates pass at 22,499 source lines; strict policy and release remain blocked.
@@ -12,7 +20,7 @@ Policy and SARIF now share nested-diagnostic projection and retain all contribut
 
 The catalog now exposes 39 native rule IDs and draft family/gate contracts, explicitly retaining missing per-rule cases. Configured rules abstain on unsupported, disabled or unusable evaluation inputs rather than reporting verified-zero counts. All 28 native ingestion cases and 28 policy replays pass; CLI stdout matches published JSON. The initial probe recorded the E4/E6 nested-diagnostic projection/corroboration gap subsequently repaired for practices above. See `contracts/blocking-rule-coverage.md` and `acceptance/evidence-contracts-results.json`. **E2, E3, E4 and E6 remain open**; no release or T4 closure is claimed.
 
-## Current refactoring: self-measured quality
+## Prior refactoring: self-measured quality
 
 Frozen-evaluator measurements reduce token-clone groups 111→88, duplicated lines 1,641→1,382, and measured source lines 22,492→22,462. Cyclomatic/cognitive sums fall 3,223→3,214 and 1,387→1,383; maxima remain 20/11. Shared fixture and current-artifact boundaries improve reuse and selected locality scores, with explicit per-module trade-offs. All 19 artifact schemas and catalog output are unchanged. See `docs/self-refactoring.md` and `acceptance/self-refactoring-results.json` for measurements, repeatability limits and validation. No calibrated effort estimate, T4 closure or release permission is claimed.
 

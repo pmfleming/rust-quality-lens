@@ -338,11 +338,7 @@ mod tests {
             row[field] = json!(0);
         }
         type_health_rows(&json!([row]), true)?;
-        Ok(())
-    }
-
-    #[test]
-    fn map_validation_requires_identity_and_an_explicit_nullable_score() {
+        // Map scores share the explicit-unknown contract, not implicit zeros.
         for score in [Value::Null, json!(0), json!(1.5)] {
             assert!(map_node(&json!({"data": {"id": "module", "total_score": score}})).is_ok());
         }
@@ -353,10 +349,11 @@ mod tests {
         ] {
             assert!(map_node(&node).is_err());
         }
+        Ok(())
     }
 
     #[test]
-    fn static_correctness_is_valid_evidence_but_not_a_test_execution() {
+    fn artifact_validation_accepts_static_evidence_but_rejects_invalid_envelopes() {
         let document = json!({
             "schema_version": 3, "risk_model_version": MODEL_VERSION, "tool": "correctness",
             "measurement_confidence": {"complete": true, "partial": false},
@@ -364,10 +361,7 @@ mod tests {
             "data": {"summary": {"failed": 0, "run_failed": false, "compile_failed": false}, "tests": []}
         });
         assert!(validate_artifact("correctness_review.json", &document).is_ok());
-    }
-
-    #[test]
-    fn rejects_unversioned_wrong_tool_and_inconsistent_envelopes() {
+        // In contrast, malformed/mismatched envelopes cannot enter policy.
         let valid = json!({
             "schema_version": 3, "risk_model_version": MODEL_VERSION, "tool": "reliability",
             "measurement_confidence": {"complete": true, "partial": false},

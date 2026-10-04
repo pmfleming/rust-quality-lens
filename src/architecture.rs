@@ -114,7 +114,7 @@ mod tests {
     use crate::facts::{FileFacts, module_graph};
 
     #[test]
-    fn module_patterns_support_single_and_recursive_wildcards() {
+    fn module_patterns_and_denied_edges_preserve_boundaries() {
         assert!(module_matches(
             "app::*::domain::**",
             "app::lib::domain::model"
@@ -125,10 +125,7 @@ mod tests {
         ));
         assert!(!module_matches("app::*::domain", "app::lib::domain::model"));
         assert!(!module_matches("app::bin::**", "app::lib::domain"));
-    }
-
-    #[test]
-    fn denied_edges_produce_architecture_violations() {
+        // Exercise the matching contract through the actual graph evaluator.
         let mut domain = FileFacts::test_fact("/app/src/domain.rs", "domain");
         domain.package_name = "app".to_string();
         domain.target_name = "app".to_string();

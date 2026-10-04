@@ -191,10 +191,7 @@ pub(crate) fn run_check(
 }
 
 fn external_input_failures(config: &LensConfig, reasons: &[String]) -> Vec<Value> {
-    let required = config.policy.rules.iter().any(|(rule, policy)| {
-        rule.starts_with("external.") && policy.level != crate::config::PolicyRuleLevel::Off
-    });
-    if !required {
+    if config.policy.external_adapters().next().is_none() {
         return Vec::new();
     }
     reasons.iter().map(|reason| json!({"policy": "external-evidence", "status": "incomplete", "reason": reason})).collect()

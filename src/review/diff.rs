@@ -265,20 +265,6 @@ mod tests {
         }
         let ignored = parse("---\n+++\nrename to\ncopy to\ndiff --git\n")?;
         assert!(ignored.paths.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn context_is_not_counted_as_changed_lines() -> Result<()> {
-        let scope = parse(
-            "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,7 +1,7 @@\n one\n two\n three\n-old\n+new\n five\n six\n seven\n",
-        )?;
-        assert_eq!(scope.additions["src/lib.rs"], [[4, 4]]);
-        Ok(())
-    }
-
-    #[test]
-    fn quoted_unicode_spaces_and_tabs_are_decoded() -> Result<()> {
         let scope = parse(
             "--- \"a/src/caf\\303\\251 file\\t.rs\"\n+++ \"b/src/caf\\303\\251 file\\t.rs\"\n@@ -1 +1 @@\n-old\n+new\n",
         )?;
@@ -293,6 +279,24 @@ mod tests {
 
     #[test]
     fn additions_deletions_renames_and_multiple_hunks_stay_scoped() -> Result<()> {
+        for (diff, changed_line) in [
+            (
+                "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,7 +1,7 @@\n one\n two\n three\n-old\n+new\n five\n six\n seven\n",
+                4,
+            ),
+            (
+                "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n--- old\n+++ b/not-a-file.rs\n",
+                1,
+            ),
+        ] {
+            let scope = parse(diff)?;
+            assert_eq!(scope.paths.len(), 1, "{diff}");
+            assert_eq!(
+                scope.additions["src/lib.rs"],
+                [[changed_line, changed_line]],
+                "{diff}"
+            );
+        }
         let scope = parse(
             "--- a/src/old.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-gone\ndiff --git a/src/new.rs b/src/new.rs\n--- /dev/null\n+++ b/src/new.rs\n@@ -0,0 +1,2 @@\n+first\n+second\n\\ No newline at end of file\n@@ -5,0 +8 @@\n+later\ndiff --git a/src/a.rs b/src/b.rs\nrename from src/a.rs\nrename to src/b.rs\n",
         )?;
@@ -300,16 +304,6 @@ mod tests {
         assert!(scope.paths.contains("src/b.rs"));
         assert!(!scope.additions.contains_key("src/old.rs"));
         assert_eq!(scope.additions["src/new.rs"], [[1, 2], [8, 8]]);
-        Ok(())
-    }
-
-    #[test]
-    fn content_that_looks_like_a_file_header_remains_hunk_content() -> Result<()> {
-        let scope = parse(
-            "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n--- old\n+++ b/not-a-file.rs\n",
-        )?;
-        assert_eq!(scope.paths.len(), 1);
-        assert_eq!(scope.additions["src/lib.rs"], [[1, 1]]);
         Ok(())
     }
 

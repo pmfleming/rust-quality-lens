@@ -18,7 +18,7 @@ class CompilerProfileChecks(unittest.TestCase):
                  'cfg': ['unix', 'test'] if test else ['unix']}
                 for test in (False, True)]
 
-    def test_metadata_demands_both_normal_and_test_contexts(self):
+    def test_metadata_and_captured_units_require_complete_matching_contexts(self):
         target = {'kind': ['lib'], 'src_path': '/workspace/src/lib.rs', 'test': True}
         metadata = {'workspace_members': ['p'], 'packages': [
             {'id': 'p', 'manifest_path': '/workspace/Cargo.toml', 'targets': [target]},
@@ -34,7 +34,6 @@ class CompilerProfileChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             expected_units(metadata)
 
-    def test_missing_duplicate_failed_and_mismatched_cfg_are_not_evidence(self):
         records = self.records()
         expected = {tuple(row['unit']) for row in records}
         validate_coverage(records, expected)
@@ -64,7 +63,6 @@ class CompilerProfileChecks(unittest.TestCase):
             record = json.loads(records[0].read_text())
             validate_coverage([record], {tuple(record['unit'])})
 
-    def test_dependency_compiles_and_version_queries_are_not_primary_units(self):
         self.assertFalse(primary_invocation(['-vV'], {'CARGO_PRIMARY_PACKAGE': '1'}))
         self.assertFalse(primary_invocation(['--crate-name', 'dep'], {}))
         self.assertTrue(primary_invocation(['--crate-name', 'self'], {'CARGO_PRIMARY_PACKAGE': '1'}))

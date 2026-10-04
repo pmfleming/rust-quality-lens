@@ -779,33 +779,11 @@ mod tests {
     };
 
     #[test]
-    fn rust_versions_compare_as_numeric_components() {
+    fn workspace_inherited_package_values_are_resolved() -> anyhow::Result<()> {
         assert!(parse_rust_version("1.100") > parse_rust_version("1.99.9"));
         assert_eq!(parse_rust_version("1.95"), Some((1, 95, 0)));
         assert_eq!(format_rust_version((1, 95, 0)), "1.95.0");
         assert_eq!(parse_rust_version("stable"), None);
-    }
-
-    #[test]
-    fn current_workspace_package_evidence_is_resolved() -> anyhow::Result<()> {
-        let contents = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
-        )?;
-        let manifest = toml::from_str::<toml::Value>(&contents)?;
-        assert_eq!(
-            effective_package_value(&manifest, "rust-version").and_then(toml::Value::as_str),
-            Some("1.95")
-        );
-        assert_eq!(
-            effective_package_value(&manifest, "license").and_then(toml::Value::as_str),
-            Some("MIT")
-        );
-        assert!(effective_package_value(&manifest, "repository").is_some());
-        Ok(())
-    }
-
-    #[test]
-    fn workspace_inherited_package_values_are_resolved() -> anyhow::Result<()> {
         let manifest = toml::from_str::<toml::Value>(
             r#"
 [workspace.package]
@@ -822,6 +800,10 @@ repository = "https://example.invalid/demo"
         assert_eq!(
             effective_package_value(&manifest, "rust-version").and_then(toml::Value::as_str),
             Some("1.95")
+        );
+        assert_eq!(
+            effective_package_value(&manifest, "license").and_then(toml::Value::as_str),
+            Some("MIT")
         );
         assert_eq!(
             effective_package_value(&manifest, "repository").and_then(toml::Value::as_str),

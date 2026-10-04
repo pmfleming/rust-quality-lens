@@ -7,6 +7,8 @@ use std::{fs, process::Command};
 #[test]
 fn git_quoted_unicode_filename_is_included_in_scope() -> Result<()> {
     let root = tempfile::tempdir()?;
+    #[cfg(not(windows))]
+    path_matching_preserves_case_on_case_sensitive_filesystems(root.path())?;
     fs::create_dir(root.path().join("src"))?;
     let source = root.path().join("src/café file.rs");
     fs::write(&source, "pub fn before() {}\n")?;
@@ -81,12 +83,12 @@ fn covered_context_does_not_inflate_changed_line_coverage() -> Result<()> {
     Ok(())
 }
 
-#[test]
 #[cfg(not(windows))]
-fn path_matching_preserves_case_on_case_sensitive_filesystems() -> Result<()> {
-    let root = tempfile::tempdir()?;
-    let upper = root.path().join("Upper.rs");
-    let lower = root.path().join("upper.rs");
+fn path_matching_preserves_case_on_case_sensitive_filesystems(
+    root: &std::path::Path,
+) -> Result<()> {
+    let upper = root.join("Upper.rs");
+    let lower = root.join("upper.rs");
     fs::write(&upper, "upper")?;
     fs::write(&lower, "lower")?;
     // macOS may have a case-insensitive filesystem even though it is Unix.

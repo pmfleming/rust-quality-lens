@@ -227,10 +227,9 @@ fn test_status(status: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{correctness_paths, run_status};
-    use crate::config::{LensConfig, SemanticIdentityMode};
+    use crate::config::LensConfig;
     use crate::facts::{FileFacts, ModuleFileFact};
     use crate::util::normalize_slashes;
-    use std::path::PathBuf;
 
     #[test]
     fn cargo_target_paths_are_read_from_toml_structure() -> anyhow::Result<()> {
@@ -259,24 +258,7 @@ name = "integration"
 path = "tests/integration.rs"
 "#,
         )?;
-        let config = LensConfig {
-            project_name: "target-paths".to_string(),
-            project_root: root.path().to_path_buf(),
-            source_roots: vec![root.path().join("src").to_string_lossy().to_string()],
-            fingerprint_inputs: Vec::new(),
-            cargo_metadata: None,
-            helper_metadata: None,
-            output_dir: root.path().join("target/analysis"),
-            helper_manifest: PathBuf::from("unused"),
-            identity_resolution: SemanticIdentityMode::Disabled,
-            rust_analyzer: PathBuf::from("rust-analyzer"),
-            identity_timeout_seconds: 1,
-            identity_offline: true,
-            identity_build_macros: false,
-            verification: Default::default(),
-            architecture: Default::default(),
-            policy: Default::default(),
-        };
+        let config = LensConfig::test_config("target-paths", root.path());
         let linked_test = root.path().join("test_support/unit.rs");
         let mut source_fact = FileFacts::test_fact("src/lib.rs", "lib");
         source_fact.graph.module_files.push(ModuleFileFact {

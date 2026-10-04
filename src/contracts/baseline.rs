@@ -86,6 +86,7 @@ mod tests {
 
     #[test]
     fn malformed_incomplete_and_wrong_version_baselines_are_rejected() {
+        missing_invalid_and_duplicate_metrics_are_not_empty_comparisons();
         for (file, payload) in [
             (
                 "coverage.json",
@@ -120,7 +121,6 @@ mod tests {
         }
     }
 
-    #[test]
     fn missing_invalid_and_duplicate_metrics_are_not_empty_comparisons() {
         for percent in [Value::Null, json!("90"), json!(-1), json!(101)] {
             assert!(

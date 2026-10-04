@@ -59,10 +59,9 @@ fn missing_or_disabled_backend_does_not_mean_expanded() -> Result<()> {
         assert_eq!(doc["measurement_confidence"]["complete"], false);
         assert_eq!(doc["capabilities"][0]["status"], "partial");
     }
-    Ok(())
+    required_backend_failure_preserves_previous_output()
 }
 
-#[test]
 fn required_backend_failure_preserves_previous_output() -> Result<()> {
     let root = fixture(
         "macro_rules! m { () => {} } m!();",

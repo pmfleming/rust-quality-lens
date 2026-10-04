@@ -326,6 +326,10 @@ mod tests {
             layer_violations: 0,
             in_cycle: false,
         });
+        let complete = architecture_risk_scores(complete_inputs());
+        assert!(complete.total_score.is_some());
+        assert!(complete.unknown_metrics.is_empty());
+        assert_explained_score(complete);
         assert!(missing.total_score.is_none());
         assert!(
             missing
@@ -334,9 +338,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn computes_full_score_when_inputs_are_known() {
-        let scored = architecture_risk_scores(ArchitectureRiskInputs {
+    fn complete_inputs() -> ArchitectureRiskInputs {
+        ArchitectureRiskInputs {
             is_entrypoint: false,
             sloc: 10,
             public_api_count: 1,
@@ -363,9 +366,10 @@ mod tests {
             leverage_pressure: Some(3.0),
             layer_violations: 1,
             in_cycle: true,
-        });
-        assert!(scored.total_score.is_some());
-        assert!(scored.unknown_metrics.is_empty());
+        }
+    }
+
+    fn assert_explained_score(scored: super::ArchitectureRiskScores) {
         assert_eq!(scored.architectural_risk, 160.0);
         let (Some(total), Some(change), Some(correctness), Some(quality)) = (
             scored.total_score,
@@ -386,41 +390,6 @@ mod tests {
             .filter_map(|component| component["contribution"].as_f64())
             .sum::<f64>();
         assert_eq!(total, round2(explained_total));
-    }
-
-    #[test]
-    fn computes_total_from_owned_quality_evidence() {
-        let scored = architecture_risk_scores(ArchitectureRiskInputs {
-            is_entrypoint: false,
-            sloc: 10,
-            public_api_count: 1,
-            outbound_dependencies: 1,
-            inbound_dependencies: 1,
-            complexity_score: Some(10.0),
-            change: Some(ChangeFacts {
-                churn: 24,
-                commit_count: 2,
-                contributor_count: 1,
-                defect_commit_count: 1,
-                has_test_evidence: true,
-            }),
-            correctness: Some(CorrectnessFacts {
-                test_count: 1,
-                failed_count: 0,
-                unknown_count: 0,
-                skipped_count: 0,
-                run_failed: false,
-                compile_failed: false,
-                line_coverage_percent: None,
-            }),
-            locality_risk: Some(2.0),
-            leverage_pressure: Some(3.0),
-            layer_violations: 1,
-            in_cycle: true,
-        });
-
-        assert!(scored.total_score.is_some());
-        assert!(scored.unknown_metrics.is_empty());
     }
 
     #[test]

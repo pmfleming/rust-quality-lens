@@ -121,10 +121,9 @@ mod tests {
         }
         drop(batch);
         assert!(ArtifactBatch::new(&config).is_ok());
-        Ok(())
+        changed_inputs_leave_previous_artifacts_untouched()
     }
 
-    #[test]
     fn changed_inputs_leave_previous_artifacts_untouched() -> Result<()> {
         let (root, config) = source_project(Some("pub fn before() {}"))?;
         let source = root.path().join("src/lib.rs");

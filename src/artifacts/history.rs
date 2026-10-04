@@ -288,30 +288,16 @@ fn relative_to_project_root(path: &Path, config: &LensConfig) -> String {
 #[cfg(test)]
 mod tests {
     use super::{is_defect_subject, parse_git_history};
-    use crate::config::{LensConfig, SemanticIdentityMode};
+    use crate::config::LensConfig;
     use crate::facts::module_graph;
-    use std::path::PathBuf;
+    use std::path::Path;
 
     #[test]
     fn blank_line_between_header_and_numstat_keeps_commit_attribution() {
-        let config = LensConfig {
-            project_name: "history".to_string(),
-            project_root: PathBuf::from("/project"),
-            source_roots: vec!["/project/src".to_string()],
-            fingerprint_inputs: Vec::new(),
-            cargo_metadata: None,
-            helper_metadata: None,
-            output_dir: PathBuf::from("/project/target/analysis"),
-            helper_manifest: PathBuf::from("unused"),
-            identity_resolution: SemanticIdentityMode::Disabled,
-            rust_analyzer: PathBuf::from("rust-analyzer"),
-            identity_timeout_seconds: 1,
-            identity_offline: true,
-            identity_build_macros: false,
-            verification: Default::default(),
-            architecture: Default::default(),
-            policy: Default::default(),
-        };
+        assert!(is_defect_subject("fix parser crash"));
+        assert!(!is_defect_subject("refresh fixture snapshots"));
+        assert!(!is_defect_subject("prefix command output"));
+        let config = LensConfig::test_config("history", Path::new("/project"));
         let facts = vec![crate::facts::FileFacts::test_fact(
             "/project/src/lib.rs",
             "lib",
@@ -329,12 +315,5 @@ mod tests {
         assert_eq!(facts.commits.len(), 1);
         assert_eq!(facts.contributors.len(), 1);
         assert_eq!(facts.defect_commits.len(), 1);
-    }
-
-    #[test]
-    fn defect_subject_matching_uses_words_not_substrings() {
-        assert!(is_defect_subject("fix parser crash"));
-        assert!(!is_defect_subject("refresh fixture snapshots"));
-        assert!(!is_defect_subject("prefix command output"));
     }
 }

@@ -252,22 +252,6 @@ mod tests {
     }
 
     #[test]
-    fn statement_macros_keep_their_identity_without_inflating_node_counts() -> syn::Result<()> {
-        let facts = collect(
-            r#"
-fn equal() { let value = parse("one")?; assert_eq!(value.len(), 1); assert_eq!(value[0], 1); Ok(()) }
-fn boolean() { let value = parse("two")?; assert!(value.len() == 1); assert!(value[0] == 1); Ok(()) }
-fn renamed() { let other = parse("three")?; assert_eq!(other.len(), 1); assert_eq!(other[0], 1); Ok(()) }
-"#,
-        )?;
-        assert_eq!(facts.len(), 3);
-        assert_ne!(facts[0].ast_hash, facts[1].ast_hash);
-        assert_eq!(facts[0].ast_hash, facts[2].ast_hash);
-        assert_eq!(facts[0].node_count, facts[1].node_count);
-        Ok(())
-    }
-
-    #[test]
     fn records_nested_functions_and_impl_methods() -> syn::Result<()> {
         let facts = collect(
             r#"
@@ -298,6 +282,17 @@ impl Thing {
 
     #[test]
     fn hash_distinguishes_operators_but_normalizes_names() -> syn::Result<()> {
+        let facts = collect(
+            r#"
+fn equal() { let value = parse("one")?; assert_eq!(value.len(), 1); assert_eq!(value[0], 1); Ok(()) }
+fn boolean() { let value = parse("two")?; assert!(value.len() == 1); assert!(value[0] == 1); Ok(()) }
+fn renamed() { let other = parse("three")?; assert_eq!(other.len(), 1); assert_eq!(other[0], 1); Ok(()) }
+"#,
+        )?;
+        assert_eq!(facts.len(), 3);
+        assert_ne!(facts[0].ast_hash, facts[1].ast_hash);
+        assert_eq!(facts[0].ast_hash, facts[2].ast_hash);
+        assert_eq!(facts[0].node_count, facts[1].node_count);
         let same_shape = collect(
             r#"
 fn add_one(input: i32) -> i32 {

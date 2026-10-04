@@ -1,0 +1,244 @@
+{
+  "baseline_revision": "13889de",
+  "method": "Frozen pre-refactor executable before and after, unchanged rqlens.toml and quality-baseline.json; same 92 modules. No code moved outside measured scope.",
+  "scope": "Syntax/source metrics; semantic completeness remains partial.",
+  "before": {
+    "source_lines": 22499.0,
+    "functions": 992,
+    "cyclomatic_sum": 3211,
+    "cognitive_sum": 1396,
+    "cyclomatic_max": 20,
+    "cognitive_max": 11,
+    "hotspot_max": 69.22,
+    "hotspot_sum": 13317.25,
+    "clones": {
+      "ast_record_count": 0,
+      "duplicated_line_count": 1309,
+      "duplication_percent": 5.82,
+      "record_count": 83,
+      "source_nonblank_line_count": 22499,
+      "token_record_count": 83
+    },
+    "escape_hatches": 0,
+    "modules": 92,
+    "locality_mean": 97.49728260869566,
+    "leverage_mean": 22.934782608695652
+  },
+  "after": {
+    "source_lines": 22457.0,
+    "functions": 996,
+    "cyclomatic_sum": 3209,
+    "cognitive_sum": 1383,
+    "cyclomatic_max": 20,
+    "cognitive_max": 11,
+    "hotspot_max": 69.22,
+    "hotspot_sum": 13226.52,
+    "clones": {
+      "ast_record_count": 0,
+      "duplicated_line_count": 1046,
+      "duplication_percent": 4.66,
+      "record_count": 72,
+      "source_nonblank_line_count": 22457,
+      "token_record_count": 72
+    },
+    "escape_hatches": 0,
+    "modules": 92,
+    "locality_mean": 97.52989130434783,
+    "leverage_mean": 22.82608695652174
+  },
+  "targeted_functions": {
+    "before": {
+      "semantic::LspClient::request": {
+        "score": 64.29,
+        "cyclomatic_complexity": 9,
+        "cognitive_complexity": 9,
+        "sloc": 17
+      },
+      "semantic::LspClient::wait_until_ready": {
+        "score": 66.53,
+        "cyclomatic_complexity": 9,
+        "cognitive_complexity": 10,
+        "sloc": 19
+      },
+      "semantic::LspClient::wait_for": null,
+      "external::current_findings": {
+        "score": 68.04,
+        "cyclomatic_complexity": 10,
+        "cognitive_complexity": 9,
+        "sloc": 51
+      },
+      "commands::evidence::run": {
+        "score": 63.78,
+        "cyclomatic_complexity": 18,
+        "cognitive_complexity": 1,
+        "sloc": 37
+      },
+      "commands::project::run": {
+        "score": 47.15,
+        "cyclomatic_complexity": 14,
+        "cognitive_complexity": 1,
+        "sloc": 30
+      },
+      "producers::clones::ast_clone_row": {
+        "score": 22.29,
+        "cyclomatic_complexity": 3,
+        "cognitive_complexity": 2,
+        "sloc": 54
+      }
+    },
+    "frozen-after": {
+      "semantic::LspClient::request": {
+        "score": 14.67,
+        "cyclomatic_complexity": 4,
+        "cognitive_complexity": 1,
+        "sloc": 12
+      },
+      "semantic::LspClient::wait_until_ready": {
+        "score": 16.91,
+        "cyclomatic_complexity": 4,
+        "cognitive_complexity": 2,
+        "sloc": 13
+      },
+      "semantic::LspClient::wait_for": {
+        "score": 42.11,
+        "cyclomatic_complexity": 7,
+        "cognitive_complexity": 6,
+        "sloc": 16
+      },
+      "external::current_findings": {
+        "score": 54.15,
+        "cyclomatic_complexity": 8,
+        "cognitive_complexity": 8,
+        "sloc": 47
+      },
+      "commands::evidence::run": {
+        "score": 38.92,
+        "cyclomatic_complexity": 12,
+        "cognitive_complexity": 1,
+        "sloc": 37
+      },
+      "commands::project::run": {
+        "score": 38.86,
+        "cyclomatic_complexity": 12,
+        "cognitive_complexity": 1,
+        "sloc": 30
+      },
+      "producers::clones::ast_clone_row": {
+        "score": 57.29,
+        "cyclomatic_complexity": 6,
+        "cognitive_complexity": 10,
+        "sloc": 81
+      }
+    }
+  },
+  "topology_changes": {
+    "correctness_locality": [
+      91,
+      94
+    ],
+    "shared_current_artifact_leverage": [
+      20,
+      40
+    ],
+    "validation_leverage": [
+      80,
+      60
+    ],
+    "fingerprint_leverage": [
+      60,
+      50
+    ]
+  },
+  "parity": {
+    "binary_sha256": {
+      "frozen": "41f78edf7c1f697a72a465a5e2c395cfb3a0260e9491238d371a23922b33ba59",
+      "candidate": "65810b85c1499d9bc8e7538236297d904f37acd0db38d16548e84850be7e3556"
+    },
+    "normalization": "Only generated_at and measured_at removed recursively; arrays preserved",
+    "clone_fixtures": [
+      {
+        "fixture": "mini",
+        "equal": true,
+        "engines": {}
+      },
+      {
+        "fixture": "golden",
+        "equal": true,
+        "engines": {}
+      },
+      {
+        "fixture": "clone-confidence",
+        "equal": true,
+        "engines": {
+          "ast": 2,
+          "token": 1,
+          "test-ast": 1,
+          "module-responsibility": 1
+        }
+      }
+    ],
+    "self_replays": [
+      "hotspots",
+      "clones",
+      "locality",
+      "leverage",
+      "escape-hatches"
+    ],
+    "self_differential": [
+      "hotspots",
+      "clones",
+      "locality",
+      "leverage",
+      "escape-hatches"
+    ]
+  },
+  "fixture_sources": {
+    "byte_identical_files": 34,
+    "differences": []
+  },
+  "interfaces": {
+    "artifact_schemas_equal": 19,
+    "config_schema_equal": true,
+    "catalog_equal": true
+  },
+  "validation": {
+    "normal_workspace_tests": 194,
+    "live_fixtures": 2,
+    "python_tests": 25,
+    "strict_clippy": true,
+    "rustdoc": true,
+    "helper_parity": true,
+    "package_smoke": true,
+    "self_verify": true,
+    "self_gates": true,
+    "ledger_valid": true,
+    "release_gate": "blocked"
+  },
+  "regression_campaigns": {
+    "configured_policy_ingestion": 28,
+    "practice_projection": 19,
+    "malformed_diagnostics": 10,
+    "source_import_agreement": 6,
+    "source_import_rejection": 30
+  },
+  "strict_policy": {
+    "failed_policies": [
+      "configured-rules",
+      "partial",
+      "reliability-finding",
+      "test-failure"
+    ],
+    "stale_artifacts": [],
+    "test_failures": [],
+    "practice_failures": []
+  },
+  "limits": [
+    "No calibrated effort metric is available; no labor or defect-probability savings are claimed.",
+    "Unused-dependency check remains skipped, not clean. Strict Clippy passed for this configured workspace/all-targets build; this is not exhaustive dead-code proof.",
+    "Removed redundant implementations, not proven unreachable production features. Escape-hatch inventory remains zero within the unchanged source scope.",
+    "Average leverage decreases slightly when direct validation/fingerprint dependencies disappear; shared current-artifact reuse increases.",
+    "Combined AST row construction increases local cognitive complexity (2 to 10); total cognitive/cyclomatic sums still fall.",
+    "No full measure-all repeatability, cross-platform certification or E2/E3/E4/E6/T4 closure is claimed."
+  ],
+  "raw_evidence": "target/self-refactor-2"
+}

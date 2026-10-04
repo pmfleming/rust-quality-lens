@@ -13,15 +13,13 @@ class ReporterCampaignTests(unittest.TestCase):
             {"diagnostics": []}, {}, {"diagnostics": [{"finding_id": "projected", "observation_index": 0}]}]}}}
         return raw, findings, evidence
 
-    def test_lossless_references_keep_absent_and_empty_distinct(self):
+    def test_lossless_projection_and_invalid_observations(self):
         raw, findings, evidence = self.fixture()
         before = copy.deepcopy(evidence)
         actual = reconstruct(evidence, findings)["data"]["checks"]
         self.assertEqual(actual, [{"diagnostics": []}, {}, {"diagnostics": [raw]}])
         self.assertEqual(evidence, before)
 
-    def test_lost_or_misattributed_observations_cannot_pass_oracle(self):
-        _, findings, evidence = self.fixture()
         findings["projected"]["observations"][0]["check_index"] = 0
         with self.assertRaises(AssertionError):
             reconstruct(evidence, findings)
@@ -29,7 +27,6 @@ class ReporterCampaignTests(unittest.TestCase):
         with self.assertRaises(IndexError):
             reconstruct(evidence, findings)
 
-    def test_missing_projection_cannot_be_dropped_to_claim_agreement(self):
         self.assertFalse(projection_agrees([], [None]))
         self.assertFalse(projection_agrees([{"id": "a"}], [None]))
         self.assertTrue(projection_agrees([], []))

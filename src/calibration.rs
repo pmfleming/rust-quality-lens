@@ -472,16 +472,16 @@ mod tests {
         assert!(parse_project("missing-separator").is_err());
         assert!(parse_project("=missing-name").is_err());
         assert_eq!(safe_name("workspace/core.v1"), "workspace_core_v1");
-        Ok(())
+        calibration_source_roots_support_src_and_crate_layouts(&path)
     }
 
-    #[test]
-    fn calibration_source_roots_support_src_and_crate_layouts() -> anyhow::Result<()> {
-        let conventional = tempfile::tempdir()?;
-        fs::create_dir(conventional.path().join("src"))?;
+    fn calibration_source_roots_support_src_and_crate_layouts(
+        conventional: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        fs::create_dir(conventional.join("src"))?;
         assert_eq!(
-            calibration_source_roots(conventional.path()),
-            [conventional.path().join("src")]
+            calibration_source_roots(conventional),
+            [conventional.join("src")]
         );
 
         let workspace = tempfile::tempdir()?;

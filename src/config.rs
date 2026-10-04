@@ -255,6 +255,13 @@ pub(crate) struct PolicyWaiver {
 }
 
 impl PolicyConfig {
+    pub(crate) fn external_adapters(&self) -> impl Iterator<Item = &str> {
+        self.rules
+            .iter()
+            .filter(|(_, rule)| rule.level != PolicyRuleLevel::Off)
+            .filter_map(|(id, _)| id.strip_prefix("external.")?.split('.').next())
+    }
+
     pub(crate) fn active_waiver(&self, rule_id: &str, path: Option<&str>) -> Option<&PolicyWaiver> {
         self.waivers
             .iter()
@@ -401,6 +408,29 @@ pub(crate) struct LensConfig {
 }
 
 impl LensConfig {
+    /// Parser-only fixtures: no Cargo metadata, helper discovery, or filesystem IO.
+    #[cfg(test)]
+    pub(crate) fn test_config(name: &str, root: &Path) -> Self {
+        Self {
+            project_name: name.to_string(),
+            project_root: root.to_path_buf(),
+            source_roots: vec![root.join("src").to_string_lossy().into_owned()],
+            fingerprint_inputs: Vec::new(),
+            cargo_metadata: None,
+            helper_metadata: None,
+            output_dir: root.join("target/analysis"),
+            helper_manifest: PathBuf::from("unused"),
+            identity_resolution: SemanticIdentityMode::Disabled,
+            rust_analyzer: PathBuf::from("rust-analyzer"),
+            identity_timeout_seconds: 1,
+            identity_offline: true,
+            identity_build_macros: false,
+            verification: Default::default(),
+            architecture: Default::default(),
+            policy: Default::default(),
+        }
+    }
+
     pub(crate) fn input_fingerprint(&self) -> Value {
         crate::fingerprint::project(self)
     }
@@ -972,6 +1002,7 @@ mod tests {
             serde_json::to_value(supplied.normalized())?,
             serde_json::to_value(expected)?
         );
+        cargo_arguments_preserve_reproducible_workspace_scope();
         Ok(())
     }
 
@@ -1003,10 +1034,6 @@ mod tests {
                 .is_none()
         );
         assert_eq!(policy.expired_waivers().len(), 1);
-    }
-
-    #[test]
-    fn policy_rules_support_path_and_package_exclusions() {
         let rule = PolicyRule {
             level: PolicyRuleLevel::Error,
             max: 0,
@@ -1020,22 +1047,14 @@ mod tests {
     }
 
     #[test]
-    fn unknown_configuration_fields_are_rejected() {
-        assert!(toml::from_str::<RawConfig>("audti = true\n").is_err());
-        assert!(
-            toml::from_str::<RawConfig>("[verification]\nworkspace = true\naudti = true\n")
-                .is_err()
-        );
-        assert!(
-            toml::from_str::<RawConfig>(
-                "[policy.rules.unwrap]\nmax = 0\nexclude_path = [\"generated/**\"]\n"
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn toml_11_multiline_inline_tables_are_supported() -> anyhow::Result<()> {
+    fn configuration_accepts_supported_toml_but_rejects_unknown_fields() -> anyhow::Result<()> {
+        for text in [
+            "audti = true\n",
+            "[verification]\nworkspace = true\naudti = true\n",
+            "[policy.rules.unwrap]\nmax = 0\nexclude_path = [\"generated/**\"]\n",
+        ] {
+            assert!(toml::from_str::<RawConfig>(text).is_err(), "{text}");
+        }
         let config = toml::from_str::<RawConfig>(
             r#"
 project_name = "toml-1.1"
@@ -1067,10 +1086,9 @@ verification = {
         )?;
         let config = LensConfig::load(Some(config_dir.join("rqlens.toml")))?;
         assert_eq!(config.project_root, std::fs::canonicalize(project)?);
-        Ok(())
+        cargo_metadata_discovers_local_package_source_roots(&config.project_root)
     }
 
-    #[test]
     fn cargo_arguments_preserve_reproducible_workspace_scope() {
         let verification = VerificationConfig {
             locked: true,
@@ -1093,11 +1111,10 @@ verification = {
         );
     }
 
-    #[test]
-    fn cargo_metadata_discovers_local_package_source_roots() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        let application = root.path();
-        let helper = root.path().join("crates/helper");
+    fn cargo_metadata_discovers_local_package_source_roots(
+        application: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        let helper = application.join("crates/helper");
         std::fs::create_dir_all(application.join("src"))?;
         std::fs::create_dir_all(helper.join("src"))?;
         let metadata = json!({

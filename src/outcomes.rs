@@ -261,10 +261,7 @@ mod tests {
         let records =
             parse_outcomes("commit:abc\t2026-01-01T00:00:00Z\tfix parser\n\nsrc/parser.rs\n");
         assert_eq!(records[0]["modules"][0], "parser");
-    }
-
-    #[test]
-    fn reviewed_labels_are_validated_without_silent_drops() {
+        // Reviewed labels require validation rather than inferred subject matching.
         let valid = normalize_label(
             &json!({
                 "commit": "abc",

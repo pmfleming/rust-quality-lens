@@ -1886,6 +1886,13 @@ mod tests {
 
     #[test]
     fn macro_sites_keep_context_and_utf16_invocation_positions() {
+        let conditional = facts("cfg_select! { unix => { mod unix; } _ => { mod fallback; } }");
+        assert!(
+            conditional
+                .unsupported_patterns
+                .iter()
+                .any(|pattern| pattern.contains("cfg_select!"))
+        );
         let parsed = facts(
             "macro_rules! make { () => {} }\n/* é😀 */ make!();\nstruct Owner; impl Owner { make!(); }\n",
         );
@@ -1965,6 +1972,34 @@ fn local() {
 
     #[test]
     fn safety_and_panic_findings_keep_source_evidence() {
+        let documented = facts(
+            r#"
+/// # Safety
+/// The pointer must be valid.
+pub unsafe fn raw(pointer: *const i32) -> i32 {
+    // SAFETY: the caller guarantees pointer validity.
+    unsafe { *pointer }
+}
+"#,
+        );
+        assert!(documented.quality_findings.is_empty());
+        let raw = facts(
+            r#"
+fn inspect(pointer: *const i32, value: std::mem::MaybeUninit<i32>) {
+    let _ = unsafe { pointer.as_ref_unchecked() };
+    let _ = unsafe { value.assume_init_ref() };
+    let _ = std::ptr::without_provenance::<i32>(1);
+}
+"#,
+        );
+        assert_eq!(raw.escape_counts.get("unsafe_api"), Some(&3));
+        assert_eq!(
+            raw.quality_findings
+                .iter()
+                .filter(|finding| finding.rule_id == "rust.memory.raw-api")
+                .count(),
+            3
+        );
         let facts = facts(
             r#"
 pub unsafe fn raw(pointer: *const i32) -> i32 {
@@ -2010,11 +2045,7 @@ fn direct_test() { panic!("expected test panic"); }
             .count();
         assert_eq!(test_scoped, 2);
         assert_eq!(test_scoped, facts.quality_findings.len());
-    }
-
-    #[test]
-    fn test_quality_counts_assertions_calls_and_ignored_tests() {
-        let facts = facts(
+        let facts = self::facts(
             r#"
 #[test]
 #[ignore]
@@ -2032,11 +2063,7 @@ fn checks_value() {
         assert_eq!(test.assertion_count, 3);
         assert_eq!(test.sut_call_count, 3);
         assert!(test.ignored);
-    }
-
-    #[test]
-    fn cfg_test_module_files_are_marked_as_test_code() {
-        let facts = facts(
+        let facts = self::facts(
             r#"
 #[cfg(test)]
 #[path = "test_support.rs"]
@@ -2045,45 +2072,6 @@ mod test_support;
         );
         assert_eq!(facts.module_files.len(), 1);
         assert!(facts.module_files[0].test_code);
-    }
-
-    #[test]
-    fn safety_comments_and_docs_satisfy_contract_evidence() {
-        let facts = facts(
-            r#"
-/// # Safety
-/// The pointer must be valid.
-pub unsafe fn raw(pointer: *const i32) -> i32 {
-    // SAFETY: the caller guarantees pointer validity.
-    unsafe { *pointer }
-}
-"#,
-        );
-        assert!(facts.quality_findings.is_empty());
-    }
-
-    #[test]
-    fn function_metrics_preserve_nesting_and_paths() {
-        let facts = facts(
-            r#"
-fn nested(left: bool, right: bool) {
-    if left && right {
-        while left {
-            if right { break; }
-        }
-    }
-}
-"#,
-        );
-        let Some(function) = facts.functions.first() else {
-            panic!("function fact should exist");
-        };
-        assert_eq!(function.name, "nested");
-        assert_eq!(function.max_nesting_depth, 3);
-        assert!(function.branch_pressure >= 6);
-        assert!(function.path_pressure >= 4);
-        assert_eq!(function.cyclomatic_complexity, 5);
-        assert_eq!(function.cognitive_complexity, 7);
     }
 
     #[test]
@@ -2128,75 +2116,12 @@ fn broken( {
     }
 
     #[test]
-    fn rust_195_match_guards_are_counted_by_both_backends() {
-        let source = r#"
-fn guarded(input: Option<i32>, limit: Result<i32, ()>) -> i32 {
-    match input {
-        Some(value) if let Ok(max) = limit && value < max => value,
-        _ => 0,
-    }
-}
-"#;
-        let syn_facts = facts(source);
-        let tree_sitter_facts =
-            super::tree_sitter_fallback("src/lib.rs", source, "forced fallback");
-        let syn_function = &syn_facts.functions[0];
-        let tree_sitter_function = &tree_sitter_facts.functions[0];
-        assert_eq!(syn_function.cyclomatic_complexity, 5);
-        assert_eq!(syn_function.cognitive_complexity, 3);
-        assert_eq!(
-            tree_sitter_function.cyclomatic_complexity,
-            syn_function.cyclomatic_complexity
-        );
-        assert_eq!(
-            tree_sitter_function.cognitive_complexity,
-            syn_function.cognitive_complexity
-        );
-    }
-
-    #[test]
-    fn new_raw_memory_apis_are_explicit_unscored_evidence() {
-        let facts = facts(
-            r#"
-fn inspect(pointer: *const i32, value: std::mem::MaybeUninit<i32>) {
-    let _ = unsafe { pointer.as_ref_unchecked() };
-    let _ = unsafe { value.assume_init_ref() };
-    let _ = std::ptr::without_provenance::<i32>(1);
-}
-"#,
-        );
-        assert_eq!(facts.escape_counts.get("unsafe_api"), Some(&3));
-        assert_eq!(
-            facts
-                .quality_findings
-                .iter()
-                .filter(|finding| finding.rule_id == "rust.memory.raw-api")
-                .count(),
-            3
-        );
-    }
-
-    #[test]
-    fn cfg_select_is_reported_until_macro_expansion_is_available() {
-        let facts = facts(
-            r#"
-cfg_select! {
-    unix => { mod unix; }
-    _ => { mod fallback; }
-}
-"#,
-        );
-        assert!(
-            facts
-                .unsupported_patterns
-                .iter()
-                .any(|pattern| pattern.contains("cfg_select!"))
-        );
-    }
-
-    #[test]
     fn tree_sitter_standard_metrics_match_syn_on_valid_rust() {
-        let source = r#"
+        for (name, cognitive, source) in [
+            (
+                "nested",
+                7,
+                r#"
 fn nested(left: bool, right: bool) {
     if left && right {
         while left {
@@ -2204,25 +2129,48 @@ fn nested(left: bool, right: bool) {
         }
     }
 }
-"#;
-        let syn_facts = facts(source);
-        let tree_sitter_facts =
-            super::tree_sitter_fallback("src/lib.rs", source, "forced fallback");
-        let Some(syn_function) = syn_facts.functions.first() else {
-            panic!("syn function should exist");
-        };
-        let Some(tree_sitter_function) = tree_sitter_facts.functions.first() else {
-            panic!("tree-sitter function should exist");
-        };
+"#,
+            ),
+            (
+                "guarded",
+                3,
+                r#"
+fn guarded(input: Option<i32>, limit: Result<i32, ()>) -> i32 {
+    match input {
+        Some(value) if let Ok(max) = limit && value < max => value,
+        _ => 0,
+    }
+}
+"#,
+            ),
+        ] {
+            let syn_facts = facts(source);
+            let tree_sitter_facts =
+                super::tree_sitter_fallback("src/lib.rs", source, "forced fallback");
+            let Some(syn_function) = syn_facts.functions.first() else {
+                panic!("syn function should exist");
+            };
+            let Some(tree_sitter_function) = tree_sitter_facts.functions.first() else {
+                panic!("tree-sitter function should exist");
+            };
 
-        assert_eq!(tree_sitter_facts.syntax_error_count, 0);
-        assert_eq!(
-            tree_sitter_function.cyclomatic_complexity,
-            syn_function.cyclomatic_complexity
-        );
-        assert_eq!(
-            tree_sitter_function.cognitive_complexity,
-            syn_function.cognitive_complexity
-        );
+            assert_eq!(syn_function.name, name);
+            assert_eq!(syn_function.cyclomatic_complexity, 5, "{name}");
+            assert_eq!(syn_function.cognitive_complexity, cognitive, "{name}");
+            if name == "nested" {
+                assert_eq!(tree_sitter_facts.syntax_error_count, 0);
+                assert_eq!(syn_function.max_nesting_depth, 3);
+                assert!(syn_function.branch_pressure >= 6);
+                assert!(syn_function.path_pressure >= 4);
+            }
+            assert_eq!(
+                tree_sitter_function.cyclomatic_complexity,
+                syn_function.cyclomatic_complexity
+            );
+            assert_eq!(
+                tree_sitter_function.cognitive_complexity,
+                syn_function.cognitive_complexity
+            );
+        }
     }
 }

@@ -710,18 +710,13 @@ impl LspClient {
         let id = self.next_id;
         self.next_id += 1;
         self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
-        loop {
-            let message = self.receive(deadline, "request")?;
-            if message["id"].as_u64() == Some(id) {
-                if !message["error"].is_null() {
-                    bail!("rust-analyzer {method} error: {}", message["error"]);
-                }
-                return Ok(message.get("result").cloned().unwrap_or(Value::Null));
-            }
-            if message.get("method").is_some() && message.get("id").is_some() {
-                self.respond_to_server(&message)?;
-            }
+        let message = self.wait_for(deadline, "request", |message| {
+            message["id"].as_u64() == Some(id)
+        })?;
+        if !message["error"].is_null() {
+            bail!("rust-analyzer {method} error: {}", message["error"]);
         }
+        Ok(message.get("result").cloned().unwrap_or(Value::Null))
     }
 
     fn respond_to_server(&mut self, message: &Value) -> Result<()> {
@@ -747,18 +742,29 @@ impl LspClient {
     }
 
     fn wait_until_ready(&mut self, deadline: Instant) -> Result<()> {
-        loop {
-            let message = self.receive(deadline, "project loading")?;
-            if message["method"] == "experimental/serverStatus"
+        let message = self.wait_for(deadline, "project loading", |message| {
+            message["method"] == "experimental/serverStatus"
                 && message["params"]["quiescent"] == true
-            {
-                if message["params"]["health"] == "error" {
-                    bail!(
-                        "rust-analyzer project loading failed: {}",
-                        message["params"]["message"]
-                    );
-                }
-                return Ok(());
+        })?;
+        if message["params"]["health"] == "error" {
+            bail!(
+                "rust-analyzer project loading failed: {}",
+                message["params"]["message"]
+            );
+        }
+        Ok(())
+    }
+
+    fn wait_for(
+        &mut self,
+        deadline: Instant,
+        operation: &str,
+        accepts: impl Fn(&Value) -> bool,
+    ) -> Result<Value> {
+        loop {
+            let message = self.receive(deadline, operation)?;
+            if accepts(&message) {
+                return Ok(message);
             }
             if message.get("method").is_some() && message.get("id").is_some() {
                 self.respond_to_server(&message)?;
@@ -1057,6 +1063,54 @@ mod tests {
     use std::fs;
     use std::process::Command;
 
+    // Script the incoming stream independently of the writable transport.
+    #[test]
+    #[cfg(unix)]
+    fn waiter_handles_interleaved_requests_errors_and_deadlines() -> anyhow::Result<()> {
+        use anyhow::Context;
+        use std::{
+            process::Stdio,
+            sync::mpsc,
+            time::{Duration, Instant},
+        };
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()?;
+        let (sender, receiver) = mpsc::channel();
+        let mut client = super::LspClient {
+            stdin: child.stdin.take().context("script transport stdin")?,
+            child,
+            receiver,
+            next_id: 1,
+            configuration: json!({"cargo": {"offline": true}}),
+        };
+        for message in [
+            json!({"id": "config", "method": "workspace/configuration", "params": {"items": [{"section": "rust-analyzer.cargo"}]}}),
+            json!({"id": 99, "result": "unrelated"}),
+            json!({"method": "notification"}),
+            json!({"id": 1, "result": "accepted"}),
+            json!({"method": "experimental/serverStatus", "params": {"quiescent": false}}),
+            json!({"id": "folders", "method": "workspace/workspaceFolders"}),
+            json!({"method": "experimental/serverStatus", "params": {"quiescent": true, "health": "ok"}}),
+            json!({"id": 2, "error": "scripted failure"}),
+            json!({"method": "experimental/serverStatus", "params": {"quiescent": true, "health": "error", "message": "loading failed"}}),
+            json!({"id": 3}),
+        ] {
+            sender.send(Ok(message))?;
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        assert_eq!(client.request("test", json!({}), deadline)?, "accepted");
+        client.wait_until_ready(deadline)?;
+        assert!(client.request("test", json!({}), deadline).is_err());
+        assert!(client.wait_until_ready(deadline).is_err());
+        assert!(client.request("test", json!({}), deadline)?.is_null());
+        assert!(client.wait_until_ready(Instant::now()).is_err());
+        drop(sender);
+        assert!(client.wait_until_ready(deadline).is_err());
+        Ok(())
+    }
+
     #[test]
     fn cache_keys_cover_contents_member_manifests_and_configuration() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
@@ -1135,34 +1189,6 @@ mod tests {
     }
 
     #[test]
-    fn unmapped_virtual_origin_is_not_disguised_by_an_external_generator() {
-        let reference = DependencyReferenceFact {
-            raw_path: "crate::generated::Message".into(),
-            line: 1,
-            column: 0,
-        };
-        for virtual_first in [false, true] {
-            let mut uris = [
-                "file:///registry/generator.rs",
-                "rust-analyzer://macro/generated.rs",
-            ];
-            if virtual_first {
-                uris.reverse();
-            }
-            let locations = uris
-                .into_iter()
-                .map(|uri| super::DefinitionLocation {
-                    uri: uri.into(),
-                    line: 0,
-                    character: 0,
-                })
-                .collect();
-            let resolved = super::resolved_definitions(&reference, locations, &Default::default());
-            assert_eq!(resolved.status, "unmapped_generated_definition");
-        }
-    }
-
-    #[test]
     fn generated_navigation_prefers_local_origin_over_external_generator() -> anyhow::Result<()> {
         let root = tempfile::tempdir()?;
         let path = root.path().join("lib.rs");
@@ -1178,6 +1204,24 @@ mod tests {
             column: 0,
         };
         for local_first in [false, true] {
+            let mut uris = [
+                "file:///registry/generator.rs",
+                "rust-analyzer://macro/generated.rs",
+            ];
+            if local_first {
+                uris.reverse();
+            }
+            let virtual_locations = uris
+                .into_iter()
+                .map(|uri| super::DefinitionLocation {
+                    uri: uri.into(),
+                    line: 0,
+                    character: 0,
+                })
+                .collect();
+            let unresolved =
+                super::resolved_definitions(&reference, virtual_locations, &Default::default());
+            assert_eq!(unresolved.status, "unmapped_generated_definition");
             let mut locations = vec![
                 super::DefinitionLocation {
                     uri: "file:///registry/scanner/src/lib.rs".into(),
@@ -1246,10 +1290,7 @@ mod tests {
             assert!(summary.reason.is_some());
             assert_eq!(summary.unresolved_count, 1);
         }
-    }
-
-    #[test]
-    fn semantic_evidence_is_independent_of_execution_telemetry() {
+        // Execution/cache telemetry must not change the semantic claim.
         let mut summary = IdentityResolutionSummary::disabled(SemanticIdentityMode::Auto, 3);
         let before = summary.to_json();
         summary.cache_hit = true;
@@ -1266,13 +1307,10 @@ mod tests {
     }
 
     #[test]
-    fn uri_encoding_round_trips_paths() {
+    fn source_locations_and_file_uris_preserve_coordinates() -> anyhow::Result<()> {
         let path = "/tmp/a project/src/über.rs";
         assert_eq!(percent_decode(&percent_encode(path)).as_deref(), Some(path));
-    }
-
-    #[test]
-    fn file_uris_round_trip_native_paths() -> anyhow::Result<()> {
+        assert_eq!(utf16_column_to_byte("a🦀b", 3), 5);
         let root = tempfile::tempdir()?;
         let path = root.path().join("a project.rs");
         fs::write(&path, "")?;
@@ -1280,11 +1318,6 @@ mod tests {
         assert!(uri.starts_with("file:///"));
         let decoded = uri_path(&uri).ok_or_else(|| anyhow::anyhow!("file URI should decode"))?;
         assert_eq!(fs::canonicalize(decoded)?, fs::canonicalize(path)?);
-        Ok(())
-    }
-
-    #[test]
-    fn parses_location_links() {
         let Some(location) = definition_location(&json!([{
             "targetUri": "file:///tmp/lib.rs",
             "targetSelectionRange": {"start": {"line": 4, "character": 7}, "end": {"line": 4, "character": 10}}
@@ -1293,11 +1326,7 @@ mod tests {
         };
         assert_eq!(location.line, 4);
         assert_eq!(location.character, 7);
-    }
-
-    #[test]
-    fn converts_utf16_columns() {
-        assert_eq!(utf16_column_to_byte("a🦀b", 3), 5);
+        Ok(())
     }
 
     #[test]

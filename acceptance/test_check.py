@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from check import EXPECTED, check
+from audit_test_reduction import rust_ids
 from profile import documents
 
 
@@ -27,6 +28,16 @@ class AcceptanceGate(unittest.TestCase):
         with self.assertRaises(json.JSONDecodeError):
             list(documents('{"results":[]} trailing-corruption'))
         self.assertEqual(len(EXPECTED), 25)
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "tests.txt"
+            path.write_text("case: test\n1 test, 0 benchmarks\n")
+            self.assertEqual(rust_ids(path), ["case"])
+            for invalid in ["", "case: test\n", "case: test\n2 tests, 0 benchmarks\n",
+                            "case: test\ncase: test\n2 tests, 0 benchmarks\n"]:
+                with self.subTest(inventory=invalid):
+                    path.write_text(invalid)
+                    with self.assertRaises(ValueError):
+                        rust_ids(path)
 
 
 if __name__ == "__main__":

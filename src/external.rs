@@ -90,15 +90,11 @@ pub(crate) fn current_findings(config: &LensConfig) -> ExternalEvidence {
             .reasons
             .push("No imported external reports are available".into());
     }
-    for (rule, policy) in &config.policy.rules {
-        if policy.level != crate::config::PolicyRuleLevel::Off
-            && let Some(adapter) = rule
-                .strip_prefix("external.")
-                .and_then(|rule| rule.split('.').next())
-            && !config
-                .output_dir
-                .join(format!("external_{adapter}.json"))
-                .is_file()
+    for adapter in config.policy.external_adapters() {
+        if !config
+            .output_dir
+            .join(format!("external_{adapter}.json"))
+            .is_file()
         {
             evidence.reasons.push(format!(
                 "Required external adapter {adapter} has no imported report"
@@ -176,6 +172,18 @@ mod tests {
 
     #[test]
     fn imported_findings_require_producer_source_identity() -> anyhow::Result<()> {
+        assert!(validate("cargo-crap", &json!({})).is_err());
+        assert!(
+            validate(
+                "cargo-crap",
+                &json!({
+                    "tool": {"name": "cargo-crap", "version": "1.0.0"},
+                    "status": "completed", "scope": {}, "findings": [], "metrics": [],
+                    "confidence": {"complete": true}
+                })
+            )
+            .is_ok()
+        );
         let (root, config) = crate::test_support::source_project(Some("pub fn a() {}"))?;
         let report = root.path().join("report.json");
         let mut evidence = json!({"tool":{"name":"other","version":"1"},"status":"completed","scope":{},
@@ -192,19 +200,5 @@ mod tests {
         std::fs::write(root.path().join("src/lib.rs"), "pub fn changed() {}")?;
         assert!(super::current_findings(&config).findings.is_empty());
         Ok(())
-    }
-
-    #[test]
-    fn external_contract_requires_explicit_tool_status_and_confidence() {
-        let valid = json!({
-            "tool": {"name": "cargo-crap", "version": "1.0.0"},
-            "status": "completed",
-            "scope": {},
-            "findings": [],
-            "metrics": [],
-            "confidence": {"complete": true}
-        });
-        assert!(validate("cargo-crap", &valid).is_ok());
-        assert!(validate("cargo-crap", &json!({})).is_err());
     }
 }

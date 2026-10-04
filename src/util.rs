@@ -122,20 +122,11 @@ fn write_if_changed(path: &Path, contents: &str) -> Result<()> {
 }
 
 pub(crate) fn resolve_config_path(path: PathBuf, config_dir: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path
-    } else {
-        absolutize(config_dir.join(path))
-    }
+    // Path::join replaces the base for absolute paths, on each native platform.
+    absolutize(config_dir.join(path))
 }
 
-pub(crate) fn resolve_project_path(path: PathBuf, project_root: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path
-    } else {
-        absolutize(project_root.join(path))
-    }
-}
+pub(crate) use resolve_config_path as resolve_project_path;
 
 pub(crate) fn absolutize(path: impl AsRef<Path>) -> PathBuf {
     let path = path.as_ref();
@@ -366,8 +357,20 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_detects_deleted_sources_and_preserved_timestamps() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
+    fn fingerprints_cover_mutations_and_exclude_unmeasured_outputs() -> anyhow::Result<()> {
+        for check in [
+            fingerprint_detects_deleted_sources_and_preserved_timestamps,
+            verification_files_invalidate_fingerprints_on_add_edit_and_delete,
+            project_fingerprint_changes_with_quality_inputs_only,
+        ] {
+            check(&tempfile::tempdir()?)?;
+        }
+        Ok(())
+    }
+
+    fn fingerprint_detects_deleted_sources_and_preserved_timestamps(
+        root: &tempfile::TempDir,
+    ) -> anyhow::Result<()> {
         let path = root.path().join("lib.rs");
         std::fs::write(&path, "pub fn before() {}")?;
         let initial = project_input_fingerprint(root.path(), &[]);
@@ -393,9 +396,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn verification_files_invalidate_fingerprints_on_add_edit_and_delete() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
+    fn verification_files_invalidate_fingerprints_on_add_edit_and_delete(
+        root: &tempfile::TempDir,
+    ) -> anyhow::Result<()> {
         for name in [
             "SECURITY.md",
             "LICENSE",
@@ -424,9 +427,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn project_fingerprint_changes_with_quality_inputs_only() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
+    fn project_fingerprint_changes_with_quality_inputs_only(
+        root: &tempfile::TempDir,
+    ) -> anyhow::Result<()> {
         std::fs::create_dir_all(root.path().join("src"))?;
         std::fs::create_dir_all(root.path().join("target"))?;
         std::fs::write(root.path().join("Cargo.toml"), "[workspace]\n")?;
