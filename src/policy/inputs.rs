@@ -87,6 +87,52 @@ impl Inputs {
         failures
     }
 
+    pub(super) fn rule_unavailability(&self, config: &LensConfig, rule: &str) -> Option<String> {
+        let Ok(contracts) =
+            serde_json::from_str::<Value>(include_str!("../../contracts/blocking-rules.json"))
+        else {
+            return Some("The blocking-rule contract inventory is malformed".into());
+        };
+        let architecture = config
+            .architecture
+            .rules
+            .iter()
+            .find(|entry| entry.id == rule);
+        if architecture.is_some_and(|entry| {
+            entry.level == PolicyRuleLevel::Off || contracts["rules"].get(rule).is_some()
+        }) {
+            return Some(
+                "The architecture check is disabled or its ID collides with a native rule".into(),
+            );
+        }
+        let family = contracts["rules"][rule]
+            .as_str()
+            .or_else(|| architecture.map(|_| "architecture"));
+        let Some(file) = family.and_then(|name| contracts["families"][name]["artifact"].as_str())
+        else {
+            return Some("No supported per-rule evaluation coverage; finding absence is not a negative result".into());
+        };
+        if self.status[file].status != InputStatus::Available {
+            return Some(format!("{file}: {:?}", self.status[file].status));
+        }
+        if file == "rust_practices.json" {
+            let matching = self.documents[file]["data"]["checks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|check| check["rule_id"] == rule)
+                .collect::<Vec<_>>();
+            if matching.is_empty()
+                || matching
+                    .iter()
+                    .any(|check| !matches!(check["status"].as_str(), Some("passed" | "failed")))
+            {
+                return Some("The practice check is absent, disabled, unavailable or has an unknown execution status".into());
+            }
+        }
+        None
+    }
+
     fn require_regression_inputs(&self, baseline: Option<&Path>, failures: &mut Vec<Value>) {
         for file in ["coverage.json", "performance.json"] {
             if self.status[file].status != InputStatus::Missing

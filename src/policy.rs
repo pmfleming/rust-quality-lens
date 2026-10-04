@@ -45,8 +45,14 @@ pub(crate) fn run_check(
     let test_failures = test_failures(documents);
     let practices = classify_findings(config, practice_findings(documents));
     let reliability = classify_findings(config, reliability_findings(documents));
-    let architecture = classify_findings(config, architecture_findings(documents));
-    let test_quality = classify_findings(config, test_quality_findings(documents));
+    let architecture = classify_findings(
+        config,
+        document_findings(documents, "architecture_rules.json", "violations"),
+    );
+    let test_quality = classify_findings(
+        config,
+        document_findings(documents, "test_quality.json", "findings"),
+    );
     let operational_failures = operational_failures(documents);
     let (external_findings, external_reasons) = crate::external::current_findings(config);
     let external = classify_findings(config, external_findings);
@@ -61,14 +67,18 @@ pub(crate) fn run_check(
     let policy_rule_evaluations = evaluate_policy_rules(
         &config.policy,
         classified.iter().flat_map(|group| group.active.iter()),
+        |rule| inputs.rule_unavailability(config, rule),
     );
     let policy_rule_violations = policy_rule_evaluations
         .iter()
         .filter(|evaluation| evaluation["status"] == "exceeded")
         .cloned()
         .collect::<Vec<_>>();
-    let policy_rule_errors = policy_rule_violations
+    let policy_rule_errors = policy_rule_evaluations
         .iter()
+        .filter(|evaluation| {
+            ["exceeded", "incomplete"].contains(&evaluation["status"].as_str().unwrap_or_default())
+        })
         .filter(|evaluation| evaluation["level"] == "error")
         .count();
     let mut waived_findings = practices.waived;
@@ -328,12 +338,10 @@ fn test_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
 }
 
 fn practice_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
-    let Some(document) = documents.get("rust_practices.json") else {
-        return vec![json!({"reason": "rust_practices.json is missing"})];
-    };
-    let data = artifact_payload(document);
-    data["checks"]
-        .as_array()
+    documents
+        .get("rust_practices.json")
+        .map(artifact_payload)
+        .and_then(|data| data["checks"].as_array())
         .into_iter()
         .flatten()
         .filter(|check| {
@@ -358,30 +366,20 @@ fn operational_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
         .collect()
 }
 
-fn test_quality_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
+fn document_findings(documents: &BTreeMap<String, Value>, file: &str, key: &str) -> Vec<Value> {
     documents
-        .get("test_quality.json")
+        .get(file)
         .map(artifact_payload)
-        .and_then(|payload| payload["findings"].as_array())
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn architecture_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
-    documents
-        .get("architecture_rules.json")
-        .map(artifact_payload)
-        .and_then(|payload| payload["violations"].as_array())
+        .and_then(|payload| payload[key].as_array())
         .cloned()
         .unwrap_or_default()
 }
 
 fn reliability_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
-    let Some(document) = documents.get("reliability_findings.json") else {
-        return vec![json!({"reason": "reliability_findings.json is missing"})];
-    };
-    artifact_payload(document)
-        .as_array()
+    documents
+        .get("reliability_findings.json")
+        .map(artifact_payload)
+        .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter(|finding| finding["severity"] != "advisory" && finding["scope"] == "production")
@@ -431,6 +429,7 @@ fn apply_waivers(config: &LensConfig, findings: Vec<Value>) -> (Vec<Value>, Vec<
 fn evaluate_policy_rules<'a>(
     policy: &crate::config::PolicyConfig,
     findings: impl Iterator<Item = &'a Value> + Clone,
+    unavailability: impl Fn(&str) -> Option<String>,
 ) -> Vec<Value> {
     policy
         .rules
@@ -447,17 +446,28 @@ fn evaluate_policy_rules<'a>(
                 })
                 .count();
             let excluded = matching.len().saturating_sub(observed);
-            let exceeded = observed > rule.max && rule.level != crate::config::PolicyRuleLevel::Off;
+            let disabled = rule.level == crate::config::PolicyRuleLevel::Off;
+            let reason = if disabled {
+                None
+            } else {
+                unavailability(rule_id)
+            };
+            let complete = !disabled && reason.is_none();
             json!({
                 "rule_id": rule_id,
                 "level": rule.level.as_str(),
                 "maximum": rule.max,
-                "observed": observed,
-                "excess": observed.saturating_sub(rule.max),
+                "observed": complete.then_some(observed),
+                "observed_findings": observed,
+                "excess": complete.then_some(observed.saturating_sub(rule.max)),
                 "excluded": excluded,
-                "status": if rule.level == crate::config::PolicyRuleLevel::Off {
+                "evaluation_complete": complete,
+                "reason": reason,
+                "status": if disabled {
                     "disabled"
-                } else if exceeded {
+                } else if !complete {
+                    "incomplete"
+                } else if observed > rule.max {
                     "exceeded"
                 } else {
                     "passed"
@@ -647,7 +657,7 @@ mod tests {
             json!({"rule_id": "rust.reliability.expect", "path": "src/main.rs", "package_name": "app"}),
             json!({"rule_id": "rust.reliability.expect", "path": "src/generated/model.rs", "package_name": "app"}),
         ];
-        let evaluations = evaluate_policy_rules(&policy, findings.iter());
+        let evaluations = evaluate_policy_rules(&policy, findings.iter(), |_| None);
         assert_eq!(evaluations[0]["observed"], 2);
         assert_eq!(evaluations[0]["excluded"], 1);
         assert_eq!(evaluations[0]["status"], "exceeded");

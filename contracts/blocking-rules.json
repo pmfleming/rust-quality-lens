@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "coverage_status": "draft-not-E2-certification",
+  "case_convention": "Positive means an observed violation; negative means evaluated without violation; unavailable means abstention, never a negative.",
+  "rules": {
+    "rust.reliability.unwrap": "reliability",
+    "rust.reliability.expect": "reliability",
+    "rust.reliability.panic": "reliability",
+    "rust.reliability.todo": "reliability",
+    "rust.reliability.unimplemented": "reliability",
+    "rust.memory.raw-api": "reliability",
+    "rust.safety.missing-safety-docs": "reliability",
+    "rust.safety.undocumented-unsafe": "reliability",
+    "rust.test.ignored": "test-quality",
+    "rust.test.no-assertion": "test-quality",
+    "rust.test.no-sut-call": "test-quality",
+    "rust.official.rustfmt": "practices",
+    "rust.official.cargo-check": "practices",
+    "rust.official.clippy": "practices",
+    "rust.official.tests": "practices",
+    "rust.official.doctests": "practices",
+    "rust.official.rustdoc": "practices",
+    "rust.api.semver": "practices",
+    "rust.dependencies.unused": "practices",
+    "rust.features.matrix": "practices",
+    "rust.safety.fuzz": "practices",
+    "rust.safety.miri": "practices",
+    "rust.safety.sanitizers": "practices",
+    "rust.security.rustsec": "practices",
+    "rust.supply-chain.cargo-deny": "practices",
+    "rust.supply-chain.unsafe-inventory": "practices",
+    "rust.tests.flaky-repeat": "practices",
+    "rust.tests.mutation": "practices",
+    "rust.project.changelog": "practices",
+    "rust.project.code-of-conduct": "practices",
+    "rust.project.contributing": "practices",
+    "rust.project.license": "practices",
+    "rust.project.msrv-compatible": "practices",
+    "rust.project.msrv-declared": "practices",
+    "rust.project.repository": "practices",
+    "rust.project.security-policy": "practices",
+    "rust.project.toolchain-policy": "practices",
+    "rust.project.active-toolchain-compatible": "practices",
+    "rust.project.pinned-toolchain-compatible": "practices"
+  },
+  "families": {
+    "reliability": {
+      "artifact": "reliability_findings.json",
+      "prerequisites": ["Current, validated, complete artifact", "Readable configured Rust sources", "Compatible rust_facts helper"],
+      "applicability": "Recognized source-syntax rules; both configured-rule counting and the CLI reliability gate select non-advisory production findings. Test/advisory rows remain outside this policy selection.",
+      "scope": "Configured source roots; source spans, test/production classification and rule-specific syntax matching, not a compiled safety proof.",
+      "rationale": "Identify explicit failure and unsafe-code maintenance risks without interpreting unknown scope as zero.",
+      "limitations": ["Per-rule language/version profiles and detection corpora remain incomplete", "Unexpanded and conditional source ownership remains subject to semantic abstention", "No proof that unwrap panics or unsafe code is unsound"],
+      "cases": {"positive": ["contracts/quality-corpus.json#unwrap"], "negative": ["contracts/quality-corpus.json#explicit-default"], "unavailable": ["src/policy/tests.rs#enabled_policies_require_evidence_and_write_failure_reports"]},
+      "case_coverage": "Partial: unwrap corpus and gate unavailability, not every detection rule"
+    },
+    "test-quality": {
+      "artifact": "test_quality.json",
+      "prerequisites": ["Current, validated, complete artifact", "Readable sources and test catalog"],
+      "applicability": "Syntactically discovered test functions; configured rule limits only.",
+      "scope": "Ignored-test annotations and observed assertion/subject-call syntax in the configured test scope.",
+      "rationale": "Make missing test intent evidence reviewable without treating heuristics as proof of ineffective tests.",
+      "limitations": ["Indirect assertions and custom harnesses can escape syntax recognition", "No exhaustive per-rule positive/negative/unavailable certification"],
+      "cases": {"positive": [], "negative": [], "unavailable": []},
+      "case_coverage": "Pending per-rule cases"
+    },
+    "practices": {
+      "artifact": "rust_practices.json",
+      "prerequisites": ["Current, validated, complete artifact", "A matching check with status passed or failed", "Enabled backend and its declared tool/configuration/dependency inputs"],
+      "applicability": "Official cargo checks plus explicitly enabled optional tools and project metadata checks. Skipped or absent checks do not establish a negative.",
+      "scope": "The recorded command, verification workspace/target/features configuration, or named project metadata field/file; not all possible configurations.",
+      "rationale": "Use observed execution or metadata evidence instead of assuming installed/enabled tools or successful execution.",
+      "limitations": ["Tool-specific prerequisites and version applicability still require individual rule contracts", "Project metadata presence does not establish content quality", "Compiler diagnostic rule enablement is not inferred from an empty diagnostic list"],
+      "cases": {"positive": [], "negative": [], "unavailable": []},
+      "case_coverage": "Pending per-rule cases; policy ingestion cases are separate from backend certification"
+    },
+    "architecture": {
+      "artifact": "architecture_rules.json",
+      "prerequisites": ["Current, validated, complete artifact", "Matching enabled architecture rule in effective configuration", "Resolved graph scope"],
+      "applicability": "Exact configured architecture rule IDs, not guessed namespaces.",
+      "scope": "Configured layer/boundary graph constraints and their declared exclusions.",
+      "rationale": "Enforce explicit dependency boundaries using the graph actually observed.",
+      "limitations": ["Incomplete semantic edges require abstention", "Configuration-specific positive/negative/unavailable cases remain to be certified"],
+      "cases": {"positive": [], "negative": [], "unavailable": []},
+      "case_coverage": "Pending per-configured-rule cases"
+    }
+  },
+  "dynamic_families": {
+    "rust.compiler.* / rust.clippy.*": {
+      "prerequisites": ["Producer diagnostic identity", "Proof of rule enablement for the declared command/version/scope"],
+      "applicability": "Diagnostic observations are retained, but an arbitrary diagnostic rule cannot be certified from its absence.",
+      "scope": "Individual compiler/linter invocation and configuration.",
+      "rationale": "Prevent an unsupported or disabled lint from becoming a clean configured rule.",
+      "limitations": ["Policy does not yet project nested compiler diagnostics consistently with SARIF", "Per-rule negative coverage is unavailable"],
+      "cases": {"positive": [], "negative": [], "unavailable": []},
+      "case_coverage": "Unsupported for complete configured-rule evaluation"
+    },
+    "external.<adapter>.<rule>": {
+      "prerequisites": ["Source-linked current imported evidence", "Explicit producer version, evaluated rules, applicability and exclusion scope"],
+      "applicability": "Imported observations are retained; an empty imported report does not prove that an arbitrary rule ran.",
+      "scope": "Imported producer scope, not an inferred union of engine scopes.",
+      "rationale": "Preserve external observations without inventing negative coverage or engine agreement.",
+      "limitations": ["Current external format does not establish per-rule negative coverage", "Corroboration/disagreement/exclusion projection remains open"],
+      "cases": {"positive": [], "negative": [], "unavailable": []},
+      "case_coverage": "Unsupported for complete configured-rule evaluation"
+    }
+  },
+  "automatic_gates": {
+    "configured-rules": {"prerequisites": ["All four native finding artifacts when any configured rule has error level", "Rule-specific coverage from the families above"], "applicability": "Configured rules with error level", "scope": "Active findings after waivers and path/package exclusions, within each producer's selection scope", "rationale": "Enforce declared counts only when their evaluation is supported and complete", "limitations": ["Unknown, compiler-diagnostic and external rule coverage abstains", "Family contracts are not exhaustive per-rule detector certification"], "cases": {"positive": ["acceptance/evidence_contract_campaign.py#violation"], "negative": ["acceptance/evidence_contract_campaign.py#clean"], "unavailable": ["acceptance/evidence_contract_campaign.py#unsupported-rule"]}},
+    "architecture-rules": {"prerequisites": ["architecture_rules.json when an architecture rule has error level"], "applicability": "Enabled error-level architecture rules", "scope": "Declared graph boundaries", "rationale": "Apply configured boundaries independently of CLI fail-on flags", "limitations": ["Graph completeness is required", "Full configured-rule case certification is pending"], "cases": {"positive": [], "negative": [], "unavailable": []}},
+    "external-evidence": {"prerequisites": ["Imported source-linked reports for required external adapters"], "applicability": "Any non-off configured external rule", "scope": "External report ingestion and freshness, not per-rule negative coverage", "rationale": "Reject absent or unusable imported evidence", "limitations": ["A current report is not proof that every external rule ran", "E6 scope/corroboration semantics remain open"], "cases": {"positive": [], "negative": [], "unavailable": ["acceptance/evidence_contract_campaign.py#external.other.rule"]}}
+  },
+  "gates": {
+    "partial": {"prerequisites": ["All default measure-all artifacts"], "applicability": "Explicit --fail-on partial", "scope": "Default producer inventory, excluding opt-in source-expansion", "rationale": "Reject missing or incomplete evidence", "limitations": ["Completeness is scoped, not a compiled whole-program proof"], "cases": {"positive": [], "negative": [], "unavailable": []}},
+    "test-failure": {"prerequisites": ["correctness_review.json", "Observed successful run and no unknown test statuses"], "applicability": "Explicit --fail-on test-failure", "scope": "Recorded test invocation", "rationale": "Reject failures and unexecuted/unknown tests", "limitations": ["Passing tests do not prove correctness"], "cases": {"positive": ["src/policy/tests.rs#malformed_partial_and_stale_test_evidence_cannot_pass"], "negative": ["src/policy/tests.rs#malformed_partial_and_stale_test_evidence_cannot_pass"], "unavailable": ["src/policy/tests.rs#enabled_policies_require_evidence_and_write_failure_reports"]}},
+    "practice-failure": {"prerequisites": ["rust_practices.json"], "applicability": "Explicit --fail-on practice-failure", "scope": "Enabled practice checks and blocking dispositions", "rationale": "Reject failed required tools/checks", "limitations": ["Optional skipped checks are not certified"], "cases": {"positive": [], "negative": [], "unavailable": ["src/policy/tests.rs#enabled_policies_require_evidence_and_write_failure_reports"]}},
+    "reliability-finding": {"prerequisites": ["reliability_findings.json"], "applicability": "Explicit --fail-on reliability-finding", "scope": "Non-advisory production findings with blocking disposition", "rationale": "Apply declared source-risk policy", "limitations": ["Not a proof of runtime failure"], "cases": {"positive": [], "negative": [], "unavailable": ["src/policy/tests.rs#enabled_policies_require_evidence_and_write_failure_reports"]}},
+    "operational-failure": {"prerequisites": ["operational_evidence.json", "Fresh telemetry observation window"], "applicability": "Explicit --fail-on operational-failure", "scope": "Recorded operational budget/window", "rationale": "Reject breached budgets or absent/expired observations", "limitations": ["No inference beyond the measured window"], "cases": {"positive": [], "negative": [], "unavailable": ["src/policy/tests.rs#operational_policy_rechecks_observation_age"]}},
+    "threshold": {"prerequisites": ["map.json", "Numeric comparable scores"], "applicability": "Explicit --fail-on threshold", "scope": "Current module scores and --max-total-score", "rationale": "Enforce the declared heuristic budget", "limitations": ["Score is not a calibrated defect or effort probability"], "cases": {"positive": ["src/policy/tests.rs#scoring_policies_reject_unknown_scores_and_missing_baselines"], "negative": ["src/policy/tests.rs#scoring_policies_reject_unknown_scores_and_missing_baselines"], "unavailable": ["src/policy/tests.rs#scoring_policies_reject_unknown_scores_and_missing_baselines"]}},
+    "regression": {"prerequisites": ["map.json", "Compatible baseline", "Coverage/performance evidence when present in either side"], "applicability": "Explicit --fail-on regression", "scope": "Compatible current/baseline observations and configured delta limits", "rationale": "Do not confuse incomparable or disappeared evidence with improvement", "limitations": ["Runtime coverage/performance are execution inputs, not deterministic static measurements"], "cases": {"positive": [], "negative": ["src/policy/tests.rs#auxiliary_baseline_errors_are_reported_instead_of_skipping_comparisons"], "unavailable": ["src/policy/tests.rs#disappearing_benchmarks_are_incomparable_not_empty_comparisons"]}}
+  }
+}

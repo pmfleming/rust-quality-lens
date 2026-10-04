@@ -1,5 +1,9 @@
 # Cross-lens upgrade execution
 
+## Current evidence contracts: initial E2/E3 boundary
+
+The catalog now exposes 39 native rule IDs and draft family/gate contracts, explicitly retaining missing per-rule cases. Configured rules abstain on unsupported, disabled or unusable evaluation inputs rather than reporting verified-zero counts. All 28 native ingestion cases and 28 policy replays pass; CLI stdout matches published JSON. A separate probe confirms the remaining E4/E6 nested-diagnostic projection/corroboration gap. See `contracts/blocking-rule-coverage.md` and `acceptance/evidence-contracts-results.json`. **E2, E3, E4 and E6 remain open**; no release or T4 closure is claimed.
+
 ## Current refactoring: self-measured quality
 
 Frozen-evaluator measurements reduce token-clone groups 111→88, duplicated lines 1,641→1,382, and measured source lines 22,492→22,462. Cyclomatic/cognitive sums fall 3,223→3,214 and 1,387→1,383; maxima remain 20/11. Shared fixture and current-artifact boundaries improve reuse and selected locality scores, with explicit per-module trade-offs. All 19 artifact schemas and catalog output are unchanged. See `docs/self-refactoring.md` and `acceptance/self-refactoring-results.json` for measurements, repeatability limits and validation. No calibrated effort estimate, T4 closure or release permission is claimed.

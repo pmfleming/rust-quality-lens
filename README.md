@@ -177,6 +177,13 @@ exclude_paths = ["src/generated/**"]
 exclude_packages = ["generated-bindings"]
 ```
 
+Configured rules require supported, current, complete evaluation evidence. Missing,
+skipped, stale or unsupported checks report `incomplete`, not a verified zero;
+error-level incomplete rules block policy. `rqlens catalog` exposes the draft
+blocking-rule contracts and their remaining coverage gaps. See
+[`contracts/blocking-rule-coverage.md`](contracts/blocking-rule-coverage.md),
+including current compiler-diagnostic and external-rule limitations.
+
 Temporary exceptions must include ownership and an expiry:
 
 ```toml
@@ -187,8 +194,8 @@ owner = "project-maintainers"
 expires = "2026-12-31"
 ```
 
-Active waivers remain visible in `policy_report.json` and are omitted from
-SARIF. Expired waivers no longer suppress findings.
+Waivable findings accepted by active waivers remain visible in `policy_report.json`
+and in SARIF as accepted suppressions. Expired waivers no longer suppress findings.
 
 ### Export SARIF
 

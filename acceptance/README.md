@@ -10,6 +10,8 @@ Each passed row must cite commands, actual results, source revision, bounded sco
 
 Steps 1–5 are implementation iterations, not completed acceptance. Six criteria have scoped evidence; **19/25 remain unresolved**. T1 is reconfirmed; T2 and T3 pass the final 182-command/91-comparison campaign on six daemons plus daemon-framework. Unresolved type/semantic scope now explicitly abstains (`trust-t3-review.md`, `trust-t3-results.json`, `../contracts/semantic-abstention.md`). T4 is **not passed**: strict native policy rejects partial self-evidence, and platform/latest-stable certification remains outstanding (`trust-t4-results.json`). Historical clean results are in `step-5.md`; they do not certify the new implementation. Operational recovery/limits are in `../contracts/operational-scope.md`.
 
+The initial E2/E3 milestone inventories rule families and fixes configured-policy false-clean statuses (28 native ingestion cases). All E2/E3/E4/E6 criteria remain open: per-rule detector cases are incomplete, and the native reporter probe retains an E4/E6 counterexample. See `evidence-contracts-results.json` and `../contracts/blocking-rule-coverage.md`.
+
 Additional checks:
 
 ```sh
@@ -19,6 +21,8 @@ python3 acceptance/calibration.py --release  # intentionally blocked pending ind
 python3 acceptance/profile.py               # after native build/helper prewarming
 python3 acceptance/trust_campaign.py --output target/trust-new  # fresh directory; built rqlens required
 python3 acceptance/check_trust_t3.py target/trust-new            # current incomplete syntax profiles
+python3 acceptance/evidence_contract_campaign.py --output target/evidence-new  # fresh native policy fixtures
+python3 acceptance/probe_reporter_gaps.py --output target/reporter-probe-new  # retained E4/E6 gaps, not certification
 python3 acceptance/trust_campaign.py --output target/expansion-new --tools source-expansion  # experimental, opt-in
 ```
 

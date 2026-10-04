@@ -40,7 +40,8 @@ pub(crate) fn print_catalog(config: &LensConfig) -> Result<()> {
                 {"id": "correctness", "title": "Correctness Review"},
                 {"id": "map", "title": "Map"}
             ],
-            "tasks": tasks
+            "tasks": tasks,
+            "blocking_rule_contracts": serde_json::from_str::<Value>(include_str!("../contracts/blocking-rules.json"))?
         }))?
     );
     Ok(())

@@ -300,24 +300,13 @@ fn payload(document: &Value) -> &Value {
 #[cfg(test)]
 mod tests {
     use super::write;
-    use crate::config::LensConfig;
     use anyhow::Context;
     use serde_json::{Map, Value, json};
 
     #[test]
     fn emits_findings_and_failed_gates_as_sarif() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        let analysis = root.path().join("analysis");
-        std::fs::create_dir_all(&analysis)?;
-        std::fs::create_dir(root.path().join("src"))?;
+        let (root, config) = crate::test_support::source_project(Some("pub fn example() {}\n"))?;
         let source = root.path().join("src/lib.rs");
-        std::fs::write(&source, "pub fn example() {}\n")?;
-        let config_file = root.path().join("rqlens.toml");
-        std::fs::write(
-            &config_file,
-            "source_roots = ['src']\noutput_dir = 'analysis'\n[rust]\nidentity_resolution = 'disabled'\n",
-        )?;
-        let config = LensConfig::load(Some(config_file))?;
         let inputs: Map<String, Value> =
             serde_json::from_str(include_str!("../tests/fixtures/sarif-inputs.json"))?;
         for (file, payload) in inputs {
@@ -330,7 +319,7 @@ mod tests {
                 .as_object_mut()
                 .context("header object")?
                 .extend(fields);
-            crate::util::write_json(&analysis.join(file), &document)?;
+            crate::util::write_json(&config.output_dir.join(file), &document)?;
         }
         let output = write(&config, None)?;
         let document: serde_json::Value = serde_json::from_slice(&std::fs::read(output)?)?;

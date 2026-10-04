@@ -7,15 +7,13 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::command_runner::{CommandOutcome, CommandRequest, CommandStatus, run};
-use crate::config::LensConfig;
+use crate::{config::LensConfig, toolchain::parse_version as parse_rust_version};
 
 pub(super) fn produce(config: &LensConfig, context: &crate::facts::RunContext) -> Result<Value> {
     let toolchain = &context.snapshot.toolchain;
     let mut checks = official_checks(config);
+    checks.extend(supply_chain_checks(config));
     checks.extend([
-        audit_check(config),
-        deny_check(config),
-        geiger_check(config),
         unused_dependencies_check(config),
         semver_check(config),
         feature_matrix_check(config),
@@ -148,64 +146,57 @@ fn official_checks(config: &LensConfig) -> Vec<Value> {
     ]
 }
 
-fn audit_check(config: &LensConfig) -> Value {
-    if config.verification.audit {
-        cargo_check(
-            config,
+fn supply_chain_checks(config: &LensConfig) -> Vec<Value> {
+    [
+        (
+            config.verification.audit,
             "rust.security.rustsec",
             "Dependencies have no known RustSec advisories",
-            vec!["audit".to_string()],
-            "https://rustsec.org/",
-            BTreeMap::new(),
-        )
-    } else {
-        skipped_check(
-            "rust.security.rustsec",
             "Dependency advisory scan",
+            &["audit"][..],
             "enable verification.audit to require cargo-audit",
             "https://rustsec.org/",
-        )
-    }
-}
-
-fn deny_check(config: &LensConfig) -> Value {
-    if config.verification.deny {
-        cargo_check(
-            config,
+        ),
+        (
+            config.verification.deny,
             "rust.supply-chain.cargo-deny",
             "Dependency policy passes cargo-deny",
-            vec!["deny".to_string(), "check".to_string()],
-            "https://embarkstudios.github.io/cargo-deny/",
-            BTreeMap::new(),
-        )
-    } else {
-        skipped_check(
-            "rust.supply-chain.cargo-deny",
             "Dependency license and source policy",
+            &["deny", "check"][..],
             "enable verification.deny to require cargo-deny",
             "https://embarkstudios.github.io/cargo-deny/",
-        )
-    }
-}
-
-fn geiger_check(config: &LensConfig) -> Value {
-    if config.verification.geiger {
-        cargo_check(
-            config,
+        ),
+        (
+            config.verification.geiger,
             "rust.supply-chain.unsafe-inventory",
             "Unsafe usage inventory completes for the dependency graph",
-            vec!["geiger".to_string()],
-            "https://github.com/geiger-rs/cargo-geiger",
-            BTreeMap::new(),
-        )
-    } else {
-        skipped_check(
-            "rust.supply-chain.unsafe-inventory",
             "Dependency unsafe usage inventory",
+            &["geiger"][..],
             "enable verification.geiger to require cargo-geiger",
             "https://github.com/geiger-rs/cargo-geiger",
-        )
-    }
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(enabled, rule, title, skipped_title, arguments, reason, source)| {
+            if enabled {
+                cargo_check(
+                    config,
+                    rule,
+                    title,
+                    arguments
+                        .iter()
+                        .map(|argument| (*argument).to_string())
+                        .collect(),
+                    source,
+                    BTreeMap::new(),
+                )
+            } else {
+                skipped_check(rule, skipped_title, reason, source)
+            }
+        },
+    )
+    .collect()
 }
 
 fn unused_dependencies_check(config: &LensConfig) -> Value {
@@ -743,10 +734,6 @@ fn msrv_dependency_check(config: &LensConfig, manifest: Option<&toml::Value>) ->
             "maximum_dependency": maximum.map(|(_, package)| package),
         },
     })
-}
-
-fn parse_rust_version(value: &str) -> Option<(u64, u64, u64)> {
-    crate::toolchain::parse_version(value)
 }
 
 fn format_rust_version(version: (u64, u64, u64)) -> String {

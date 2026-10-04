@@ -1,0 +1,698 @@
+{
+  "parent_revision": "62da2414aff35fee98fa8a52c5d6780c02059282",
+  "criterion_status": {
+    "E2": "open",
+    "E3": "open",
+    "E4": "open",
+    "E6": "open"
+  },
+  "scope": "Initial family inventory and configured-policy ingestion boundary; not exhaustive rule or reporter certification",
+  "baseline": {
+    "binary_sha256": "49527c77f4997a244c57a692fc776f9879d156d2992b73e7f9306f6c1b72c049",
+    "cases": 28,
+    "wrong_evaluation_statuses": 22,
+    "incorrect_passed_statuses": 20,
+    "expanded_contract_passes": 0,
+    "note": "Expanded contract includes newly introduced fields; failing those alone is not a preexisting defect."
+  },
+  "candidate": {
+    "binary_sha256": "3a1682f3236cbf5c67f91805bb5a9c0a03387cb2f215927885bf23382e8f5061",
+    "scope": "Synthetic policy-ingestion fixtures with native current fingerprints; not detector/backend certification",
+    "cases": [
+      {
+        "case": 0,
+        "rule": "rust.reliability.unwrap",
+        "level": "error",
+        "mutation": "clean",
+        "expected_status": "passed",
+        "actual_status": "passed",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 1,
+        "rule": "rust.reliability.unwrap",
+        "level": "error",
+        "mutation": "violation",
+        "expected_status": "exceeded",
+        "actual_status": "exceeded",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 2,
+        "rule": "rust.reliability.unwrap",
+        "level": "error",
+        "mutation": "missing",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 3,
+        "rule": "rust.reliability.unwrap",
+        "level": "error",
+        "mutation": "corrupt",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 4,
+        "rule": "rust.reliability.unwrap",
+        "level": "error",
+        "mutation": "stale",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 5,
+        "rule": "rust.reliability.unwrap",
+        "level": "error",
+        "mutation": "partial",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 6,
+        "rule": "rust.reliability.unwrap",
+        "level": "error",
+        "mutation": "unsupported-schema",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 7,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "clean",
+        "expected_status": "passed",
+        "actual_status": "passed",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 8,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "violation",
+        "expected_status": "exceeded",
+        "actual_status": "exceeded",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 9,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "missing",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 10,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "corrupt",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 11,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "stale",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 12,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "partial",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 13,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "unsupported-schema",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 14,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "absent-check",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 15,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "skipped",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 16,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "unavailable",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 17,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "timed-out",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 18,
+        "rule": "rust.security.rustsec",
+        "level": "error",
+        "mutation": "mixed-skipped",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 19,
+        "rule": "rust.unknown.typo",
+        "level": "error",
+        "mutation": "unsupported-rule",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 20,
+        "rule": "rust.reliability.unreachable",
+        "level": "error",
+        "mutation": "unsupported-rule",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 21,
+        "rule": "rust.compiler.diagnostic",
+        "level": "error",
+        "mutation": "unsupported-rule",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 22,
+        "rule": "external.other.rule",
+        "level": "error",
+        "mutation": "unsupported-rule",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 23,
+        "rule": "boundary",
+        "level": "error",
+        "mutation": "architecture-clean",
+        "expected_status": "passed",
+        "actual_status": "passed",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 24,
+        "rule": "boundary",
+        "level": "error",
+        "mutation": "architecture-disabled",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 25,
+        "rule": "rust.reliability.unwrap",
+        "level": "error",
+        "mutation": "architecture-collision",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 26,
+        "rule": "rust.unknown.typo",
+        "level": "off",
+        "mutation": "missing",
+        "expected_status": "disabled",
+        "actual_status": "disabled",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      },
+      {
+        "case": 27,
+        "rule": "rust.security.rustsec",
+        "level": "warning",
+        "mutation": "skipped",
+        "expected_status": "incomplete",
+        "actual_status": "incomplete",
+        "checks": {
+          "status": true,
+          "exit": true,
+          "passed": true,
+          "cli_json_agreement": true,
+          "completeness": true,
+          "known_count": true,
+          "unknown_count": true,
+          "unknown_excess": true,
+          "reason": true,
+          "no_invented_violation": true
+        },
+        "passed": true
+      }
+    ],
+    "passed": true
+  },
+  "repeatability": {
+    "commands": 28,
+    "matching_policy_reports": 28,
+    "normalization": [
+      "generated_at",
+      "measured_at"
+    ],
+    "arrays_preserved": true
+  },
+  "reporter_probe": {
+    "scope": "Synthetic repeated diagnostic through two invocation records; not an engine-accuracy or same-scope disagreement test",
+    "input_observations": 2,
+    "policy_evaluation": {
+      "evaluation_complete": false,
+      "excess": null,
+      "excluded": 0,
+      "level": "error",
+      "maximum": 0,
+      "observed": null,
+      "observed_findings": 0,
+      "reason": "No supported per-rule evaluation coverage; finding absence is not a negative result",
+      "rule_id": "rust.compiler.diagnostic",
+      "status": "incomplete"
+    },
+    "sarif_diagnostic_results": [
+      {
+        "level": "error",
+        "locations": [
+          {
+            "physicalLocation": {
+              "artifactLocation": {
+                "uri": "src/lib.rs"
+              },
+              "region": {
+                "startColumn": 1,
+                "startLine": 1
+              }
+            }
+          }
+        ],
+        "message": {
+          "text": "shared observation"
+        },
+        "partialFingerprints": {
+          "rqlens/source-anchor-v1": "rqlens:6ebd4a95160e0be1:1"
+        },
+        "ruleId": "rust.compiler.diagnostic"
+      }
+    ],
+    "criterion_status": {
+      "E4": "open",
+      "E6": "open"
+    },
+    "limitations": [
+      "Nested compiler observations are not counted by configured policy rules",
+      "SARIF deduplicates the two observations without retaining both invocation records",
+      "Missing output alone would not establish engine disagreement; scope compatibility is not inferred"
+    ]
+  },
+  "validation": {
+    "normal_workspace_tests": 193,
+    "live_fixtures": 2,
+    "python_tests": 18,
+    "strict_clippy": true,
+    "rustdoc": true,
+    "package_smoke": true,
+    "bundled_helper_parity": true,
+    "unchanged_self_gates": true,
+    "unchanged_artifact_schemas": 19,
+    "catalog_task_definitions_unchanged": true,
+    "disabled_supply_chain_check_records_unchanged": true
+  },
+  "self_metrics": {
+    "source_nonblank_lines": 22498.0,
+    "maximum_function_hotspot": 69.22,
+    "cyclomatic_max": 20,
+    "cognitive_max": 11
+  },
+  "raw_evidence": "target/evidence-contracts",
+  "limitations": [
+    "No all-rule detector/command/version/applicability certification; inventory declares pending cases.",
+    "Policy-selected observations are not yet the same projection as SARIF nested diagnostics.",
+    "Corroboration, disagreement and exclusion scope are not certified; the probe retains an actual projection counterexample.",
+    "No native source-scope, rule thresholds, weights or budgets were weakened. T4 and release remain blocked."
+  ]
+}
