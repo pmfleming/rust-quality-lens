@@ -1,6 +1,10 @@
 # Cross-lens upgrade execution
 
-## Current reporter agreement: shared practice projection
+## Current reporter agreement: source and imported findings
+
+Source and imported projections now share identity, policy-context and waiver interpretation. Original evidence is retained, reliability selection remains unchanged and out-of-scope observations stay visible. Six native agreement fixtures, 30 rejection/abstention cases and twelve exact reporter replays pass; actual self-analysis agrees on 127 source findings, including 125 outside reliability policy selection. Unsafe adapter names and malformed imports cannot replace prior valid reports. See `contracts/source-projection.md` and `acceptance/source-reporters-results.json`. Review/change snapshots and broader E2/E3/E4/E6 scope remain open. Self gates pass at 22,499 source lines; strict policy and release remain blocked.
+
+## Prior reporter agreement: shared practice projection
 
 Policy and SARIF now share nested-diagnostic projection and retain all contributing observations and invocation context. Nineteen native cases verify identity, evidence, disposition, waivers/exclusions and exact input reconstruction; 38 reporter replays match byte-for-byte. Ten malformed-input cases reject without replacing the prior SARIF. The original 28 ingestion cases still pass. See `contracts/practice-projection.md` and `acceptance/reporter-agreement-results.json`. Unknown negative coverage and compatible-engine scope remain explicit; **E2/E3/E4/E6 remain open** outside these bounded cases. Self gates pass at 22,492 source lines with no scope/budget/weight changes.
 

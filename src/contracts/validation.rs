@@ -182,27 +182,29 @@ fn practice(value: &Value) -> Result<()> {
         "invalid practice check status",
     )?;
     if let Some(diagnostics) = value.get("diagnostics") {
-        each(diagnostics, diagnostic)?;
+        validate_diagnostics(diagnostics)?;
     }
     Ok(())
 }
 
-fn diagnostic(value: &Value) -> Result<()> {
-    finding(value)?;
-    ensure!(
-        value["message"].is_string(),
-        "diagnostic requires a message"
-    );
-    for field in ["line", "column"] {
+pub(crate) fn validate_diagnostics(values: &Value) -> Result<()> {
+    for value in array(values)? {
+        finding(value)?;
         ensure!(
-            value[field].is_null() || value[field].as_u64().is_some_and(|number| number > 0),
-            "invalid diagnostic {field}"
+            value["message"].is_string(),
+            "diagnostic requires a message"
+        );
+        for field in ["line", "column"] {
+            ensure!(
+                value[field].is_null() || value[field].as_u64().is_some_and(|number| number > 0),
+                "invalid diagnostic {field}"
+            );
+        }
+        ensure!(
+            value["path"].is_null() || value["path"].is_string(),
+            "invalid diagnostic path"
         );
     }
-    ensure!(
-        value["path"].is_null() || value["path"].is_string(),
-        "invalid diagnostic path"
-    );
     Ok(())
 }
 

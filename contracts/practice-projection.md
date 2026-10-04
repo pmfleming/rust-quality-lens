@@ -95,7 +95,8 @@ python3 acceptance/evidence_contract_campaign.py --output target/ingestion-new
 Directories must be fresh. Summary: `acceptance/reporter-agreement-results.json`;
 raw evidence: `target/reporter-agreement/`.
 
-Still required: product-wide source/external/review/policy-disposition parity,
+Source/imported projection is extended in `source-projection.md` without certifying
+compatible scopes. Still required: product-wide review/policy-disposition parity,
 compatible engine applicability and exclusion-scope modelling, explicit semantic
 disagreement handling, exhaustive per-rule cases, and resource certification for
 large diagnostic inventories. Retaining supplied scope is not proof of that scope.

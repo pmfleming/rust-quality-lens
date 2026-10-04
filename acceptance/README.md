@@ -12,6 +12,8 @@ Steps 1–5 are implementation iterations, not completed acceptance. Six criteri
 
 The initial E2/E3 milestone inventories rule families and fixes configured-policy false-clean statuses (28 native ingestion cases). Shared practice projection subsequently repairs the nested-diagnostic counterexample with 19 native projection cases and ten malformed-input cases. All E2/E3/E4/E6 criteria remain open beyond these scopes. See `evidence-contracts-results.json`, `reporter-agreement-results.json`, and `../contracts/practice-projection.md`.
 
+Source/imported reporter agreement adds six native agreement fixtures, 30 rejection/abstention cases, twelve exact replays and an actual 127-finding self comparison. Source/import provenance is retained without changing reliability selection or inventing engine-scope completeness. See `source-reporters-results.json` and `../contracts/source-projection.md`.
+
 Additional checks:
 
 ```sh
@@ -24,6 +26,7 @@ python3 acceptance/check_trust_t3.py target/trust-new            # current incom
 python3 acceptance/evidence_contract_campaign.py --output target/evidence-new  # fresh native policy fixtures
 python3 acceptance/probe_reporter_gaps.py --output target/reporter-probe-new  # bounded projection probe, not certification
 python3 acceptance/reporter_campaign.py --output target/reporters-new  # lossless projection and rejection cases
+python3 acceptance/source_reporter_campaign.py --output target/source-reporters-new  # source/imported projection
 python3 acceptance/trust_campaign.py --output target/expansion-new --tools source-expansion  # experimental, opt-in
 ```
 

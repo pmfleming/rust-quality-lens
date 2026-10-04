@@ -1,7 +1,7 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{collections::BTreeMap, fs};
 
 use crate::config::LensConfig;
 use crate::util::write_json;
@@ -13,9 +13,7 @@ pub(crate) fn ingest(config: &LensConfig, adapter: &str, input: &Path) -> Result
     )
     .with_context(|| format!("parsing external evidence {}", input.display()))?;
     validate(adapter, &document)?;
-    let output = config
-        .output_dir
-        .join(format!("external_{}.json", safe_name(adapter)));
+    let output = config.output_dir.join(format!("external_{adapter}.json"));
     let envelope = json!({
         "schema_version": 1,
         "generated_from": "rqlens-external-ingest",
@@ -29,34 +27,52 @@ pub(crate) fn ingest(config: &LensConfig, adapter: &str, input: &Path) -> Result
 }
 
 fn validate(adapter: &str, document: &Value) -> Result<()> {
-    if adapter.trim().is_empty() {
-        bail!("external evidence adapter must not be empty");
+    ensure!(
+        !adapter.is_empty()
+            && adapter
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric()
+                    || ['-', '_'].contains(&character)),
+        "external adapter must contain only ASCII letters, digits, '-' or '_'"
+    );
+    for field in ["name", "version"] {
+        ensure!(
+            document["tool"][field]
+                .as_str()
+                .is_some_and(|value| !value.trim().is_empty()),
+            "external evidence requires nonempty tool.{field}"
+        );
     }
-    let tool_name = document["tool"]["name"].as_str().unwrap_or_default();
-    if tool_name.is_empty() || document["tool"]["version"].as_str().is_none() {
-        bail!("external evidence requires tool.name and tool.version");
-    }
-    if !matches!(
-        document["status"].as_str(),
-        Some("completed" | "failed" | "partial" | "unavailable")
-    ) {
-        bail!("external evidence status must be completed, failed, partial, or unavailable");
-    }
+    ensure!(
+        ["completed", "failed", "partial", "unavailable"]
+            .contains(&document["status"].as_str().unwrap_or_default()),
+        "external evidence status must be completed, failed, partial, or unavailable"
+    );
     for field in ["findings", "metrics"] {
-        if !document[field].is_array() {
-            bail!("external evidence {field} must be an array");
-        }
+        ensure!(
+            document[field].is_array(),
+            "external evidence {field} must be an array"
+        );
     }
-    if !document["scope"].is_object() || !document["confidence"].is_object() {
-        bail!("external evidence requires scope and confidence objects");
-    }
-    Ok(())
+    ensure!(
+        ["scope", "confidence"]
+            .iter()
+            .all(|field| document[*field].is_object()),
+        "external evidence requires scope and confidence objects"
+    );
+    crate::contracts::validate_diagnostics(&document["findings"])
+}
+
+#[derive(Default)]
+pub(crate) struct ExternalEvidence {
+    pub(crate) findings: Vec<Value>,
+    pub(crate) reasons: Vec<String>,
+    pub(crate) documents: BTreeMap<String, Value>,
 }
 
 /// Imported reports enter policy/export only when their producer linked the current inputs.
-pub(crate) fn current_findings(config: &LensConfig) -> (Vec<Value>, Vec<String>) {
-    let mut findings = Vec::new();
-    let mut reasons = Vec::new();
+pub(crate) fn current_findings(config: &LensConfig) -> ExternalEvidence {
+    let mut evidence = ExternalEvidence::default();
     let mut paths = fs::read_dir(&config.output_dir)
         .into_iter()
         .flatten()
@@ -70,7 +86,9 @@ pub(crate) fn current_findings(config: &LensConfig) -> (Vec<Value>, Vec<String>)
         .collect::<Vec<_>>();
     paths.sort();
     if paths.is_empty() {
-        reasons.push("No imported external reports are available".into());
+        evidence
+            .reasons
+            .push("No imported external reports are available".into());
     }
     for (rule, policy) in &config.policy.rules {
         if policy.level != crate::config::PolicyRuleLevel::Off
@@ -79,10 +97,10 @@ pub(crate) fn current_findings(config: &LensConfig) -> (Vec<Value>, Vec<String>)
                 .and_then(|rule| rule.split('.').next())
             && !config
                 .output_dir
-                .join(format!("external_{}.json", safe_name(adapter)))
+                .join(format!("external_{adapter}.json"))
                 .is_file()
         {
-            reasons.push(format!(
+            evidence.reasons.push(format!(
                 "Required external adapter {adapter} has no imported report"
             ));
         }
@@ -90,21 +108,39 @@ pub(crate) fn current_findings(config: &LensConfig) -> (Vec<Value>, Vec<String>)
     let current = config.input_fingerprint();
     for path in paths {
         match current_report(config, &path, &current) {
-            Ok(rows) => findings.extend(rows),
-            Err(error) => reasons.push(format!("{}: {error}", path.display())),
+            Ok((rows, document)) => {
+                evidence.findings.extend(rows);
+                evidence.documents.insert(
+                    document["adapter"].as_str().unwrap_or_default().to_string(),
+                    document,
+                );
+            }
+            Err(error) => evidence
+                .reasons
+                .push(format!("{}: {error}", path.display())),
         }
     }
-    (findings, reasons)
+    evidence
 }
 
-fn current_report(config: &LensConfig, path: &Path, current: &Value) -> Result<Vec<Value>> {
+fn current_report(
+    config: &LensConfig,
+    path: &Path,
+    current: &Value,
+) -> Result<(Vec<Value>, Value)> {
     let envelope: Value = serde_json::from_slice(&fs::read(path)?)?;
     let adapter = envelope["adapter"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("missing adapter"))?;
     let document = &envelope["data"];
     validate(adapter, document)?;
-    anyhow::ensure!(
+    ensure!(
+        envelope["schema_version"] == 1
+            && path.file_name().and_then(|name| name.to_str())
+                == Some(format!("external_{adapter}.json").as_str()),
+        "external schema version or adapter/filename mismatch"
+    );
+    ensure!(
         document["status"] == "completed"
             && document["confidence"]["complete"] == true
             && crate::fingerprint::freshness(document, current)
@@ -116,41 +152,21 @@ fn current_report(config: &LensConfig, path: &Path, current: &Value) -> Result<V
         .into_iter()
         .flatten()
         .map(|raw| external_finding(adapter, &document["tool"], raw))
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<Vec<_>>();
     crate::findings::normalize_records(config, &mut rows);
-    Ok(rows)
+    crate::findings::policy_context(config, &mut rows);
+    for (index, row) in rows.iter_mut().enumerate() {
+        row["origin"] = json!({"adapter": adapter, "record_index": index});
+    }
+    Ok((rows, envelope))
 }
 
-fn external_finding(adapter: &str, producer: &Value, raw: &Value) -> Result<Value> {
-    let rule = raw["rule_id"]
-        .as_str()
-        .filter(|rule| !rule.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("missing rule ID"))?;
-    anyhow::ensure!(
-        raw["message"].is_string()
-            && matches!(
-                raw["severity"].as_str(),
-                Some("error" | "warning" | "advisory")
-            ),
-        "invalid external finding"
-    );
+fn external_finding(adapter: &str, producer: &Value, raw: &Value) -> Value {
+    let rule = raw["rule_id"].as_str().unwrap_or_default();
     let mut finding = raw.clone();
-    finding["rule_id"] = json!(format!("external.{}.{}", safe_name(adapter), rule));
+    finding["rule_id"] = json!(format!("external.{adapter}.{rule}"));
     finding["producer"] = producer.clone();
-    Ok(finding)
-}
-
-fn safe_name(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect()
+    finding
 }
 
 #[cfg(test)]
@@ -166,15 +182,15 @@ mod tests {
             "confidence":{"complete":true},"metrics":[],"findings":[{"rule_id":"rule","message":"problem","severity":"warning","path":"src/lib.rs","line":1}]});
         std::fs::write(&report, serde_json::to_vec(&evidence)?)?;
         super::ingest(&config, "other", &report)?;
-        assert!(super::current_findings(&config).0.is_empty());
+        assert!(super::current_findings(&config).findings.is_empty());
         evidence["input_fingerprint"] = config.input_fingerprint();
         std::fs::write(&report, serde_json::to_vec(&evidence)?)?;
         super::ingest(&config, "other", &report)?;
-        let (findings, reasons) = super::current_findings(&config);
-        assert!(reasons.is_empty(), "{reasons:?}");
-        assert_eq!(findings[0]["rule_id"], "external.other.rule");
+        let current = super::current_findings(&config);
+        assert!(current.reasons.is_empty(), "{:?}", current.reasons);
+        assert_eq!(current.findings[0]["rule_id"], "external.other.rule");
         std::fs::write(root.path().join("src/lib.rs"), "pub fn changed() {}")?;
-        assert!(super::current_findings(&config).0.is_empty());
+        assert!(super::current_findings(&config).findings.is_empty());
         Ok(())
     }
 

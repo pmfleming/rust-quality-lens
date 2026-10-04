@@ -46,19 +46,19 @@ pub(crate) fn run_check(
     let practice_projection =
         crate::findings::practices::project(config, documents.get("rust_practices.json"));
     let practices = classify_findings(config, practice_projection.findings);
-    let reliability = classify_findings(config, reliability_findings(documents));
-    let architecture = classify_findings(
-        config,
-        document_findings(documents, "architecture_rules.json", "violations"),
-    );
-    let test_quality = classify_findings(
-        config,
-        document_findings(documents, "test_quality.json", "findings"),
-    );
+    let source_findings = |file| {
+        classify_findings(
+            config,
+            crate::findings::source(config, file, documents.get(file)),
+        )
+    };
+    let reliability = source_findings("reliability_findings.json");
+    let architecture = source_findings("architecture_rules.json");
+    let test_quality = source_findings("test_quality.json");
     let operational_failures = operational_failures(documents);
-    let (external_findings, external_reasons) = crate::external::current_findings(config);
-    let external = classify_findings(config, external_findings);
-    input_failures.extend(external_input_failures(config, &external_reasons));
+    let external_evidence = crate::external::current_findings(config);
+    let external = classify_findings(config, external_evidence.findings);
+    input_failures.extend(external_input_failures(config, &external_evidence.reasons));
     let classified = [
         &practices,
         &reliability,
@@ -158,13 +158,16 @@ pub(crate) fn run_check(
         "practice_evidence": practice_projection.evidence,
         "reliability_findings": reliability.errors,
         "reliability_warnings": reliability.warnings,
+        "reliability_out_of_scope": reliability.out_of_scope,
+        "source_evidence": crate::findings::SOURCE_FILES.iter().map(|(file, _)| (*file, documents.get(*file))).collect::<BTreeMap<_, _>>(),
         "architecture_violations": architecture.errors,
         "architecture_warnings": architecture.warnings,
         "test_quality_findings": test_quality.errors,
         "test_quality_warnings": test_quality.warnings,
         "operational_failures": operational_failures,
         "external_findings": external.active,
-        "external_evidence_reasons": external_reasons,
+        "external_evidence_reasons": external_evidence.reasons,
+        "external_evidence": external_evidence.documents,
         "waived_findings": waived_findings,
         "expired_waivers": expired_waivers,
         "policy_rule_evaluations": policy_rule_evaluations,
@@ -352,36 +355,19 @@ fn operational_failures(documents: &BTreeMap<String, Value>) -> Vec<Value> {
         .collect()
 }
 
-fn document_findings(documents: &BTreeMap<String, Value>, file: &str, key: &str) -> Vec<Value> {
-    documents
-        .get(file)
-        .map(artifact_payload)
-        .and_then(|payload| payload[key].as_array())
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn reliability_findings(documents: &BTreeMap<String, Value>) -> Vec<Value> {
-    documents
-        .get("reliability_findings.json")
-        .map(artifact_payload)
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|finding| finding["severity"] != "advisory" && finding["scope"] == "production")
-        .cloned()
-        .collect()
-}
-
 struct FindingClassification {
     active: Vec<Value>,
     errors: Vec<Value>,
     warnings: Vec<Value>,
     waived: Vec<Value>,
+    out_of_scope: Vec<Value>,
 }
 
 fn classify_findings(config: &LensConfig, findings: Vec<Value>) -> FindingClassification {
     let (active, waived) = apply_waivers(config, findings);
+    let (active, out_of_scope): (Vec<_>, Vec<_>) = active
+        .into_iter()
+        .partition(|finding| finding["policy_selected"] != false);
     let (errors, warnings) = active
         .iter()
         .cloned()
@@ -391,6 +377,7 @@ fn classify_findings(config: &LensConfig, findings: Vec<Value>) -> FindingClassi
         errors,
         warnings,
         waived,
+        out_of_scope,
     }
 }
 
@@ -398,12 +385,7 @@ fn apply_waivers(config: &LensConfig, findings: Vec<Value>) -> (Vec<Value>, Vec<
     let mut active = Vec::new();
     let mut waived = Vec::new();
     for finding in findings {
-        let waiver = finding["rule_id"].as_str().and_then(|rule_id| {
-            config
-                .policy
-                .active_waiver(rule_id, finding["path"].as_str())
-        });
-        if let Some(waiver) = waiver.filter(|_| crate::findings::is_waivable(&finding)) {
+        if let Some(waiver) = crate::findings::active_waiver(config, &finding) {
             waived.push(json!({"finding": finding, "waiver": waiver}));
         } else {
             active.push(finding);

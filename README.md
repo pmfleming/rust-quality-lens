@@ -209,6 +209,10 @@ and invocation evidence preserved. Projected diagnostic fingerprints use the new
 `rqlens/exact-diagnostic-v1` namespace; original IDs remain in observations.
 See [the projection contract](contracts/practice-projection.md) for identity,
 waiver/exclusion, scope and remaining reporter limitations.
+Source and imported findings likewise retain their original evidence and explicit
+policy selection; see [source/imported projection](contracts/source-projection.md).
+Import adapter names must use only ASCII letters, digits, `-` or `_`; invalid names
+are rejected rather than silently sanitized into another report's filename.
 
 ## Other workflows
 

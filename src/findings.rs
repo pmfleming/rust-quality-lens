@@ -1,6 +1,6 @@
 //! Stable source anchors shared by artifacts, review and exporters.
 pub(crate) mod practices;
-use crate::config::LensConfig;
+use crate::config::{LensConfig, PolicyWaiver};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs};
 
@@ -23,6 +23,54 @@ pub(crate) fn is_waivable(finding: &Value) -> bool {
         finding["status"].as_str(),
         Some("unavailable" | "timed-out" | "failed_execution" | "incomplete")
     )
+}
+
+pub(crate) const SOURCE_FILES: [(&str, &str); 3] = [
+    ("reliability_findings.json", "/records"),
+    ("architecture_rules.json", "/data/violations"),
+    ("test_quality.json", "/data/findings"),
+];
+
+pub(crate) fn source(config: &LensConfig, file: &str, document: Option<&Value>) -> Vec<Value> {
+    let mut rows = SOURCE_FILES
+        .iter()
+        .find(|(name, _)| *name == file)
+        .and_then(|(_, pointer)| document?.pointer(pointer)?.as_array())
+        .cloned()
+        .unwrap_or_default();
+    normalize_records(config, &mut rows);
+    policy_context(config, &mut rows);
+    for (index, row) in rows.iter_mut().enumerate() {
+        row["origin"] = json!({"artifact": file, "record_index": index});
+        row["policy_selected"] = json!(
+            file != "reliability_findings.json"
+                || (row["severity"] != "advisory" && row["scope"] == "production")
+        );
+    }
+    rows
+}
+
+pub(crate) fn policy_context(config: &LensConfig, rows: &mut [Value]) {
+    for row in rows {
+        row["policy_selected"] = json!(true);
+        row["policy_scope"] = Value::Null;
+        if let Some(rule) = row["rule_id"]
+            .as_str()
+            .and_then(|id| config.policy.rules.get(id))
+        {
+            row["policy_scope"] = json!({"included": rule.includes(row["path"].as_str(), row["package_name"].as_str()), "configuration": rule});
+        }
+    }
+}
+
+pub(crate) fn active_waiver<'a>(
+    config: &'a LensConfig,
+    finding: &Value,
+) -> Option<&'a PolicyWaiver> {
+    config
+        .policy
+        .active_waiver(finding["rule_id"].as_str()?, finding["path"].as_str())
+        .filter(|_| is_waivable(finding))
 }
 
 pub(crate) fn normalize(config: &LensConfig, value: &mut Value) {

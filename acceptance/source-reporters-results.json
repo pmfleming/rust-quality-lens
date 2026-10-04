@@ -1,0 +1,110 @@
+{
+  "parent_revision": "aa48585d1650db328f2e74aec6acc5dcc982dd6e",
+  "criterion_status": {
+    "E2": "open",
+    "E3": "open",
+    "E4": "open",
+    "E6": "open"
+  },
+  "scope": "Source/imported finding identity, selection, waiver/exclusion context and input admission; not review or compatible-engine certification",
+  "baseline": {
+    "binary_sha256": "b52d49d4e980e3dbaac017b5bdb115cf73da537b5721940aedfc9116347f3be9",
+    "counterexample": {
+      "policy_identity": "original-production",
+      "sarif_identity": "rqlens:c716a7afc78e37c8:2",
+      "identity_agreement": false,
+      "policy_retains_out_of_scope": false,
+      "source_context_retained": false
+    }
+  },
+  "candidate": {
+    "binary_sha256": "41f78edf7c1f697a72a465a5e2c395cfb3a0260e9491238d371a23922b33ba59",
+    "source_and_external_cases": [
+      "plain",
+      "excluded",
+      "waived",
+      "expired",
+      "partial",
+      "external"
+    ],
+    "rejection_cases": [
+      "adapter:a/b",
+      "adapter:a.b",
+      "adapter:a b",
+      "adapter:../a",
+      "adapter:",
+      "message",
+      "rule_id",
+      "severity",
+      "disposition",
+      "path",
+      "line",
+      "tool:name",
+      "tool:version",
+      "reader:version",
+      "reader:adapter",
+      "reader:partial",
+      "reader:stale",
+      "reader:corrupt",
+      "reliability_findings.json:stale",
+      "reliability_findings.json:corrupt",
+      "reliability_findings.json:version",
+      "reliability_findings.json:missing",
+      "architecture_rules.json:stale",
+      "architecture_rules.json:corrupt",
+      "architecture_rules.json:version",
+      "architecture_rules.json:missing",
+      "test_quality.json:stale",
+      "test_quality.json:corrupt",
+      "test_quality.json:version",
+      "test_quality.json:missing"
+    ],
+    "exact_reporter_replays": 12,
+    "passed": true,
+    "scope": "Synthetic native-envelope and import-boundary fixtures; not detector or engine-scope certification"
+  },
+  "previous_suites": {
+    "practice_projection_cases": 19,
+    "malformed_diagnostic_cases": 10,
+    "configured_policy_cases": 28
+  },
+  "self_analysis": {
+    "rows": 127,
+    "out_of_scope_rows": 125,
+    "policy_exit": 1,
+    "failed_policies": [
+      "configured-rules",
+      "partial",
+      "reliability-finding",
+      "test-failure"
+    ],
+    "stale_artifacts": [],
+    "source_rows_equal": true,
+    "source_evidence_equal": true
+  },
+  "validation": {
+    "normal_workspace_tests": 193,
+    "live_fixtures": 2,
+    "python_tests": 24,
+    "strict_clippy": true,
+    "rustdoc": true,
+    "package_smoke": true,
+    "bundled_helper_parity": true,
+    "self_verify": true,
+    "unchanged_self_gates": true
+  },
+  "self_metrics": {
+    "source_nonblank_lines": 22499.0,
+    "maximum_hotspot": 69.22,
+    "cyclomatic_max": 20,
+    "cognitive_max": 11
+  },
+  "limitations": [
+    "Initial self-SARIF correctly rejected stale rust_practices.json; explicit verify refreshed it, without removing prior artifacts or bypassing validation.",
+    "Policy retains prior non-advisory production selection; out-of-scope observations are visible, not newly blocking.",
+    "Declared import scope is retained, not certified; engine agreement/disagreement and negative coverage remain unsupported.",
+    "Review/change snapshots and product-wide reporter/disposition matrix remain open.",
+    "No source scope, scoring weights, thresholds or budgets changed; strict policy, T4 and release remain blocked."
+  ],
+  "raw_evidence": "target/source-reporters"
+}

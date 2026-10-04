@@ -14,16 +14,16 @@ mod reporting_tests;
 pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<PathBuf> {
     let mut rules = BTreeMap::<String, Value>::new();
     let mut results = Vec::new();
-    for (file, key) in [
-        ("reliability_findings.json", None),
-        ("architecture_rules.json", Some("violations")),
-        ("test_quality.json", Some("findings")),
-    ] {
-        add_finding_document(config, file, key, &mut rules, &mut results)?;
+    let mut source_evidence = BTreeMap::new();
+    for (file, _) in crate::findings::SOURCE_FILES {
+        let document = read_optional(config, file)?;
+        let findings = crate::findings::source(config, file, document.as_ref());
+        add_source_findings(config, findings.iter(), &mut rules, &mut results);
+        source_evidence.insert(file, document);
     }
     let practice_evidence = add_practice_results(config, &mut rules, &mut results)?;
-    let (external, external_reasons) = crate::external::current_findings(config);
-    add_source_findings(config, external.iter(), &mut rules, &mut results);
+    let external = crate::external::current_findings(config);
+    add_source_findings(config, external.findings.iter(), &mut rules, &mut results);
     let document = json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -36,33 +36,12 @@ pub(crate) fn write(config: &LensConfig, output: Option<PathBuf>) -> Result<Path
                 }
             },
             "results": results,
-            "properties": {"external_evidence_reasons": external_reasons, "practice_evidence": practice_evidence},
+            "properties": {"external_evidence_reasons": external.reasons, "external_evidence": external.documents, "practice_evidence": practice_evidence, "source_evidence": source_evidence},
         }]
     });
     let output = output.unwrap_or_else(|| config.output_dir.join("rqlens.sarif"));
     write_json(&output, &document)?;
     Ok(output)
-}
-
-fn add_finding_document(
-    config: &LensConfig,
-    file_name: &str,
-    payload_key: Option<&str>,
-    rules: &mut BTreeMap<String, Value>,
-    results: &mut Vec<Value>,
-) -> Result<()> {
-    let Some(document) = read_optional(config, file_name)? else {
-        return Ok(());
-    };
-    let payload = payload(&document);
-    let findings = payload_key.map_or(payload, |key| &payload[key]);
-    add_source_findings(
-        config,
-        findings.as_array().into_iter().flatten(),
-        rules,
-        results,
-    );
-    Ok(())
 }
 
 fn add_source_findings<'a>(
@@ -126,10 +105,7 @@ fn annotate_result(config: &LensConfig, finding: &Value, result: &mut Value) {
             .unwrap_or("source-anchor-v1");
         result["partialFingerprints"] = json!({format!("rqlens/{version}"): id});
     }
-    let rule = finding["rule_id"].as_str().unwrap_or_default();
-    if crate::findings::is_waivable(finding)
-        && let Some(waiver) = config.policy.active_waiver(rule, finding["path"].as_str())
-    {
+    if let Some(waiver) = crate::findings::active_waiver(config, finding) {
         result["suppressions"] =
             json!([{"kind": "external", "status": "accepted", "justification": waiver.reason}]);
     }
@@ -145,7 +121,7 @@ fn read_optional(config: &LensConfig, file: &str) -> Result<Option<Value>> {
     }
     let contents = fs::read_to_string(&path)
         .with_context(|| format!("reading SARIF input {}", path.display()))?;
-    let mut document: Value = serde_json::from_str(&contents)
+    let document: Value = serde_json::from_str(&contents)
         .with_context(|| format!("parsing SARIF input {}", path.display()))?;
     crate::contracts::validate_artifact(file, &document)
         .with_context(|| format!("invalid SARIF input {file}"))?;
@@ -154,17 +130,7 @@ fn read_optional(config: &LensConfig, file: &str) -> Result<Option<Value>> {
             == crate::fingerprint::Freshness::Current,
         "SARIF input {file} is stale or has incomplete provenance; rerun measurement"
     );
-    if file != "rust_practices.json" {
-        crate::findings::normalize(config, &mut document);
-    }
     Ok(Some(document))
-}
-
-fn payload(document: &Value) -> &Value {
-    document
-        .get("records")
-        .or_else(|| document.get("data"))
-        .unwrap_or(document)
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ pub(crate) use current::{ArtifactReadError, read_current};
 mod baseline;
 pub(crate) use baseline::{coverage_percent, read_baseline, validate_comparison_evidence};
 mod validation;
-pub(crate) use validation::validate_artifact;
+pub(crate) use validation::{validate_artifact, validate_diagnostics};
 
 pub(crate) fn artifact_document(
     tool: &MeasureTool,

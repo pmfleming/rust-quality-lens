@@ -43,14 +43,7 @@ pub(crate) fn project(config: &LensConfig, document: Option<&Value>) -> Practice
         group.finding["observations"] = json!(group.observations);
         group.finding
     }));
-    for finding in &mut findings {
-        if let Some(rule) = finding["rule_id"]
-            .as_str()
-            .and_then(|id| config.policy.rules.get(id))
-        {
-            finding["policy_scope"] = json!({"included": rule.includes(finding["path"].as_str(), finding["package_name"].as_str()), "configuration": rule});
-        }
-    }
+    super::policy_context(config, &mut findings);
     PracticeProjection {
         findings,
         evidence: json!({"projection": "practice-v1", "scope_relation": "not_established", "artifact_with_diagnostic_refs": source}),
