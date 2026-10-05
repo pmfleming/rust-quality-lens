@@ -6,6 +6,7 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Added
 
+- Genuine, versioned Rust Halstead counts, volume, difficulty, and effort on function/file hotspots, with documented syntax-token rules, null recovery metrics, and independent numeric regression tests. Hotspot and architecture-risk scoring remain unchanged.
 - Explicit trusted-project `rust.identity_build_macros` opt-in for compiler-assisted generated-symbol resolution, with cache invalidation and a live offline regression fixture.
 
 - Rust 1.95 toolchain provenance and compatibility evidence, structured compiler diagnostics, and SARIF locations for compiler and Clippy findings.
@@ -43,14 +44,14 @@ All notable changes to this project will be documented here. The format follows 
 
 - Raised the workspace MSRV from Rust 1.88 to Rust 1.95, upgraded manifest/configuration parsing to TOML 1.1, and replaced the standard artifact envelope v2 with toolchain-aware v3.
 - Bumped the standard raw complexity metric to version 2 to count match guards without changing calibrated hotspot or architecture-risk scoring.
-- Split command orchestration and architecture-map scoring behind focused boundaries, tightened the self-metric baseline, and reduced maximum function effort, cyclomatic/cognitive complexity, dependency pressure, duplication, and source size.
+- Split command orchestration and architecture-map scoring behind focused boundaries, tightened the self-metric baseline, and reduced maximum function hotspot score, cyclomatic/cognitive complexity, dependency pressure, duplication, and source size.
 - Verified gates, correctness runs, and coverage now share workspace, target, feature, exclusion, and optional lockfile scope.
 - Coverage rejects malformed exports and nested invocations instead of emitting misleading complete metrics.
 - Correctness target discovery now uses Cargo metadata across local workspace packages.
 - Artifacts record generation time and RQLens version; the CLI exposes `--version`.
 - Configured project roots are canonicalized for stable paths and identities.
 - Reused Criterion estimates from `performance --no-run` are marked partial because their execution time is unknown.
-- The self-metric gate now enforces maximum effort, cyclomatic and cognitive complexity, source size, and duplication, plus minimum map locality and leverage.
+- The self-metric gate now enforces maximum hotspot score, cyclomatic and cognitive complexity, source size, and duplication, plus minimum map locality and leverage.
 - Verified gates, static findings, and heuristic architecture signals are represented separately.
 - Coverage collection and baseline-regression analysis are split into smaller, testable stages.
 - Syntax complexity visitors share traversal logic, and run-context input requirements are centralized in measurement-tool metadata.

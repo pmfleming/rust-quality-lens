@@ -58,6 +58,10 @@ pub(crate) fn bundled_helper_manifest() -> Result<PathBuf> {
     let sources = [
         ("src/lib.rs", include_str!("bundled_helpers/lib.rs.txt")),
         (
+            "src/halstead.rs",
+            include_str!("bundled_helpers/halstead.rs.txt"),
+        ),
+        (
             "src/bin/rust_facts.rs",
             include_str!("bundled_helpers/rust_facts.rs.txt"),
         ),

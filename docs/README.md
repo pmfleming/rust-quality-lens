@@ -7,6 +7,7 @@ This directory contains the design and interpretation notes for rust-quality-len
 - [Project README](../README.md): installation, common commands, generated outputs, and external tools
 - [Quality model](quality-model.md): evidence classes, authoritative sources, confidence, and policy interpretation
 - [Measurement design and upgrades](measurement-upgrades.md): artifact, extraction, confidence, and scoring design
+- [Halstead measurement](halstead.md): researched formulas, versioned Rust counting rules, scopes, and limitations
 - [Validation corpus](validation-corpus.md): calibration limits and the outcome-validation protocol
 - [Evidence pipeline](evidence-pipeline.md): typed contracts, shared snapshots, staged publication, trusted generated-symbol resolution, and regression tests
 

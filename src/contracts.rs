@@ -193,6 +193,24 @@ pub(crate) fn artifact_schemas(tool: &MeasureTool) -> Value {
     }
 }
 
+fn halstead_schema() -> Value {
+    json!({
+        "type": ["object", "null"],
+        "required": ["distinct_operators", "total_operators", "distinct_operands", "total_operands", "vocabulary", "length", "volume", "difficulty", "effort"],
+        "properties": {
+            "distinct_operators": {"type": "integer", "minimum": 0},
+            "total_operators": {"type": "integer", "minimum": 0},
+            "distinct_operands": {"type": "integer", "minimum": 0},
+            "total_operands": {"type": "integer", "minimum": 0},
+            "vocabulary": {"type": "integer", "minimum": 0},
+            "length": {"type": "integer", "minimum": 0},
+            "volume": {"type": "number", "minimum": 0},
+            "difficulty": {"type": ["number", "null"], "minimum": 0},
+            "effort": {"type": ["number", "null"], "minimum": 0}
+        }
+    })
+}
+
 fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
     let payload = match tool {
         MeasureTool::Hotspots => array_schema(
@@ -227,6 +245,12 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "cognitive_complexity_max": {"type": ["integer", "null"], "minimum": 0},
                 "complexity_metric_model_id": {"type": "string", "const": "rqlens.rust_standard_complexity"},
                 "complexity_metric_model_version": {"type": "integer", "const": 2},
+                "halstead_metric_model_id": {"type": "string", "const": "rqlens.rust_halstead"},
+                "halstead_metric_model_version": {"type": "integer", "const": 1},
+                "halstead_scope": {"type": "string", "enum": ["file", "function_signature_and_body"]},
+                "halstead_status": {"type": "string", "enum": ["measured", "unavailable"]},
+                "halstead": halstead_schema(),
+                "halstead_effort": {"type": ["number", "null"], "minimum": 0},
                 "parse_status": {"type": "string"},
                 "syntax_backend": {"type": "string", "enum": ["tree-sitter-rust", "text"]},
                 "syntax_error_count": {"type": "integer", "minimum": 0},

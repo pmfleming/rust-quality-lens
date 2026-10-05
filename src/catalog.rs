@@ -93,7 +93,7 @@ fn task_definitions() -> Vec<TaskDefinition> {
             category: "quality",
             subcategory: "hotspots",
             title: "Hotspots",
-            description: "Reports standard cyclomatic and cognitive complexity, then ranks function and module branch, path, nesting, and size pressure using RQLens-specific proxies.",
+            description: "Reports cyclomatic and cognitive complexity plus versioned Halstead counts and effort; ranks function and module branch, path, nesting, and size pressure using separate RQLens-specific proxies.",
         },
         TaskDefinition {
             tool: MeasureTool::Clones,

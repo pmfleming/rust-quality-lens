@@ -1,7 +1,7 @@
 use proc_macro2::Span;
 use quote::ToTokens;
 use rust_quality_lens_helpers::{
-    exit_on_error, module_key_for_path, normalize_path, qualify, read_paths_file,
+    exit_on_error, halstead, module_key_for_path, normalize_path, qualify, read_paths_file,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -83,6 +83,7 @@ struct FunctionFact {
     max_nesting_depth: usize,
     cyclomatic_complexity: usize,
     cognitive_complexity: usize,
+    halstead: Option<halstead::HalsteadMetrics>,
 }
 
 #[derive(Serialize)]
@@ -147,6 +148,7 @@ struct FactVisitor {
     impls: Vec<ImplFact>,
     tests: Vec<TestFact>,
     functions: Vec<FunctionFact>,
+    halstead: Option<halstead::HalsteadMetrics>,
     escape_counts: BTreeMap<String, usize>,
     escape_locations: Vec<LocationFact>,
     quality_findings: Vec<QualityFinding>,
@@ -431,7 +433,7 @@ impl FactVisitor {
         &mut self,
         name: String,
         qualified_name: String,
-        span: proc_macro2::Span,
+        signature: &syn::Signature,
         body: &syn::Block,
     ) {
         let mut complexity = FunctionComplexity {
@@ -444,7 +446,7 @@ impl FactVisitor {
             ..StandardComplexity::default()
         };
         standard_complexity.visit_block(body);
-        let start_line = span.start().line;
+        let start_line = signature.fn_token.span.start().line;
         let end_line = body.brace_token.span.close().end().line;
         self.functions.push(FunctionFact {
             name,
@@ -459,6 +461,7 @@ impl FactVisitor {
             max_nesting_depth: complexity.max_nesting_depth,
             cyclomatic_complexity: standard_complexity.cyclomatic_complexity,
             cognitive_complexity: standard_complexity.cognitive_complexity,
+            halstead: Some(halstead::measure(&quote::quote!(#signature #body))),
         });
     }
 }
@@ -699,6 +702,11 @@ impl<'ast> Visit<'ast> for StandardComplexity {
 }
 
 impl<'ast> Visit<'ast> for FactVisitor {
+    fn visit_file(&mut self, file: &'ast syn::File) {
+        self.halstead = Some(halstead::measure(file));
+        visit::visit_file(self, file);
+    }
+
     fn visit_block(&mut self, block: &'ast syn::Block) {
         self.block_depth += 1;
         visit::visit_block(self, block);
@@ -953,7 +961,7 @@ impl FactVisitor {
         self.record_function_metrics(
             name.clone(),
             format!("{}::{name}", self.current_module_key()),
-            item.sig.fn_token.span,
+            &item.sig,
             &item.block,
         );
     }
@@ -1054,7 +1062,7 @@ impl FactVisitor {
         self.record_function_metrics(
             name.clone(),
             format!("{}::{owner}::{name}", self.current_module_key()),
-            method.sig.fn_token.span,
+            &method.sig,
             &method.block,
         );
     }
@@ -1335,6 +1343,7 @@ fn collect_tree_sitter_functions(
             max_nesting_depth: 0,
             cyclomatic_complexity: complexity.cyclomatic_complexity,
             cognitive_complexity: complexity.cognitive_complexity,
+            halstead: None,
         });
     }
 
@@ -1874,6 +1883,46 @@ fn print_usage() {
 mod tests {
     use super::FactVisitor;
     use syn::visit::Visit;
+
+    #[test]
+    fn halstead_scopes_include_nested_code_without_double_counting_the_file() {
+        let extracted =
+            facts("fn outer() { let closure = |x| x + 1; fn inner() { 42; } closure(1); }");
+        let outer = extracted
+            .functions
+            .iter()
+            .find(|function| function.name == "outer");
+        let inner = extracted
+            .functions
+            .iter()
+            .find(|function| function.name == "inner");
+        let (Some(file), Some(outer), Some(inner)) = (
+            extracted.halstead.as_ref(),
+            outer.and_then(|function| function.halstead.as_ref()),
+            inner.and_then(|function| function.halstead.as_ref()),
+        ) else {
+            panic!("Halstead scopes should be measured")
+        };
+        assert_eq!(file.total_operators, outer.total_operators);
+        assert_eq!(file.total_operands, outer.total_operands);
+        assert!(inner.total_operators > 0);
+        assert!(inner.total_operands < outer.total_operands);
+
+        let extracted = facts("struct S; impl S { pub fn method(&self) -> bool { true } }");
+        let Some(method) = extracted
+            .functions
+            .iter()
+            .find(|function| function.name == "method")
+        else {
+            panic!("method should be inventoried")
+        };
+        let Some(metrics) = method.halstead.as_ref() else {
+            panic!("method should be measured")
+        };
+        // fn, (), &, ->, {}; method, self, bool, true. Visibility is excluded.
+        assert_eq!(metrics.total_operators, 5);
+        assert_eq!(metrics.total_operands, 4);
+    }
 
     fn facts(source: &str) -> super::FileFacts {
         let Ok(file) = syn::parse_file(source) else {

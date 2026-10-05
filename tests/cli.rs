@@ -473,6 +473,17 @@ fn artifact_schema_prints_known_output_contracts() {
         assert!(properties.contains_key(file), "missing schema for {file}");
     }
 
+    let hotspot_fields =
+        &properties["hotspots.json"]["properties"]["records"]["items"]["properties"];
+    assert_eq!(hotspot_fields["halstead_metric_model_version"]["const"], 1);
+    assert!(
+        hotspot_fields["halstead"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "distinct_operands")
+    );
+
     let map_output = run(&["artifact-schema", "map"]);
     let map_schema: Value = serde_json::from_slice(&map_output.stdout).unwrap();
     assert_eq!(map_schema["title"], "map.json artifact envelope");
@@ -659,6 +670,13 @@ fn generated_artifacts_keep_expected_top_level_shapes(analysis: &Path) {
         .expect("module hotspot should be emitted");
     assert!(module["cyclomatic_complexity_sum"].as_u64().is_some());
     assert!(module["cognitive_complexity_sum"].as_u64().is_some());
+    for row in [function, module] {
+        assert_eq!(row["halstead_metric_model_id"], "rqlens.rust_halstead");
+        assert_eq!(row["halstead_metric_model_version"], 1);
+        assert_eq!(row["halstead_status"], "measured");
+        assert!(row["halstead"]["total_operators"].as_u64().is_some());
+        assert_eq!(row["halstead_effort"], row["halstead"]["effort"]);
+    }
     let correctness = read_json(analysis.join("correctness_review.json"));
     for key in ["version", "generated_from", "summary", "tests"] {
         assert!(correctness.get(key).is_some(), "missing {key}");
@@ -1099,6 +1117,63 @@ fn hotspots_report_syntax_fact_confidence(analysis: &Path) {
 }
 
 #[test]
+fn halstead_counts_survive_the_helper_and_artifact_pipeline() {
+    let root = fixture_root("halstead");
+    fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"halstead\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[workspace]\n",
+    )
+    .unwrap();
+    fs::write(root.join("rqlens.toml"), "project_name = \"halstead\"\nsource_roots = [\"src\"]\n[rust]\nidentity_resolution = \"disabled\"\n").unwrap();
+    let source = "fn f(x: i32) -> i32 { x + x + 1 }";
+    fs::write(root.join("src/lib.rs"), source).unwrap();
+    fs::write(root.join("src/empty.rs"), "// no tokens").unwrap();
+    let config = root.join("rqlens.toml");
+    let config = config.to_str().unwrap();
+    let expected = serde_json::json!({
+        "distinct_operators": 6, "total_operators": 7,
+        "distinct_operands": 4, "total_operands": 7,
+        "vocabulary": 10, "length": 14,
+        "volume": 14.0 * 10_f64.log2(), "difficulty": 5.25,
+        "effort": 5.25 * (14.0 * 10_f64.log2()),
+    });
+    for text in [
+        source,
+        "/// ignored\n#[inline]\nfn f ( x: i32 ) -> i32 {\n // ignored +\n x + x + 1\n}",
+    ] {
+        fs::write(root.join("src/lib.rs"), text).unwrap();
+        run(&["measure", "hotspots", "--config", config]);
+        let payload = read_json(root.join("target/analysis/hotspots.json"));
+        let rows = payload.as_array().unwrap();
+        let nonempty = rows
+            .iter()
+            .filter(|row| !row["path"].as_str().unwrap().ends_with("empty.rs"))
+            .collect::<Vec<_>>();
+        assert_eq!(nonempty.len(), 2);
+        for row in nonempty {
+            assert_eq!(row["halstead"], expected);
+            assert_eq!(row["halstead_effort"], expected["effort"]);
+            assert_eq!(row["halstead_status"], "measured");
+            assert_eq!(
+                row["halstead_scope"],
+                if row["kind"] == "module" {
+                    "file"
+                } else {
+                    "function_signature_and_body"
+                }
+            );
+        }
+        let empty = rows
+            .iter()
+            .find(|row| row["path"].as_str().unwrap().ends_with("empty.rs"))
+            .unwrap();
+        assert_eq!(empty["halstead_status"], "measured");
+        assert_eq!(empty["halstead"]["length"], 0);
+        assert_eq!(empty["halstead_effort"], 0.0);
+    }
+}
+
+#[test]
 fn syntax_failures_preserve_partial_source_evidence() {
     let fixture = write_syntax_error_fixture("partial-syntax-evidence");
     let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
@@ -1131,6 +1206,11 @@ fn syntax_failures_preserve_partial_source_evidence() {
     assert_eq!(function["cyclomatic_complexity"], 2);
     assert_eq!(function["cognitive_complexity"], 2);
     assert!(function["score"].is_null());
+    for partial in [row, function] {
+        assert_eq!(partial["halstead_status"], "unavailable");
+        assert!(partial.get("halstead").unwrap().is_null());
+        assert!(partial.get("halstead_effort").unwrap().is_null());
+    }
     assert_eq!(
         row["measurement_confidence"]["observed_inputs"]["rust_syntax_fact_files"],
         0

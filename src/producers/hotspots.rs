@@ -3,12 +3,31 @@ use serde_json::{Value, json};
 
 use crate::artifacts::json_f64;
 use crate::config::LensConfig;
-use crate::facts::{FileFacts, FunctionFact, RunContext};
+use crate::facts::{FileFacts, FunctionFact, HalsteadMetrics, RunContext};
 use crate::measurement::{MODEL_ID, MODEL_VERSION};
 use crate::util::{normalize_slashes, round2};
 
 const COMPLEXITY_METRIC_MODEL_ID: &str = "rqlens.rust_standard_complexity";
 const COMPLEXITY_METRIC_MODEL_VERSION: u64 = 2;
+
+fn with_halstead(fact: &FileFacts, metrics: Option<&HalsteadMetrics>, mut row: Value) -> Value {
+    row["halstead_metric_model_id"] = json!("rqlens.rust_halstead");
+    row["halstead_metric_model_version"] = json!(1);
+    row["halstead_scope"] = json!(if row["kind"] == "module" {
+        "file"
+    } else {
+        "function_signature_and_body"
+    });
+    row["halstead_status"] = json!(if metrics.is_some() {
+        "measured"
+    } else {
+        "unavailable"
+    });
+    row["halstead"] = json!(metrics);
+    // Convenience projection for consumers; never the old LOC-based proxy.
+    row["halstead_effort"] = json!(metrics.and_then(|metrics| metrics.effort));
+    super::with_fact_identity(fact, row)
+}
 
 pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Value> {
     let facts = &context.source_facts;
@@ -73,8 +92,9 @@ fn function_hotspot_row(
         round2(function.max_nesting_depth.saturating_sub(2) as f64 * 3.0 * 1.12);
     let size_contribution =
         round2((function.source_line_count.saturating_sub(20) as f64 * 0.25).min(20.0) * 1.12);
-    super::with_fact_identity(
+    with_halstead(
         fact,
+        function.halstead.as_ref(),
         json!({
             "name": function.qualified_name,
             "qualified_name": function.qualified_name,
@@ -171,8 +191,9 @@ fn module_hotspot_row(
         .max()
         .unwrap_or_default();
     let function_count = function_scores.len();
-    super::with_fact_identity(
+    with_halstead(
         fact,
+        fact.source.halstead.as_ref(),
         json!({
             "name": normalize_slashes(&fact.path),
             "module_key": fact.module_key,
@@ -230,8 +251,9 @@ fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
         .map(|function| function.cognitive_complexity)
         .sum::<usize>();
     let function_count = recovered_functions.len();
-    super::with_fact_identity(
+    with_halstead(
         fact,
+        None,
         json!({
             "name": normalize_slashes(&fact.path),
             "module_key": fact.module_key,
@@ -277,8 +299,9 @@ fn partial_function_hotspot_row(
     function: &FunctionFact,
     confidence: &Value,
 ) -> Value {
-    super::with_fact_identity(
+    with_halstead(
         fact,
+        None,
         json!({
             "name": function.qualified_name,
             "qualified_name": function.qualified_name,

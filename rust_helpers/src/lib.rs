@@ -1,5 +1,7 @@
 //! Shared path and identity utilities for the bundled syntax extractors.
 
+pub mod halstead;
+
 use std::env;
 use std::fs;
 use std::path::Path;

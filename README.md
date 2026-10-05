@@ -319,6 +319,13 @@ short-circuit operators. Cognitive complexity also reflects nesting, `else`
 branches, logical sequences, labeled jumps, and closures. These raw metrics do
 not alter the calibrated hotspot score.
 
+Hotspots also report versioned **Halstead** operator/operand counts, volume,
+difficulty, and effort for functions and whole files. `halstead_effort` is
+derived from actual syntax-token counts, not LOC or cyclomatic complexity.
+Missing syntax yields `null`, not zero. This metric does not change risk scores
+or predict developer hours; see [Halstead measurement](docs/halstead.md) for
+counting rules, aggregation, research references, and historical compatibility.
+
 `clones.json` distinguishes four engines:
 
 - `token`: normalized token-window repeats within extracted function spans;

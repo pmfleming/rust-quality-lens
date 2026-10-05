@@ -153,6 +153,21 @@ pub(crate) struct SourceMetrics {
     pub(crate) source_nonblank_line_count: usize,
     pub(crate) source_comment_line_count: usize,
     pub(crate) function_count: usize,
+    #[serde(default)]
+    pub(crate) halstead: Option<HalsteadMetrics>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct HalsteadMetrics {
+    pub(crate) distinct_operators: usize,
+    pub(crate) total_operators: usize,
+    pub(crate) distinct_operands: usize,
+    pub(crate) total_operands: usize,
+    pub(crate) vocabulary: usize,
+    pub(crate) length: usize,
+    pub(crate) volume: f64,
+    pub(crate) difficulty: Option<f64>,
+    pub(crate) effort: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -201,6 +216,8 @@ pub(crate) struct FunctionFact {
     pub(crate) cyclomatic_complexity: usize,
     #[serde(default)]
     pub(crate) cognitive_complexity: usize,
+    #[serde(default)]
+    pub(crate) halstead: Option<HalsteadMetrics>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
