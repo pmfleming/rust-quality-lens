@@ -138,16 +138,3 @@ pub(crate) fn title_from_name(name: &str) -> String {
         useful.into_iter().take(7).collect::<Vec<_>>().join(" ")
     )
 }
-
-pub(crate) fn project_relative_path(config_root: &Path, path: impl AsRef<Path>) -> String {
-    let path = path.as_ref();
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        config_root.join(path)
-    };
-    absolute
-        .strip_prefix(config_root)
-        .map(normalize_slashes)
-        .unwrap_or_else(|_| normalize_slashes(absolute))
-}

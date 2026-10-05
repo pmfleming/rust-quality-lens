@@ -5,9 +5,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext, TestFact, TestStatus, resolve_dependency, run_tests};
 use crate::measurement::{
-    RULESET_ID, RULESET_VERSION, classify_path, module_for_path, project_relative_path,
-    test_kind_for_path, title_from_name,
+    RULESET_ID, RULESET_VERSION, classify_path, module_for_path, test_kind_for_path,
+    title_from_name,
 };
+
+use crate::util::project_relative_path;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext, run: bool) -> Result<Value> {
     let facts = &context.correctness_facts;

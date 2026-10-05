@@ -2,11 +2,10 @@ use super::{COMPILER_VERSION, Profile};
 use crate::{command_runner::checked_output, config::LensConfig};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
-use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
     time::Duration,
 };
@@ -23,9 +22,260 @@ struct DriverInfo {
     host: String,
 }
 
+// Decode Cargo's required fields once. Additional Cargo metadata is intentionally
+// ignored, unlike the version-pinned compiler wire format.
+#[derive(Deserialize)]
+struct CargoInventory {
+    packages: Vec<Package>,
+    workspace_members: BTreeSet<String>,
+    workspace_default_members: BTreeSet<String>,
+    resolve: Resolution,
+}
+
+#[derive(Deserialize)]
+struct Resolution {
+    nodes: Vec<Features>,
+}
+
+#[derive(Deserialize)]
+struct Features {
+    id: String,
+    features: BTreeSet<String>,
+}
+
+#[derive(Deserialize)]
+struct Package {
+    id: String,
+    name: String,
+    manifest_path: PathBuf,
+    targets: Vec<Target>,
+}
+
+#[derive(Deserialize)]
+struct Target {
+    kind: Vec<String>,
+    src_path: PathBuf,
+    test: bool,
+    #[serde(default, rename = "required-features")]
+    required_features: BTreeSet<String>,
+}
+
+impl Target {
+    fn is(&self, kind: &str) -> bool {
+        self.kind.iter().any(|value| value == kind)
+    }
+
+    fn modes(&self, all_targets: bool) -> Result<&'static [bool]> {
+        if self.is("custom-build") {
+            return Ok(&[]);
+        }
+        if self.kind.iter().any(|kind| {
+            [
+                "lib",
+                "bin",
+                "proc-macro",
+                "rlib",
+                "dylib",
+                "staticlib",
+                "cdylib",
+            ]
+            .contains(&kind.as_str())
+        }) {
+            return Ok(if all_targets && self.test {
+                &[false, true]
+            } else {
+                &[false]
+            });
+        }
+        if !all_targets {
+            return Ok(&[]);
+        }
+        ensure!(
+            self.is("test"),
+            "compiler inventory coverage for target kinds {:?} is not implemented; no completeness is certified",
+            self.kind
+        );
+        Ok(&[true])
+    }
+}
+
+#[derive(Default)]
+struct Selection {
+    units: BTreeSet<Unit>,
+    // Canonicalize selected package ownership once, then reuse it for capture
+    // validation instead of scanning/canonicalizing every dependency per profile.
+    packages: BTreeMap<PathBuf, (String, BTreeSet<String>)>,
+}
+
+impl Selection {
+    fn new(metadata: &CargoInventory, config: &LensConfig) -> Result<Self> {
+        let scope = &config.verification;
+        let members = if scope.workspace {
+            &metadata.workspace_members
+        } else {
+            &metadata.workspace_default_members
+        };
+        let mut selected = Self::default();
+        for package in metadata.packages.iter().filter(|package| {
+            members.contains(&package.id)
+                && !(scope.workspace && scope.exclude.contains(&package.name))
+        }) {
+            let manifest = fs::canonicalize(
+                package
+                    .manifest_path
+                    .parent()
+                    .context("manifest has no directory")?,
+            )?;
+            let enabled = &metadata
+                .resolve
+                .nodes
+                .iter()
+                .find(|node| node.id == package.id)
+                .context("selected package has no feature resolution")?
+                .features;
+            let feature_cfg = enabled
+                .iter()
+                .map(|feature| format!("feature={feature:?}"))
+                .collect();
+            ensure!(
+                selected
+                    .packages
+                    .insert(manifest.clone(), (package.name.clone(), feature_cfg))
+                    .is_none(),
+                "ambiguous selected package"
+            );
+            for target in package
+                .targets
+                .iter()
+                .filter(|target| target.required_features.is_subset(enabled))
+            {
+                let source = fs::canonicalize(&target.src_path)?;
+                for &test in target.modes(scope.all_targets)? {
+                    selected
+                        .units
+                        .insert((manifest.clone(), source.clone(), test));
+                }
+            }
+        }
+        ensure!(
+            !selected.units.is_empty(),
+            "no supported selected Cargo compilation contexts"
+        );
+        Ok(selected)
+    }
+
+    fn validate_profile(&self, profile: &Profile, target: &str) -> Result<()> {
+        profile.validate()?;
+        ensure!(
+            profile.target_triple == target,
+            "unexpected compiler target"
+        );
+        let (name, expected) = self
+            .packages
+            .get(&profile.manifest_dir)
+            .context("compiler context is not a selected metadata package")?;
+        ensure!(
+            name == &profile.package_name,
+            "compiler package identity differs from Cargo metadata"
+        );
+        let actual = profile
+            .cfg
+            .iter()
+            .filter(|cfg| cfg.starts_with("feature="))
+            .cloned()
+            .collect();
+        ensure!(
+            expected == &actual,
+            "effective compiler feature cfg differs from requested Cargo resolution"
+        );
+        Ok(())
+    }
+}
+
 pub(super) fn collect(config: &LensConfig) -> Result<(Vec<Profile>, BTreeSet<Unit>)> {
     let driver = config.compiler_inventory_driver.as_ref()
         .context("compiler inventory is not enabled; configure rust.compiler_inventory_driver for a trusted build")?;
+    let info = driver_info(driver, config)?;
+    let target = config
+        .compiler_inventory_target
+        .as_deref()
+        .unwrap_or(&info.host);
+    ensure!(
+        !target.is_empty() && !target.starts_with('-') && !target.ends_with(".json"),
+        "compiler inventory requires a named target triple, not a custom target JSON"
+    );
+    let metadata = cargo_inventory(config, &info, target)?;
+    let selected = Selection::new(&metadata, config)?;
+    let build_scripts = metadata
+        .packages
+        .iter()
+        .flat_map(|package| &package.targets)
+        .filter(|target| target.is("custom-build"))
+        .map(|target| fs::canonicalize(&target.src_path))
+        .collect::<std::io::Result<Vec<_>>>()?;
+
+    // A fresh directory prevents cache hits from omitting wrapper invocations.
+    fs::create_dir_all(config.target_directory())?;
+    let run = tempfile::Builder::new()
+        .prefix("rqlens-compiler-")
+        .tempdir_in(config.target_directory())?;
+    let captures = run.path().join("captures");
+    fs::create_dir(&captures)?;
+    let mut command = cargo(
+        config,
+        &info,
+        config.verification.cargo_arguments("check", true, false),
+    );
+    command
+        .args(["--target", target, "--message-format=json"])
+        .arg("--target-dir")
+        .arg(run.path().join("build"))
+        .env("RUSTC_WORKSPACE_WRAPPER", driver)
+        .env("RQLENS_COMPILER_CAPTURE", &captures)
+        .env(
+            "RQLENS_COMPILER_BUILD_SCRIPTS",
+            serde_json::to_string(&build_scripts)?,
+        );
+    checked_output(
+        &mut command,
+        Duration::from_secs(config.verification.timeout_seconds),
+    )
+    .context("compiler inventory build failed; captured fragments were not promoted")?;
+    let profiles = read_captures(&captures, &selected, target)?;
+    Ok((profiles, selected.units))
+}
+
+fn cargo(config: &LensConfig, info: &DriverInfo, args: Vec<String>) -> Command {
+    let mut command = Command::new("cargo");
+    command
+        .args(args)
+        .current_dir(&config.project_root)
+        .env("RUSTC", &info.rustc);
+    if config.identity_offline {
+        command.arg("--offline");
+    }
+    command
+}
+
+fn cargo_inventory(config: &LensConfig, info: &DriverInfo, target: &str) -> Result<CargoInventory> {
+    let mut args = vec![
+        "metadata".into(),
+        "--format-version=1".into(),
+        "--filter-platform".into(),
+        target.into(),
+    ];
+    args.extend(config.verification.cargo_feature_arguments());
+    if config.verification.locked {
+        args.push("--locked".into());
+    }
+    let output = checked_output(
+        &mut cargo(config, info, args),
+        Duration::from_secs(config.verification.timeout_seconds),
+    )?;
+    Ok(serde_json::from_str(&output.stdout)?)
+}
+
+fn driver_info(driver: &Path, config: &LensConfig) -> Result<DriverInfo> {
     for variable in [
         "RUSTC_BOOTSTRAP",
         "RUSTC_WRAPPER",
@@ -63,82 +313,13 @@ pub(super) fn collect(config: &LensConfig) -> Result<(Vec<Profile>, BTreeSet<Uni
         version.stdout.trim() == info.compiler_version,
         "adapter and compiler versions differ"
     );
-    let target = config
-        .compiler_inventory_target
-        .as_deref()
-        .unwrap_or(&info.host);
-    ensure!(
-        !target.is_empty() && !target.starts_with('-') && !target.ends_with(".json"),
-        "compiler inventory requires a named target triple, not a custom target JSON"
-    );
-    let timeout = Duration::from_secs(config.verification.timeout_seconds);
-    let mut metadata = Command::new("cargo");
-    metadata
-        .args([
-            "metadata",
-            "--format-version=1",
-            "--filter-platform",
-            target,
-        ])
-        .args(config.verification.cargo_feature_arguments())
-        .current_dir(&config.project_root)
-        .env("RUSTC", &info.rustc);
-    if config.verification.locked {
-        metadata.arg("--locked");
-    }
-    if config.identity_offline {
-        metadata.arg("--offline");
-    }
-    let metadata: Value = serde_json::from_str(&checked_output(&mut metadata, timeout)?.stdout)?;
-    let build_scripts = metadata["packages"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|package| package["targets"].as_array().into_iter().flatten())
-        .filter(|target| {
-            target["kind"]
-                .as_array()
-                .is_some_and(|kinds| kinds.iter().any(|kind| kind == "custom-build"))
-        })
-        .filter_map(|target| target["src_path"].as_str())
-        .map(fs::canonicalize)
-        .collect::<std::io::Result<Vec<_>>>()?;
-    let expected = expected_units(&metadata, config)?;
-    ensure!(
-        !expected.is_empty(),
-        "no supported selected Cargo compilation contexts"
-    );
+    Ok(info)
+}
 
-    // A fresh directory prevents Cargo's cache from omitting wrapper invocations.
-    // Under Cargo's target root, so measurement fingerprints exclude build output.
-    fs::create_dir_all(config.target_directory())?;
-    let run = tempfile::Builder::new()
-        .prefix("rqlens-compiler-")
-        .tempdir_in(config.target_directory())?;
-    let captures = run.path().join("captures");
-    fs::create_dir(&captures)?;
-    let mut command = Command::new("cargo");
-    command
-        .args(config.verification.cargo_arguments("check", true, false))
-        .args(["--target", target, "--message-format=json"])
-        .arg("--target-dir")
-        .arg(run.path().join("build"))
-        .current_dir(&config.project_root)
-        .env("RUSTC", &info.rustc)
-        .env("RUSTC_WORKSPACE_WRAPPER", driver)
-        .env("RQLENS_COMPILER_CAPTURE", &captures)
-        .env(
-            "RQLENS_COMPILER_BUILD_SCRIPTS",
-            serde_json::to_string(&build_scripts)?,
-        );
-    if config.identity_offline {
-        command.arg("--offline");
-    }
-    checked_output(&mut command, timeout)
-        .context("compiler inventory build failed; captured fragments were not promoted")?;
+fn read_captures(directory: &Path, selected: &Selection, target: &str) -> Result<Vec<Profile>> {
     let mut profiles = Vec::new();
     let mut total_bytes = 0;
-    for entry in fs::read_dir(&captures)? {
+    for entry in fs::read_dir(directory)? {
         let path = entry?.path();
         ensure!(
             path.extension()
@@ -152,15 +333,10 @@ pub(super) fn collect(config: &LensConfig) -> Result<(Vec<Profile>, BTreeSet<Uni
             "compiler inventory exceeds capture budget"
         );
         let profile: Profile = serde_json::from_slice(&fs::read(path)?)?;
-        profile.validate()?;
-        ensure!(
-            profile.target_triple == target,
-            "unexpected compiler target"
-        );
-        validate_package_features(&profile, &metadata)?;
+        selected.validate_profile(&profile, target)?;
         profiles.push(profile);
     }
-    validate_coverage(&profiles, &expected)?;
+    validate_coverage(&profiles, &selected.units)?;
     profiles.sort_by_key(|profile| {
         (
             profile.manifest_dir.clone(),
@@ -168,55 +344,7 @@ pub(super) fn collect(config: &LensConfig) -> Result<(Vec<Profile>, BTreeSet<Uni
             profile.test,
         )
     });
-    Ok((profiles, expected))
-}
-
-fn validate_package_features(profile: &Profile, metadata: &Value) -> Result<()> {
-    let package = metadata["packages"]
-        .as_array()
-        .context("missing packages")?
-        .iter()
-        .find(|package| {
-            package["manifest_path"]
-                .as_str()
-                .and_then(|path| PathBuf::from(path).parent().map(PathBuf::from))
-                .is_some_and(|manifest| {
-                    fs::canonicalize(manifest).ok().as_ref() == Some(&profile.manifest_dir)
-                })
-        })
-        .context("compiler context is not a metadata package")?;
-    ensure!(
-        package["name"] == profile.package_name,
-        "compiler package identity differs from Cargo metadata"
-    );
-    let node = metadata["resolve"]["nodes"]
-        .as_array()
-        .context("missing resolved features")?
-        .iter()
-        .find(|node| node["id"] == package["id"])
-        .context("compiler package has no resolved feature node")?;
-    let expected = node["features"]
-        .as_array()
-        .context("missing package features")?
-        .iter()
-        .map(|feature| {
-            feature
-                .as_str()
-                .map(|feature| format!("feature={feature:?}"))
-                .context("invalid feature name")
-        })
-        .collect::<Result<BTreeSet<_>>>()?;
-    let actual = profile
-        .cfg
-        .iter()
-        .filter(|cfg| cfg.starts_with("feature="))
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    ensure!(
-        expected == actual,
-        "effective compiler feature cfg differs from requested Cargo resolution"
-    );
-    Ok(())
+    Ok(profiles)
 }
 
 pub(super) fn validate_coverage(profiles: &[Profile], expected: &BTreeSet<Unit>) -> Result<()> {
@@ -231,106 +359,12 @@ pub(super) fn validate_coverage(profiles: &[Profile], expected: &BTreeSet<Unit>)
             "duplicate compilation context; cannot deduplicate distinct compiler invocations by name"
         );
     }
-    ensure!(
-        !expected.is_empty() && &actual == expected,
-        "missing or unexpected compiler contexts: missing {:?}; unexpected {:?}",
-        expected.difference(&actual).collect::<Vec<_>>(),
-        actual.difference(expected).collect::<Vec<_>>()
-    );
-    Ok(())
-}
-
-fn expected_units(metadata: &Value, config: &LensConfig) -> Result<BTreeSet<Unit>> {
-    let selected = metadata[if config.verification.workspace {
-        "workspace_members"
-    } else {
-        "workspace_default_members"
-    }]
-    .as_array()
-    .context("missing workspace selection metadata")?;
-    let features = metadata["resolve"]["nodes"]
-        .as_array()
-        .context("missing resolved feature metadata")?
-        .iter()
-        .map(|node| (node["id"].clone(), node["features"].clone()))
-        .collect::<Vec<_>>();
-    let mut expected = BTreeSet::new();
-    let mut package_names = BTreeMap::new();
-    for package in metadata["packages"]
-        .as_array()
-        .context("missing Cargo packages")?
-    {
-        let name = package["name"].as_str().context("missing package name")?;
-        if !selected.contains(&package["id"])
-            || (config.verification.workspace
-                && config
-                    .verification
-                    .exclude
-                    .iter()
-                    .any(|excluded| excluded == name))
-        {
-            continue;
-        }
-        let manifest = PathBuf::from(
-            package["manifest_path"]
-                .as_str()
-                .context("missing manifest")?,
+    if expected.is_empty() || &actual != expected {
+        bail!(
+            "missing or unexpected compiler contexts: missing {:?}; unexpected {:?}",
+            expected.difference(&actual).collect::<Vec<_>>(),
+            actual.difference(expected).collect::<Vec<_>>()
         );
-        let manifest = fs::canonicalize(manifest.parent().context("manifest has no directory")?)?;
-        ensure!(
-            package_names.insert(manifest.clone(), name).is_none(),
-            "ambiguous selected package"
-        );
-        let enabled = features
-            .iter()
-            .find(|(id, _)| id == &package["id"])
-            .and_then(|(_, value)| value.as_array())
-            .context("selected package has no feature resolution")?;
-        for target in package["targets"]
-            .as_array()
-            .context("missing Cargo targets")?
-        {
-            if target["required-features"]
-                .as_array()
-                .is_some_and(|required| required.iter().any(|feature| !enabled.contains(feature)))
-            {
-                continue;
-            }
-            let kinds = target["kind"].as_array().context("missing target kind")?;
-            let source = fs::canonicalize(
-                target["src_path"]
-                    .as_str()
-                    .context("missing target source")?,
-            )?;
-            if kinds.iter().any(|kind| kind == "custom-build") {
-                continue;
-            }
-            if kinds.iter().any(|kind| {
-                [
-                    "lib",
-                    "bin",
-                    "proc-macro",
-                    "rlib",
-                    "dylib",
-                    "staticlib",
-                    "cdylib",
-                ]
-                .contains(&kind.as_str().unwrap_or_default())
-            }) {
-                expected.insert((manifest.clone(), source.clone(), false));
-                if config.verification.all_targets && target["test"] == true {
-                    expected.insert((manifest.clone(), source, true));
-                }
-            } else if config.verification.all_targets {
-                if kinds.iter().any(|kind| kind == "test") {
-                    expected.insert((manifest.clone(), source, true));
-                } else {
-                    bail!(
-                        "compiler inventory coverage for target kinds {kinds:?} is not implemented; no completeness is certified"
-                    );
-                }
-            }
-        }
     }
-    Ok(expected)
+    Ok(())
 }

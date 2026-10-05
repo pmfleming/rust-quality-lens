@@ -4,12 +4,8 @@ use crate::tool::MeasureTool;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
-
-static HELPER_BINARIES: OnceLock<Mutex<HashMap<HelperBinaryKey, PathBuf>>> = OnceLock::new();
-
-use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 mod graph;
 mod helpers;
@@ -26,12 +22,6 @@ pub(crate) use graph::module_graph;
 pub(crate) use graph::{ModuleGraph, ModuleInfo, resolve_dependency};
 pub(crate) use helpers::ast_clone_facts_for_files;
 pub(crate) use test_runner::{TestStatus, correctness_paths, run_tests};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(super) struct HelperBinaryKey {
-    pub(super) manifest: PathBuf,
-    pub(super) bin: String,
-}
 
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct FileFacts {
@@ -299,8 +289,8 @@ pub(crate) struct RunContext {
     pub(crate) correctness_files: Vec<PathBuf>,
     graph: OnceLock<ModuleGraph>,
     type_impls: OnceLock<TypeImplIndex>,
-    pub(crate) source_facts: Vec<FileFacts>,
-    pub(crate) correctness_facts: Vec<FileFacts>,
+    pub(crate) source_facts: Arc<[FileFacts]>,
+    pub(crate) correctness_facts: Arc<[FileFacts]>,
     pub(crate) correctness_paths: Vec<String>,
     pub(crate) identity_resolution: IdentityResolutionSummary,
     pub(crate) compiler_inventory: Option<crate::compiler_inventory::Inventory>,
@@ -362,6 +352,7 @@ impl RunContext {
             Vec::new()
         };
         let identity_resolution = resolve_identities(config, tools, &mut source_facts)?;
+        let source_facts: Arc<[FileFacts]> = source_facts.into();
         let correctness_paths = if needs_correctness_facts {
             correctness_paths(config, &source_facts)
         } else {
@@ -369,11 +360,11 @@ impl RunContext {
         };
         let correctness_files = crate::util::iter_rust_files(&correctness_paths);
         let correctness_facts = if !needs_correctness_facts {
-            Vec::new()
+            Arc::default()
         } else if correctness_files == source_files && needs_source_facts {
-            source_facts.clone()
+            Arc::clone(&source_facts)
         } else {
-            helpers::rust_facts_for_files(config, &correctness_files, &targets)?
+            helpers::rust_facts_for_files(config, &correctness_files, &targets)?.into()
         };
         let compiler_requested = tools
             .iter()

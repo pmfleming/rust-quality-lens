@@ -404,11 +404,7 @@ fn thresholds(values: &[f64]) -> Value {
 }
 
 fn percentile(sorted: &[f64], quantile: f64) -> f64 {
-    if sorted.is_empty() {
-        return 0.0;
-    }
-    let index = ((sorted.len() - 1) as f64 * quantile).ceil() as usize;
-    round2(sorted[index.min(sorted.len() - 1)])
+    round2(crate::measurement::percentile(sorted, quantile))
 }
 
 fn percent(part: usize, whole: usize) -> f64 {
@@ -441,6 +437,9 @@ mod tests {
     #[test]
     fn calibration_statistics_use_empirical_percentiles() {
         let values = [1.0, 2.0, 3.0, 10.0];
+        assert_eq!(crate::measurement::percentile(&[], 0.95), 0.0);
+        assert_eq!(crate::measurement::percentile(&[1.234], 0.5), 1.234);
+        assert_eq!(distribution(&[1.234])["p95"], 1.23);
         assert_eq!(
             distribution(&values),
             json!({

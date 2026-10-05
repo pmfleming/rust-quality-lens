@@ -4,20 +4,32 @@ use serde_json::{Value, json};
 use crate::artifacts::json_f64;
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, FunctionFact, HalsteadMetrics, RunContext};
-use crate::measurement::{MODEL_ID, MODEL_VERSION};
+use crate::measurement::{MODEL_ID, MODEL_VERSION, percentile};
 use crate::util::{normalize_slashes, round2};
 
 const COMPLEXITY_METRIC_MODEL_ID: &str = "rqlens.rust_standard_complexity";
 const COMPLEXITY_METRIC_MODEL_VERSION: u64 = 2;
 
-fn with_halstead(fact: &FileFacts, metrics: Option<&HalsteadMetrics>, mut row: Value) -> Value {
+fn with_halstead(
+    fact: &FileFacts,
+    metrics: Option<&HalsteadMetrics>,
+    confidence: &Value,
+    mut row: Value,
+) -> Value {
+    let (scope, calibration) = if row["kind"] == "module" {
+        ("file", "hotspots_module")
+    } else {
+        ("function_signature_and_body", "hotspots_function")
+    };
+    row["risk_model_id"] = json!(MODEL_ID);
+    row["risk_model_version"] = json!(MODEL_VERSION);
+    row["risk_calibration"] = json!(calibration);
+    row["complexity_metric_model_id"] = json!(COMPLEXITY_METRIC_MODEL_ID);
+    row["complexity_metric_model_version"] = json!(COMPLEXITY_METRIC_MODEL_VERSION);
+    row["measurement_confidence"] = confidence.clone();
     row["halstead_metric_model_id"] = json!("rqlens.rust_halstead");
     row["halstead_metric_model_version"] = json!(1);
-    row["halstead_scope"] = json!(if row["kind"] == "module" {
-        "file"
-    } else {
-        "function_signature_and_body"
-    });
+    row["halstead_scope"] = json!(scope);
     row["halstead_status"] = json!(if metrics.is_some() {
         "measured"
     } else {
@@ -92,42 +104,37 @@ fn function_hotspot_row(
         round2(function.max_nesting_depth.saturating_sub(2) as f64 * 3.0 * 1.12);
     let size_contribution =
         round2((function.source_line_count.saturating_sub(20) as f64 * 0.25).min(20.0) * 1.12);
-    with_halstead(
-        fact,
-        function.halstead.as_ref(),
-        json!({
-            "name": function.qualified_name,
-            "qualified_name": function.qualified_name,
-            "function_name": function.name,
-            "module_key": function.module_key,
-            "path": function.path,
-            "kind": "function",
-            "start_line": function.start_line,
-            "end_line": function.end_line,
-            "sloc": function.source_line_count,
-            "branch_pressure": function.branch_pressure,
-            "path_pressure": function.path_pressure,
-            "max_nesting_depth": function.max_nesting_depth,
-            "cyclomatic_complexity": function.cyclomatic_complexity,
-            "cognitive_complexity": function.cognitive_complexity,
-            "complexity_metric_model_id": COMPLEXITY_METRIC_MODEL_ID,
-            "complexity_metric_model_version": COMPLEXITY_METRIC_MODEL_VERSION,
-            "score": score,
-            "quality_score": score,
-            "risk_level": risk_level(score, 19.15, 32.98, 80.08),
-            "score_components": [
-                {"signal": "branch_pressure", "raw": function.branch_pressure, "contribution": branch_contribution},
-                {"signal": "path_pressure", "raw": function.path_pressure, "contribution": path_contribution},
-                {"signal": "nesting_depth_over_2", "raw": function.max_nesting_depth.saturating_sub(2), "contribution": nesting_contribution},
-                {"signal": "lines_over_20", "raw": function.source_line_count.saturating_sub(20), "contribution": size_contribution},
-            ],
-            "signals": function_signals(function),
-            "risk_model_id": MODEL_ID,
-            "risk_model_version": MODEL_VERSION,
-            "risk_calibration": "hotspots_function",
-            "measurement_confidence": confidence,
-        }),
-    )
+    let mut row = function_identity(function);
+    row["branch_pressure"] = json!(function.branch_pressure);
+    row["path_pressure"] = json!(function.path_pressure);
+    row["max_nesting_depth"] = json!(function.max_nesting_depth);
+    row["score"] = json!(score);
+    row["quality_score"] = json!(score);
+    row["risk_level"] = json!(risk_level(score, 19.15, 32.98, 80.08));
+    row["score_components"] = json!([
+        {"signal": "branch_pressure", "raw": function.branch_pressure, "contribution": branch_contribution},
+        {"signal": "path_pressure", "raw": function.path_pressure, "contribution": path_contribution},
+        {"signal": "nesting_depth_over_2", "raw": function.max_nesting_depth.saturating_sub(2), "contribution": nesting_contribution},
+        {"signal": "lines_over_20", "raw": function.source_line_count.saturating_sub(20), "contribution": size_contribution},
+    ]);
+    row["signals"] = json!(function_signals(function));
+    with_halstead(fact, function.halstead.as_ref(), confidence, row)
+}
+
+fn function_identity(function: &FunctionFact) -> Value {
+    json!({
+        "name": function.qualified_name,
+        "qualified_name": function.qualified_name,
+        "function_name": function.name,
+        "module_key": function.module_key,
+        "path": function.path,
+        "kind": "function",
+        "start_line": function.start_line,
+        "end_line": function.end_line,
+        "sloc": function.source_line_count,
+        "cyclomatic_complexity": function.cyclomatic_complexity,
+        "cognitive_complexity": function.cognitive_complexity,
+    })
 }
 
 fn function_signals(function: &FunctionFact) -> Vec<&'static str> {
@@ -194,6 +201,7 @@ fn module_hotspot_row(
     with_halstead(
         fact,
         fact.source.halstead.as_ref(),
+        confidence,
         json!({
             "name": normalize_slashes(&fact.path),
             "module_key": fact.module_key,
@@ -211,8 +219,6 @@ fn module_hotspot_row(
             "cognitive_complexity_sum": cognitive_sum,
             "cognitive_complexity_average": if function_count > 0 { round2(cognitive_sum as f64 / function_count as f64) } else { 0.0 },
             "cognitive_complexity_max": cognitive_max,
-            "complexity_metric_model_id": COMPLEXITY_METRIC_MODEL_ID,
-            "complexity_metric_model_version": COMPLEXITY_METRIC_MODEL_VERSION,
             "max_function_score": round2(maximum),
             "p95_function_score": round2(p95),
             "mean_function_score": round2(mean),
@@ -228,10 +234,6 @@ fn module_hotspot_row(
             ],
             "signals": if sloc >= 250.0 || maximum >= 60.0 { "watch" } else { "stable" },
             "complexity_density": if sloc > 0.0 { round2(quality_score / sloc) } else { 0.0 },
-            "risk_model_id": MODEL_ID,
-            "risk_model_version": MODEL_VERSION,
-            "risk_calibration": "hotspots_module",
-            "measurement_confidence": confidence,
         }),
     )
 }
@@ -254,6 +256,7 @@ fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
     with_halstead(
         fact,
         None,
+        confidence,
         json!({
             "name": normalize_slashes(&fact.path),
             "module_key": fact.module_key,
@@ -270,8 +273,6 @@ fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
             "cognitive_complexity_sum": if fact.syntax_backend == "tree-sitter-rust" { Value::from(cognitive_sum) } else { Value::Null },
             "cognitive_complexity_average": if function_count > 0 { Value::from(round2(cognitive_sum as f64 / function_count as f64)) } else { Value::Null },
             "cognitive_complexity_max": recovered_functions.iter().map(|function| function.cognitive_complexity).max().map(Value::from).unwrap_or(Value::Null),
-            "complexity_metric_model_id": COMPLEXITY_METRIC_MODEL_ID,
-            "complexity_metric_model_version": COMPLEXITY_METRIC_MODEL_VERSION,
             "max_function_score": Value::Null,
             "p95_function_score": Value::Null,
             "mean_function_score": Value::Null,
@@ -286,10 +287,6 @@ fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
             "syntax_backend": fact.syntax_backend,
             "syntax_error_count": fact.syntax_error_count,
             "evidence_status": "partial",
-            "risk_model_id": MODEL_ID,
-            "risk_model_version": MODEL_VERSION,
-            "risk_calibration": "hotspots_module",
-            "measurement_confidence": confidence,
         }),
     )
 }
@@ -299,41 +296,24 @@ fn partial_function_hotspot_row(
     function: &FunctionFact,
     confidence: &Value,
 ) -> Value {
-    with_halstead(
-        fact,
-        None,
-        json!({
-            "name": function.qualified_name,
-            "qualified_name": function.qualified_name,
-            "function_name": function.name,
-            "module_key": function.module_key,
-            "path": function.path,
-            "kind": "function",
-            "start_line": function.start_line,
-            "end_line": function.end_line,
-            "sloc": function.source_line_count,
-            "branch_pressure": Value::Null,
-            "path_pressure": Value::Null,
-            "max_nesting_depth": Value::Null,
-            "cyclomatic_complexity": function.cyclomatic_complexity,
-            "cognitive_complexity": function.cognitive_complexity,
-            "complexity_metric_model_id": COMPLEXITY_METRIC_MODEL_ID,
-            "complexity_metric_model_version": COMPLEXITY_METRIC_MODEL_VERSION,
-            "score": Value::Null,
-            "quality_score": Value::Null,
-            "risk_level": "unknown",
-            "score_components": [],
-            "signals": ["tree-sitter-rust fallback"],
-            "parse_status": fact.parse_status,
-            "syntax_backend": fact.syntax_backend,
-            "syntax_error_count": fact.syntax_error_count,
-            "evidence_status": "partial",
-            "risk_model_id": MODEL_ID,
-            "risk_model_version": MODEL_VERSION,
-            "risk_calibration": "hotspots_function",
-            "measurement_confidence": confidence,
-        }),
-    )
+    let mut row = function_identity(function);
+    for field in [
+        "branch_pressure",
+        "path_pressure",
+        "max_nesting_depth",
+        "score",
+        "quality_score",
+    ] {
+        row[field] = Value::Null;
+    }
+    row["risk_level"] = json!("unknown");
+    row["score_components"] = json!([]);
+    row["signals"] = json!(["tree-sitter-rust fallback"]);
+    row["parse_status"] = json!(fact.parse_status);
+    row["syntax_backend"] = json!(fact.syntax_backend);
+    row["syntax_error_count"] = json!(fact.syntax_error_count);
+    row["evidence_status"] = json!("partial");
+    with_halstead(fact, None, confidence, row)
 }
 
 fn risk_level(score: f64, watch: f64, high: f64, extreme: f64) -> &'static str {
@@ -346,12 +326,4 @@ fn risk_level(score: f64, watch: f64, high: f64, extreme: f64) -> &'static str {
     } else {
         "normal"
     }
-}
-
-fn percentile(sorted: &[f64], percentile: f64) -> f64 {
-    if sorted.is_empty() {
-        return 0.0;
-    }
-    let index = ((sorted.len() - 1) as f64 * percentile).ceil() as usize;
-    sorted[index.min(sorted.len() - 1)]
 }

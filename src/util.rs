@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -141,6 +142,17 @@ pub(crate) fn absolutize(path: impl AsRef<Path>) -> PathBuf {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
     }
+}
+
+/// Format a project-relative path, retaining absolute paths outside the root.
+pub(crate) fn project_relative_path(root: &Path, path: impl AsRef<Path>) -> String {
+    let path = path.as_ref();
+    let absolute = if path.is_absolute() {
+        Cow::Borrowed(path)
+    } else {
+        Cow::Owned(root.join(path))
+    };
+    normalize_slashes(absolute.strip_prefix(root).unwrap_or(&absolute))
 }
 
 pub(crate) fn normalize_slashes(path: impl AsRef<Path>) -> String {

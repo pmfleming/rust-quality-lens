@@ -1,0 +1,55 @@
+{
+  "baseline_commit": "24c4f0edc2c79802ef9b0eb2a3b254a2ec07a6c1",
+  "frozen_executable_sha256": "552adbc0847ff59eeb300e4799f5eb9d141cab0338a801c3ce8ab5c7f234b0fe",
+  "raw_local_evidence": "target/self-refactor-2026-10-05",
+  "complete_evidence": false,
+  "strict_gate_passed": false,
+  "source_roots": [
+    "src", "rust_helpers/src", "compiler_helpers/src", "compiler_helpers/build.rs",
+    "tests/cli.rs", "tests/compiler_inventory.rs", "tests/source_expansion.rs", "tests/trust.rs"
+  ],
+  "before_after": {
+    "source_nonblank_lines": [25129, 25116],
+    "function_count": [1046, 1055],
+    "function_cognitive_max": [28, 17],
+    "function_cognitive_sum": [1555, 1548],
+    "function_cyclomatic_max": [27, 27],
+    "function_cyclomatic_sum": [3538, 3544],
+    "non_test_named_function_cyclomatic_max": [27, 21],
+    "function_halstead_effort_max": [449835.89339672, 349245.1510747862],
+    "function_hotspot_max": [238.11, 151.42],
+    "token_clone_groups": [80, 68],
+    "duplicated_lines": [1171, 1047],
+    "duplication_percent": [4.66, 4.17],
+    "ast_clone_groups": [0, 0],
+    "escape_occurrences": [2, 1],
+    "fixed_103_module_locality_mean": [97.67718446601941, 97.69174757281553],
+    "fixed_103_module_leverage_mean": [21.262135922330096, 20.970873786407765],
+    "capture_function_cognitive_sum": [34, 23],
+    "capture_function_cyclomatic_sum": [62, 58],
+    "util_observed_consumers": [40, 42]
+  },
+  "test_name_filter": "exclude paths containing /tests/ and qualified names containing ::tests::; not compiler-certified production selection",
+  "halstead_scope": "function_signature_and_body; not summed into program effort or converted to hours",
+  "daemon_compatibility": {
+    "projects": ["app-daemon", "bar-daemon", "bt-daemon", "clip-daemon", "nm-daemon"],
+    "tools": ["hotspots", "clones", "escape-hatches", "locality", "leverage", "test-quality", "api-health", "reliability"],
+    "matching_artifact_pairs": 40,
+    "ignored_fields": ["generated_at", "measured_at"],
+    "same_invocation_path": true,
+    "daemon_source_edits": false,
+    "complete_evidence_claimed": false
+  },
+  "validation": {
+    "workspace_tests_passed": 148,
+    "workspace_tests_failed": 0,
+    "workspace_tests_ignored": 3,
+    "compiler_inventory_suite_including_live_tests_passed": 3,
+    "public_schemas_and_catalog_unchanged": true,
+    "strict_clippy_passed": true,
+    "package_smoke_passed": true,
+    "self_metric_first_failure": "function hotspot exceeds 70.0",
+    "strict_failed_policies": ["configured-rules", "partial", "reliability-finding", "test-failure"],
+    "stale_artifacts": []
+  }
+}

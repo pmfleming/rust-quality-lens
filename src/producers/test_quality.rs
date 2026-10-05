@@ -6,7 +6,7 @@ use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext, TestFact};
 
 pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Value> {
-    let facts = merged_facts(context);
+    let facts = selected_facts(context);
     let confidence = if context.correctness_paths.is_empty() {
         context.source_confidence()
     } else {
@@ -16,7 +16,7 @@ pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Valu
     let tests = facts
         .iter()
         .flat_map(|fact| fact.items.tests.iter().map(move |test| (fact, test)))
-        .filter(|(_, test)| seen.insert((test.path.clone(), test.qualified_name.clone())))
+        .filter(|(_, test)| seen.insert((&test.path, &test.qualified_name)))
         .map(|(fact, test)| test_row(fact, test))
         .collect::<Vec<_>>();
     let findings = tests.iter().flat_map(test_findings).collect::<Vec<_>>();
@@ -33,11 +33,11 @@ pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Valu
     }))
 }
 
-fn merged_facts(context: &RunContext) -> Vec<FileFacts> {
+fn selected_facts(context: &RunContext) -> &[FileFacts] {
     if context.correctness_facts.is_empty() {
-        context.source_facts.clone()
+        &context.source_facts
     } else {
-        context.correctness_facts.clone()
+        &context.correctness_facts
     }
 }
 

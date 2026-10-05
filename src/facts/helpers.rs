@@ -1,14 +1,19 @@
 use anyhow::{Context, Result, anyhow};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use tempfile::NamedTempFile;
 
 use crate::config::LensConfig;
-use crate::facts::{AstCloneFact, FileFacts, HELPER_BINARIES, HelperBinaryKey};
+use crate::facts::{AstCloneFact, FileFacts};
 use crate::util::{absolutize, normalize_slashes, resolve_project_path};
+
+type BinaryCache = HashMap<(PathBuf, String), PathBuf>;
+static HELPER_BINARIES: OnceLock<Mutex<BinaryCache>> = OnceLock::new();
 
 pub(super) fn rust_facts_for_files(
     config: &LensConfig,
@@ -101,12 +106,8 @@ fn helper_json_for_files<T: serde::de::DeserializeOwned>(
 
 fn helper_binary(config: &LensConfig, bin: &str) -> Result<PathBuf> {
     let manifest = canonical_or_original(&config.helper_manifest);
-    let key = HelperBinaryKey {
-        manifest: manifest.clone(),
-        bin: bin.to_string(),
-    };
-    let cache =
-        HELPER_BINARIES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let key = (manifest.clone(), bin.to_string());
+    let cache = HELPER_BINARIES.get_or_init(|| Mutex::new(HashMap::new()));
     if let Some(path) = cache
         .lock()
         .map_err(|_| anyhow!("helper binary cache is poisoned"))?

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::config::LensConfig;
 use crate::facts::RunContext;
-use crate::measurement::project_relative_path;
+use crate::util::project_relative_path;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let confidence = context.source_confidence();

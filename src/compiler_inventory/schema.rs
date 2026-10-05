@@ -1,3 +1,4 @@
+use crate::contracts::schema::property_groups;
 use serde_json::{Value, json};
 
 pub(crate) fn origin_schema() -> Value {
@@ -10,13 +11,9 @@ pub(crate) fn origin_schema() -> Value {
             "location": {
                 "type": ["object", "null"], "additionalProperties": false,
                 "required": ["path", "line", "column", "end_line", "end_column"],
-                "properties": {
-                    "path": {"type": "string", "minLength": 1},
-                    "line": {"type": "integer", "minimum": 1},
-                    "column": {"type": "integer", "minimum": 1},
-                    "end_line": {"type": "integer", "minimum": 1},
-                    "end_column": {"type": "integer", "minimum": 1}
-                }
+                "properties": property_groups(json!({"path": {"type": "string", "minLength": 1}}), &[
+                    ("line column end_line end_column", json!({"type": "integer", "minimum": 1})),
+                ])
             }
         }
     })
@@ -26,14 +23,11 @@ pub(crate) fn context_schema() -> Value {
     json!({
         "type": "object", "additionalProperties": false,
         "required": ["manifest_dir", "source_root", "target_triple", "test", "cfg", "compiler_version"],
-        "properties": {
-            "manifest_dir": {"type": "string", "minLength": 1},
-            "source_root": {"type": "string", "minLength": 1},
-            "target_triple": {"type": "string", "minLength": 1},
+        "properties": property_groups(json!({
             "test": {"type": "boolean"},
             "cfg": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
             "compiler_version": {"const": super::COMPILER_VERSION}
-        }
+        }), &[("manifest_dir source_root target_triple", json!({"type": "string", "minLength": 1}))])
     })
 }
 

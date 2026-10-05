@@ -243,7 +243,7 @@ fn is_keyword_operator(value: &str) -> bool {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::*;
+    use super::{HalsteadMetrics, measure};
 
     fn file(source: &str) -> HalsteadMetrics {
         measure(&syn::parse_file(source).unwrap())

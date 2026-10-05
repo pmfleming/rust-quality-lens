@@ -5,8 +5,7 @@ use std::collections::BTreeMap;
 use crate::config::LensConfig;
 use crate::contracts::{ArtifactReadError, read_current};
 use crate::facts::{FunctionFact, RunContext};
-use crate::measurement::project_relative_path;
-use crate::util::round2;
+use crate::util::{project_relative_path, round2};
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let coverage = load_coverage(config, &context.snapshot.fingerprint);

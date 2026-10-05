@@ -5,8 +5,8 @@ use std::time::Duration;
 use crate::command_runner::{CommandRequest, CommandStatus, run as run_command};
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext};
-use crate::measurement::{module_for_path, project_relative_path};
-use crate::util::round2;
+use crate::measurement::module_for_path;
+use crate::util::{project_relative_path, round2};
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     // cargo-llvm-cov holds Cargo's build lock while tests execute. Starting it

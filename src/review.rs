@@ -6,7 +6,9 @@ use crate::facts::FileFacts;
 use crate::facts::RunContext;
 use crate::producers::produce_measurement;
 use crate::tool::MeasureTool;
-use crate::util::{absolutize, normalize_slashes, write_json};
+use crate::util::{
+    absolutize, normalize_slashes, project_relative_path as relative_path, write_json,
+};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::fs;
@@ -250,13 +252,6 @@ fn relative_paths(project_root: &Path, paths: &[PathBuf]) -> Vec<String> {
         .iter()
         .map(|path| relative_path(project_root, path))
         .collect()
-}
-
-fn relative_path(project_root: &Path, path: impl AsRef<Path>) -> String {
-    let path = path.as_ref();
-    path.strip_prefix(project_root)
-        .map(normalize_slashes)
-        .unwrap_or_else(|_| normalize_slashes(path))
 }
 
 fn filter_payload(

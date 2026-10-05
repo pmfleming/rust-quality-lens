@@ -17,6 +17,8 @@ mod baseline;
 pub(crate) use baseline::{coverage_percent, read_baseline, validate_comparison_evidence};
 mod validation;
 pub(crate) use validation::{validate_artifact, validate_diagnostics};
+pub(crate) mod schema;
+use schema::property_groups;
 
 pub(crate) fn artifact_document(
     tool: &MeasureTool,
@@ -197,17 +199,10 @@ fn halstead_schema() -> Value {
     json!({
         "type": ["object", "null"],
         "required": ["distinct_operators", "total_operators", "distinct_operands", "total_operands", "vocabulary", "length", "volume", "difficulty", "effort"],
-        "properties": {
-            "distinct_operators": {"type": "integer", "minimum": 0},
-            "total_operators": {"type": "integer", "minimum": 0},
-            "distinct_operands": {"type": "integer", "minimum": 0},
-            "total_operands": {"type": "integer", "minimum": 0},
-            "vocabulary": {"type": "integer", "minimum": 0},
-            "length": {"type": "integer", "minimum": 0},
-            "volume": {"type": "number", "minimum": 0},
-            "difficulty": {"type": ["number", "null"], "minimum": 0},
-            "effort": {"type": ["number", "null"], "minimum": 0}
-        }
+        "properties": property_groups(json!({"volume": {"type": "number", "minimum": 0}}), &[
+            ("distinct_operators total_operators distinct_operands total_operands vocabulary length", json!({"type": "integer", "minimum": 0})),
+            ("difficulty effort", json!({"type": ["number", "null"], "minimum": 0})),
+        ])
     })
 }
 
@@ -224,40 +219,43 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "score_components",
                 "measurement_confidence",
             ],
-            json!({
-                "name": {"type": "string"},
-                "kind": {"type": "string", "enum": ["module", "function"]},
-                "module_key": {"type": "string"},
-                "module_id": {"type": "string"},
-                "package_name": {"type": "string"},
-                "target_name": {"type": "string"},
-                "identity_backend": {"type": "string"},
-                "score": {"type": ["number", "null"]},
-                "quality_score": {"type": ["number", "null"]},
-                "risk_level": {"type": "string", "enum": ["normal", "watch", "high", "extreme", "unknown"]},
-                "cyclomatic_complexity": {"type": "integer", "minimum": 1},
-                "cognitive_complexity": {"type": "integer", "minimum": 0},
-                "cyclomatic_complexity_sum": {"type": ["integer", "null"], "minimum": 0},
-                "cyclomatic_complexity_average": {"type": ["number", "null"], "minimum": 0},
-                "cyclomatic_complexity_max": {"type": ["integer", "null"], "minimum": 0},
-                "cognitive_complexity_sum": {"type": ["integer", "null"], "minimum": 0},
-                "cognitive_complexity_average": {"type": ["number", "null"], "minimum": 0},
-                "cognitive_complexity_max": {"type": ["integer", "null"], "minimum": 0},
-                "complexity_metric_model_id": {"type": "string", "const": "rqlens.rust_standard_complexity"},
-                "complexity_metric_model_version": {"type": "integer", "const": 2},
-                "halstead_metric_model_id": {"type": "string", "const": "rqlens.rust_halstead"},
-                "halstead_metric_model_version": {"type": "integer", "const": 1},
-                "halstead_scope": {"type": "string", "enum": ["file", "function_signature_and_body"]},
-                "halstead_status": {"type": "string", "enum": ["measured", "unavailable"]},
-                "halstead": halstead_schema(),
-                "halstead_effort": {"type": ["number", "null"], "minimum": 0},
-                "parse_status": {"type": "string"},
-                "syntax_backend": {"type": "string", "enum": ["tree-sitter-rust", "text"]},
-                "syntax_error_count": {"type": "integer", "minimum": 0},
-                "evidence_status": {"type": "string", "enum": ["partial"]},
-                "score_components": {"type": "array", "items": {"type": "object"}},
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
+            property_groups(
+                json!({
+                    "kind": {"type": "string", "enum": ["module", "function"]},
+                    "risk_level": {"type": "string", "enum": ["normal", "watch", "high", "extreme", "unknown"]},
+                    "cyclomatic_complexity": {"type": "integer", "minimum": 1},
+                    "complexity_metric_model_id": {"type": "string", "const": "rqlens.rust_standard_complexity"},
+                    "complexity_metric_model_version": {"type": "integer", "const": 2},
+                    "halstead_metric_model_id": {"type": "string", "const": "rqlens.rust_halstead"},
+                    "halstead_metric_model_version": {"type": "integer", "const": 1},
+                    "halstead_scope": {"type": "string", "enum": ["file", "function_signature_and_body"]},
+                    "halstead_status": {"type": "string", "enum": ["measured", "unavailable"]},
+                    "halstead": halstead_schema(),
+                    "syntax_backend": {"type": "string", "enum": ["tree-sitter-rust", "text"]},
+                    "evidence_status": {"type": "string", "enum": ["partial"]},
+                    "score_components": {"type": "array", "items": {"type": "object"}},
+                    "measurement_confidence": measurement_confidence_schema(),
+                }),
+                &[
+                    (
+                        "name module_key module_id package_name target_name identity_backend parse_status",
+                        json!({"type": "string"}),
+                    ),
+                    ("score quality_score", json!({"type": ["number", "null"]})),
+                    (
+                        "cognitive_complexity syntax_error_count",
+                        json!({"type": "integer", "minimum": 0}),
+                    ),
+                    (
+                        "cyclomatic_complexity_sum cyclomatic_complexity_max cognitive_complexity_sum cognitive_complexity_max",
+                        json!({"type": ["integer", "null"], "minimum": 0}),
+                    ),
+                    (
+                        "cyclomatic_complexity_average cognitive_complexity_average halstead_effort",
+                        json!({"type": ["number", "null"], "minimum": 0}),
+                    ),
+                ],
+            ),
         ),
         MeasureTool::Clones => array_schema(
             "clones.json",
@@ -300,20 +298,19 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         MeasureTool::Reliability => array_schema(
             "reliability_findings.json",
             &["rule_id", "category", "severity", "path", "line", "message"],
-            json!({
-                "rule_id": {"type": "string"},
-                "category": {"type": "string", "const": "static-finding"},
-                "kind": {"type": "string"},
-                "severity": {"type": "string", "enum": ["error", "warning", "advisory"]},
-                "path": {"type": "string"},
-                "line": {"type": "integer"},
-                "module_key": {"type": "string"},
-                "module_id": {"type": "string"},
-                "scope": {"type": "string", "enum": ["production", "test"]},
-                "message": {"type": "string"},
-                "source": {"type": "string"},
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
+            property_groups(
+                json!({
+                    "category": {"type": "string", "const": "static-finding"},
+                    "severity": {"type": "string", "enum": ["error", "warning", "advisory"]},
+                    "line": {"type": "integer"},
+                    "scope": {"type": "string", "enum": ["production", "test"]},
+                    "measurement_confidence": measurement_confidence_schema(),
+                }),
+                &[(
+                    "rule_id kind path module_key module_id message source",
+                    json!({"type": "string"}),
+                )],
+            ),
         ),
         MeasureTool::ArchitectureRules => summary_arrays_schema(tool, &["violations"]),
         MeasureTool::TestQuality => summary_arrays_schema(tool, &["tests", "findings"]),
@@ -326,19 +323,22 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "documented_public_item_count",
                 "documentation_percent",
             ],
-            json!({
-                "module_key": {"type": "string"},
-                "module_id": {"type": "string"},
-                "path": {"type": "string"},
-                "public_item_count": {"type": "integer"},
-                "visibility_scope": {"type": "string", "const": "syntactic_pub"},
-                "documented_public_item_count": {"type": "integer"},
-                "missing_documentation_count": {"type": "integer"},
-                "documentation_percent": {"type": "number"},
-                "crate_level_documentation": {"type": ["boolean", "null"]},
-                "signals": {"type": "array", "items": {"type": "string"}},
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
+            property_groups(
+                json!({
+                    "visibility_scope": {"type": "string", "const": "syntactic_pub"},
+                    "documentation_percent": {"type": "number"},
+                    "crate_level_documentation": {"type": ["boolean", "null"]},
+                    "signals": {"type": "array", "items": {"type": "string"}},
+                    "measurement_confidence": measurement_confidence_schema(),
+                }),
+                &[
+                    ("module_key module_id path", json!({"type": "string"})),
+                    (
+                        "public_item_count documented_public_item_count missing_documentation_count",
+                        json!({"type": "integer"}),
+                    ),
+                ],
+            ),
         ),
         MeasureTool::CompilerInventory => object_schema(
             "compiler_inventory.json",
@@ -427,27 +427,34 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "observed_impl_file_count",
                 "measurement_confidence",
             ],
-            json!({
-                "type_name": {"type": "string"},
-                "qualified_name": {"type": "string"},
-                "module_key": {"type": "string"},
-                "method_count": {"type": ["integer", "null"], "minimum": 0},
-                "impl_block_count": {"type": ["integer", "null"], "minimum": 0},
-                "impl_file_count": {"type": ["integer", "null"], "minimum": 0},
-                "observed_method_count": {"type": "integer", "minimum": 0},
-                "observed_impl_block_count": {"type": "integer", "minimum": 0},
-                "observed_impl_file_count": {"type": "integer", "minimum": 0},
-                "structural_risk": {"type": ["number", "null"]},
-                "structural_score": {"type": ["number", "null"]},
-                "structural_score_status": {"const": "not_calibrated_for_compiler_inventory"},
-                "definition_id": {"type": "string"},
-                "compiler_context_id": {"type": "string"},
-                "compiler_context": crate::compiler_inventory::context_schema(),
-                "origin": crate::compiler_inventory::origin_schema(),
-                "inventory_model_version": {"const": 1},
-                "measurement_confidence": measurement_confidence_schema(),
-                "signals": {"type": "array", "items": {"type": "string"}},
-            }),
+            property_groups(
+                json!({
+                    "structural_score_status": {"const": "not_calibrated_for_compiler_inventory"},
+                    "compiler_context": crate::compiler_inventory::context_schema(),
+                    "origin": crate::compiler_inventory::origin_schema(),
+                    "inventory_model_version": {"const": 1},
+                    "measurement_confidence": measurement_confidence_schema(),
+                    "signals": {"type": "array", "items": {"type": "string"}},
+                }),
+                &[
+                    (
+                        "type_name qualified_name module_key definition_id compiler_context_id",
+                        json!({"type": "string"}),
+                    ),
+                    (
+                        "method_count impl_block_count impl_file_count",
+                        json!({"type": ["integer", "null"], "minimum": 0}),
+                    ),
+                    (
+                        "observed_method_count observed_impl_block_count observed_impl_file_count",
+                        json!({"type": "integer", "minimum": 0}),
+                    ),
+                    (
+                        "structural_risk structural_score",
+                        json!({"type": ["number", "null"]}),
+                    ),
+                ],
+            ),
         ),
         MeasureTool::Correctness | MeasureTool::CorrectnessRun => object_schema(
             "correctness_review.json",
@@ -531,64 +538,46 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
 fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
     let array_payload = payload["type"] == "array";
     let payload_key = if array_payload { "records" } else { "data" };
-    let mut properties = serde_json::Map::new();
-    properties.insert(
-        "schema_version".to_string(),
-        json!({"type": "integer", "const": 3}),
-    );
-    properties.insert("generated_from".to_string(), json!({"type": "string"}));
-    properties.insert(
-        "generated_at".to_string(),
-        json!({"type": "string", "format": "date-time"}),
-    );
-    properties.insert("generator_version".to_string(), json!({"type": "string"}));
-    properties.insert(
-        "toolchain".to_string(),
+    let tool_schema = if matches!(tool, MeasureTool::Correctness | MeasureTool::CorrectnessRun) {
+        json!({"type": "string", "enum": ["correctness", "correctness-run"]})
+    } else {
+        json!({"type": "string", "const": tool.name()})
+    };
+    let mut properties = property_groups(
         json!({
-            "type": "object",
-            "required": ["rustc_version", "rustc_release", "cargo_version", "host", "llvm_version", "declared_rust_version", "pinned_channel"],
-            "properties": {
-                "rustc_version": {"type": ["string", "null"]},
-                "rustc_release": {"type": ["string", "null"]},
-                "cargo_version": {"type": ["string", "null"]},
-                "host": {"type": ["string", "null"]},
-                "llvm_version": {"type": ["string", "null"]},
-                "declared_rust_version": {"type": ["string", "null"]},
-                "pinned_channel": {"type": ["string", "null"]}
+            "schema_version": {"type": "integer", "const": 3},
+            "generated_at": {"type": "string", "format": "date-time"},
+            "toolchain": {
+                "type": "object",
+                "required": ["rustc_version", "rustc_release", "cargo_version", "host", "llvm_version", "declared_rust_version", "pinned_channel"],
+                "properties": property_groups(json!({}), &[(
+                    "rustc_version rustc_release cargo_version host llvm_version declared_rust_version pinned_channel",
+                    json!({"type": ["string", "null"]}),
+                )]),
+                "additionalProperties": false
             },
-            "additionalProperties": false
+            "input_fingerprint": {
+                "type": "object",
+                "required": ["algorithm", "digest", "file_count", "complete"],
+                "properties": {
+                    "algorithm": {"type": "string"},
+                    "digest": {"type": "string"},
+                    "file_count": {"type": "integer"},
+                    "complete": {"type": "boolean"},
+                    "read_errors": {"type": "array", "items": {"type": "string"}}
+                }
+            },
+            "tool": tool_schema,
+            "risk_model_version": {"type": "integer"},
+            "measurement_confidence": measurement_confidence_schema(),
+            "summary": {"type": "object"},
         }),
+        &[(
+            "generated_from generator_version risk_model_id",
+            json!({"type": "string"}),
+        )],
     );
-    properties.insert(
-        "input_fingerprint".to_string(),
-        json!({
-            "type": "object",
-            "required": ["algorithm", "digest", "file_count", "complete"],
-            "properties": {
-                "algorithm": {"type": "string"},
-                "digest": {"type": "string"},
-                "file_count": {"type": "integer"},
-                "complete": {"type": "boolean"},
-                "read_errors": {"type": "array", "items": {"type": "string"}}
-            }
-        }),
-    );
-    properties.insert(
-        "tool".to_string(),
-        if matches!(tool, MeasureTool::Correctness | MeasureTool::CorrectnessRun) {
-            json!({"type": "string", "enum": ["correctness", "correctness-run"]})
-        } else {
-            json!({"type": "string", "const": tool.name()})
-        },
-    );
-    properties.insert("risk_model_id".to_string(), json!({"type": "string"}));
-    properties.insert("risk_model_version".to_string(), json!({"type": "integer"}));
-    properties.insert(
-        "measurement_confidence".to_string(),
-        measurement_confidence_schema(),
-    );
-    properties.insert("summary".to_string(), json!({"type": "object"}));
-    properties.insert(payload_key.to_string(), payload);
+    properties[payload_key] = payload;
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": format!("{} artifact envelope", tool.output_file()),

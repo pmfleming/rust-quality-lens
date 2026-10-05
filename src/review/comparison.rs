@@ -5,7 +5,7 @@ use std::{collections::BTreeSet, fs, path::Path};
 pub(super) fn snapshot(config: &LensConfig, measurements: &[Value], complete: bool) -> Value {
     let profile = json!({"generator": env!("CARGO_PKG_VERSION"), "identity": "source-anchor-v1", "model": crate::measurement::MODEL_VERSION,
         "architecture": config.architecture, "verification": config.verification, "identity_resolution": config.identity_resolution,
-        "source_roots": config.source_roots.iter().map(|root| crate::measurement::project_relative_path(&config.project_root, root)).collect::<Vec<_>>()});
+        "source_roots": config.source_roots.iter().map(|root| crate::util::project_relative_path(&config.project_root, root)).collect::<Vec<_>>()});
     let mut ids = BTreeSet::new();
     for value in measurements {
         collect_ids(value, &mut ids);

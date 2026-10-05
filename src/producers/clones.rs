@@ -6,10 +6,8 @@ use std::fs;
 
 use crate::config::LensConfig;
 use crate::facts::{AstCloneFact, FileFacts, RunContext, ast_clone_facts_for_files};
-use crate::measurement::{
-    MODEL_ID, MODEL_VERSION, project_relative_path, source_scan_confidence_with_errors,
-};
-use crate::util::{normalize_slashes, round2, stable_hash};
+use crate::measurement::{MODEL_ID, MODEL_VERSION, source_scan_confidence_with_errors};
+use crate::util::{normalize_slashes, project_relative_path, round2, stable_hash};
 
 struct CloneInstance {
     file_path: String,

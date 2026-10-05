@@ -11,8 +11,7 @@ pub(crate) use snapshot::InputSnapshot;
 
 pub(crate) use confidence::{source_confidence_from_inventory, source_scan_confidence_with_errors};
 pub(crate) use paths::{
-    classify_module, classify_path, module_for_path, project_relative_path, test_kind_for_path,
-    title_from_name,
+    classify_module, classify_path, module_for_path, test_kind_for_path, title_from_name,
 };
 pub(crate) use provenance::{Provenance, ToolScoreMetadata, provenance, tool_score_metadata};
 pub(crate) use scoring::{TypeScoreComponent, escape_labels, escape_weights, type_risk};
@@ -21,6 +20,13 @@ pub(crate) const MODEL_ID: &str = "rqlens.architecture_risk";
 pub(crate) const MODEL_VERSION: u64 = 4;
 pub(crate) const RULESET_ID: &str = "rqlens.generic_layers";
 pub(crate) const RULESET_VERSION: u64 = 1;
+
+/// Empirical ceiling-rank percentile; callers choose their output rounding.
+pub(crate) fn percentile(sorted: &[f64], quantile: f64) -> f64 {
+    let last = sorted.len().saturating_sub(1);
+    let index = ((last as f64 * quantile).ceil() as usize).min(last);
+    sorted.get(index).copied().unwrap_or_default()
+}
 
 pub(crate) fn option_json(value: Option<f64>) -> Value {
     value.map(Value::from).unwrap_or(Value::Null)

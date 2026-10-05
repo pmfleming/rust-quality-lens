@@ -60,6 +60,13 @@ fn fixture_root(name: &str) -> PathBuf {
     root
 }
 
+fn write_files(root: &Path, files: &[(&str, &str)]) {
+    files
+        .iter()
+        .try_for_each(|(path, text)| fs::write(root.join(path), text))
+        .expect("fixture files should be written");
+}
+
 fn write_clone_fixture(name: &str) -> PathBuf {
     let root = fixture_root(name);
     fs::create_dir_all(root.join("tests")).expect("test fixture tests should be created");
@@ -186,37 +193,30 @@ fn duplicated_setup() {{
 
 fn write_architecture_fixture(name: &str, artifacts: bool) -> PathBuf {
     let root = fixture_root(name);
-    fs::write(
-        root.join("rqlens.toml"),
-        format!(
-            r#"project_name = "{name}"
-project_root = "."
-source_roots = ["src"]
-output_dir = "target/analysis"
-"#
-        ),
-    )
-    .expect("test config should be written");
-    fs::write(
-        root.join("Cargo.toml"),
-        "[package]\nname = \"arch-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
-    )
-    .expect("cargo manifest should be written");
-    fs::write(
-        root.join("src").join("lib.rs"),
-        "pub mod domain;\npub mod service;\n",
-    )
-    .expect("lib source should be written");
-    fs::write(
-        root.join("src").join("domain.rs"),
-        "use crate::service::run;\npub fn value() -> i32 { run() }\n",
-    )
-    .expect("domain source should be written");
-    fs::write(
-        root.join("src").join("service.rs"),
-        "use crate::domain::value;\npub fn run() -> i32 { value() }\n",
-    )
-    .expect("service source should be written");
+    write_files(
+        &root,
+        &[
+            (
+                "rqlens.toml",
+                &format!(
+                    "project_name = \"{name}\"\nproject_root = \".\"\nsource_roots = [\"src\"]\noutput_dir = \"target/analysis\"\n"
+                ),
+            ),
+            (
+                "Cargo.toml",
+                "[package]\nname = \"arch-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            ),
+            ("src/lib.rs", "pub mod domain;\npub mod service;\n"),
+            (
+                "src/domain.rs",
+                "use crate::service::run;\npub fn value() -> i32 { run() }\n",
+            ),
+            (
+                "src/service.rs",
+                "use crate::domain::value;\npub fn run() -> i32 { value() }\n",
+            ),
+        ],
+    );
     if artifacts {
         std::thread::sleep(std::time::Duration::from_millis(20));
         let analysis = root.join("target").join("analysis");
@@ -282,25 +282,23 @@ fn wrap_fixture_artifacts(root: &Path) {
 
 fn write_syntax_error_fixture(name: &str) -> PathBuf {
     let root = fixture_root(name);
-    fs::write(
-        root.join("Cargo.toml"),
-        "[package]\nname = \"syntax-error-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
-    )
-    .expect("syntax-error manifest should be written");
-    fs::write(
-        root.join("rqlens.toml"),
-        r#"project_name = "syntax-error-fixture"
-project_root = "."
-source_roots = ["src"]
-output_dir = "target/analysis"
-"#,
-    )
-    .expect("syntax-error config should be written");
-    fs::write(
-        root.join("src/lib.rs"),
-        "//! Partially measurable crate.\n\npub fn recovered(flag: bool) -> bool {\n    if flag { true } else { false }\n}\n\npub fn broken( {\n    // source metrics survive\n",
-    )
-    .expect("malformed Rust source should be written");
+    write_files(
+        &root,
+        &[
+            (
+                "Cargo.toml",
+                "[package]\nname = \"syntax-error-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            ),
+            (
+                "rqlens.toml",
+                "project_name = \"syntax-error-fixture\"\nproject_root = \".\"\nsource_roots = [\"src\"]\noutput_dir = \"target/analysis\"\n",
+            ),
+            (
+                "src/lib.rs",
+                "//! Partially measurable crate.\n\npub fn recovered(flag: bool) -> bool {\n    if flag { true } else { false }\n}\n\npub fn broken( {\n    // source metrics survive\n",
+            ),
+        ],
+    );
     root
 }
 
