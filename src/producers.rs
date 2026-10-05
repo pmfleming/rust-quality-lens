@@ -48,6 +48,11 @@ pub(crate) fn produce_measurement(
         MeasureTool::ApiHealth => api_health::produce(config, context),
         MeasureTool::SemanticApi => semantic_api::produce(config),
         MeasureTool::SourceExpansion => crate::semantic::expansion::produce(config, context),
+        MeasureTool::CompilerInventory => context
+            .compiler_inventory
+            .as_ref()
+            .map(|inventory| inventory.report(context.snapshot.fingerprint["complete"] == true))
+            .ok_or_else(|| anyhow::anyhow!("compiler inventory was not requested")),
         MeasureTool::Correctness | MeasureTool::CorrectnessRun => {
             correctness::produce(config, context, matches!(tool, MeasureTool::CorrectnessRun))
         }

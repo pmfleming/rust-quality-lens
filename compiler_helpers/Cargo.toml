@@ -1,0 +1,13 @@
+[package]
+name = "rqlens-compiler-inventory"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+publish = false
+license = "MIT"
+
+# rustc_private is deliberately isolated from the stable RQLens workspace.
+[workspace]
+
+[dependencies]
+serde_json = "1.0"

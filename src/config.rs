@@ -32,6 +32,8 @@ struct RawRustConfig {
     identity_timeout_seconds: Option<u64>,
     identity_offline: Option<bool>,
     identity_build_macros: Option<bool>,
+    compiler_inventory_driver: Option<PathBuf>,
+    compiler_inventory_target: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -402,6 +404,8 @@ pub(crate) struct LensConfig {
     pub(crate) identity_timeout_seconds: u64,
     pub(crate) identity_offline: bool,
     pub(crate) identity_build_macros: bool,
+    pub(crate) compiler_inventory_driver: Option<PathBuf>,
+    pub(crate) compiler_inventory_target: Option<String>,
     pub(crate) verification: VerificationConfig,
     pub(crate) architecture: ArchitectureConfig,
     pub(crate) policy: PolicyConfig,
@@ -425,6 +429,8 @@ impl LensConfig {
             identity_timeout_seconds: 1,
             identity_offline: true,
             identity_build_macros: false,
+            compiler_inventory_driver: None,
+            compiler_inventory_target: None,
             verification: Default::default(),
             architecture: Default::default(),
             policy: Default::default(),
@@ -472,6 +478,9 @@ impl LensConfig {
         let roots = local_package_roots(self.helper_metadata.iter());
         let mut inputs = local_workspace_inputs(&roots);
         inputs.insert(self.helper_manifest.to_string_lossy().into_owned());
+        if let Some(driver) = &self.compiler_inventory_driver {
+            inputs.insert(driver.to_string_lossy().into_owned());
+        }
         crate::util::quality_input_fingerprint(
             self.helper_manifest.parent().unwrap_or(&self.project_root),
             &roots.into_iter().collect::<Vec<_>>(),
@@ -585,6 +594,10 @@ impl LensConfig {
             identity_timeout_seconds,
             identity_offline,
             identity_build_macros: rust.identity_build_macros.unwrap_or(false),
+            compiler_inventory_driver: rust
+                .compiler_inventory_driver
+                .map(|path| resolve_config_path(path, &config_dir)),
+            compiler_inventory_target: rust.compiler_inventory_target,
             verification,
             architecture,
             policy,
@@ -794,6 +807,9 @@ identity_timeout_seconds = 60
 identity_offline = true
 # Trusted projects only: execute build scripts and procedural macros for identity.
 identity_build_macros = false
+# Opt-in compiler-backed type inventory; runs Cargo/build scripts/procedural macros.
+# compiler_inventory_driver = "/path/to/rqlens-compiler-inventory"
+# compiler_inventory_target = "x86_64-unknown-linux-gnu"
 
 [verification]
 timeout_seconds = 600
@@ -873,6 +889,8 @@ pub(crate) fn config_schema() -> Value {
                     "rust_analyzer": {"type": "string", "default": "rust-analyzer"},
                     "identity_timeout_seconds": {"type": "integer", "minimum": 1, "default": 60},
                     "identity_offline": {"type": "boolean", "default": true},
+                    "compiler_inventory_driver": {"type": "string", "description": "Opt-in pinned rustc HIR adapter; executes trusted project builds, macros and build scripts. Relative to the configuration file."},
+                    "compiler_inventory_target": {"type": "string", "description": "Compiler inventory target triple; defaults to the adapter compiler host."},
                     "identity_build_macros": {"type": "boolean", "default": false,
                         "description": "Trusted projects only: allow rust-analyzer to execute build scripts and procedural macros"}
                 }

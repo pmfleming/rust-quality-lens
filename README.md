@@ -20,6 +20,12 @@ Coverage, auditing, mutation, fuzzing, sanitizers, and Miri require their
 corresponding optional tools. Missing tools are reported explicitly and never
 count as passing.
 
+For opt-in compiler-expanded type inventory, build the separately pinned
+`rustc-dev` adapter and configure `rust.compiler_inventory_driver`;
+see [compiler inventory](docs/compiler-inventory.md). This handles macro/derive,
+attribute, cfg, and resolved-ownership evidence for type-health, without claiming
+complete body-level or architecture analysis.
+
 ## What RQLens measures
 
 RQLens keeps three kinds of evidence separate:

@@ -32,6 +32,16 @@ pub(crate) fn project_with_toolchain(
         "git": git,
         "toolchain": toolchain,
         "generator_version": env!("CARGO_PKG_VERSION"),
+        "compiler_environment": config.compiler_inventory_driver.as_ref().map(|_| {
+            std::env::vars_os().filter_map(|(key, value)| {
+                let key = key.to_str()?;
+                (matches!(key, "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS" | "CARGO_BUILD_RUSTFLAGS"
+                    | "RUSTC_BOOTSTRAP" | "RUSTUP_TOOLCHAIN" | "RUSTC_WRAPPER" | "RUSTC_WORKSPACE_WRAPPER"
+                    | "CARGO_BUILD_RUSTC_WRAPPER" | "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER" | "RQLENS_COMPILER_CAPTURE")
+                    || (key.starts_with("CARGO_TARGET_") && key.ends_with("_RUSTFLAGS")))
+                    .then(|| (key.to_owned(), value.to_string_lossy().into_owned()))
+            }).collect::<std::collections::BTreeMap<_, _>>()
+        }),
     });
     json!({
         "algorithm": "fnv1a64-quality-inputs-v5",

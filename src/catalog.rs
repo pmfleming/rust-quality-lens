@@ -77,6 +77,7 @@ impl TaskDefinition {
             self.tool,
             MeasureTool::SemanticApi
                 | MeasureTool::SourceExpansion
+                | MeasureTool::CompilerInventory
                 | MeasureTool::Practices
                 | MeasureTool::CorrectnessRun
                 | MeasureTool::Coverage
@@ -159,6 +160,15 @@ fn task_definitions() -> Vec<TaskDefinition> {
             description: "Optionally inventories compiler-derived reachable public API through cargo-public-api.",
         },
         TaskDefinition {
+            tool: MeasureTool::CompilerInventory,
+            id: "quality.compiler_inventory",
+            aliases: vec![],
+            category: "quality",
+            subcategory: "types",
+            title: "Compiler Inventory",
+            description: "Opt-in pinned rustc HIR inventory after macro expansion and cfg selection; includes per-context compiler-owned types and impls without source-calibrated scores.",
+        },
+        TaskDefinition {
             tool: MeasureTool::SourceExpansion,
             id: "quality.source_expansion",
             aliases: vec![],
@@ -174,7 +184,7 @@ fn task_definitions() -> Vec<TaskDefinition> {
             category: "quality",
             subcategory: "structure",
             title: "Type Health",
-            description: "Ranks wide structs, large enums, broad method surfaces, and impl spread.",
+            description: "Ranks syntax-based type pressure, or emits unscored compiler-resolved per-context type/impl counts when a compiler inventory driver is configured.",
         },
         TaskDefinition {
             tool: MeasureTool::Practices,

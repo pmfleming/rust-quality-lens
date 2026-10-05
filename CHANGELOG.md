@@ -6,6 +6,7 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Added
 
+- Opt-in pinned rustc HIR inventory and compiler-backed type-health: expanded macros/attributes/derives, effective target/features/cfg, compiler-resolved impl ownership, explicit invocation attribution, and per-context deduplication. Unsupported or failed builds remain partial; source-calibrated scores and other producers' completeness are not changed.
 - Genuine, versioned Rust Halstead counts, volume, difficulty, and effort on function/file hotspots, with documented syntax-token rules, null recovery metrics, and independent numeric regression tests. Hotspot and architecture-risk scoring remain unchanged.
 - Explicit trusted-project `rust.identity_build_macros` opt-in for compiler-assisted generated-symbol resolution, with cache invalidation and a live offline regression fixture.
 

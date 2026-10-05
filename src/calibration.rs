@@ -190,6 +190,8 @@ fn calibration_config(
         identity_timeout_seconds: 90,
         identity_offline: true,
         identity_build_macros: false,
+        compiler_inventory_driver: None,
+        compiler_inventory_target: None,
         verification: Default::default(),
         architecture: Default::default(),
         policy: Default::default(),

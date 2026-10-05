@@ -13,6 +13,7 @@ mod catalog;
 mod cli;
 mod command_runner;
 mod commands;
+mod compiler_inventory;
 mod config;
 mod contracts;
 mod external;

@@ -92,6 +92,14 @@ fn validate_policy_payload(
         "architecture_rules.json" => each(&payload["violations"], finding),
         "test_quality.json" => each(&payload["findings"], finding),
         "map.json" => each(&payload["graph"]["nodes"], map_node),
+        "compiler_inventory.json" => {
+            ensure!(
+                payload["measurement_confidence"]["complete"]
+                    == header.measurement_confidence.is_complete(),
+                "compiler inventory and envelope confidence disagree"
+            );
+            crate::compiler_inventory::validate_report(payload)
+        }
         "source_expansion.json" => {
             ensure!(
                 !header.measurement_confidence.is_complete(),
@@ -110,8 +118,18 @@ fn validate_policy_payload(
 }
 
 fn type_health_rows(payload: &Value, complete: bool) -> Result<()> {
+    let mut compiler_definitions = std::collections::BTreeSet::new();
     for row in array(payload)? {
         type_health(row)?;
+        if row["source"] == "compiler_type_inventory" {
+            ensure!(
+                compiler_definitions.insert((
+                    row["compiler_context_id"].as_str(),
+                    row["definition_id"].as_str()
+                )),
+                "duplicate compiler type in a compilation context"
+            );
+        }
         ensure!(
             !complete || row["measurement_confidence"]["complete"] == true,
             "complete type-health artifact contains a partial row"
@@ -123,6 +141,23 @@ fn type_health_rows(payload: &Value, complete: bool) -> Result<()> {
 fn type_health(row: &Value) -> Result<()> {
     let confidence: super::MeasurementConfidence =
         serde_json::from_value(row["measurement_confidence"].clone())?;
+    let compiled = row["source"] == "compiler_type_inventory";
+    if compiled {
+        ensure!(
+            row["inventory_model_version"] == 1
+                && row["definition_id"]
+                    .as_str()
+                    .is_some_and(|id| !id.is_empty())
+                && row["compiler_context_id"]
+                    .as_str()
+                    .is_some_and(|id| !id.is_empty())
+                && row["identity_backend"] == "rustc-hir"
+                && row["measurement_confidence"]["confidence_scope"] == "compiler_type_inventory"
+                && row["structural_score_status"] == "not_calibrated_for_compiler_inventory",
+            "invalid compiler-backed type projection"
+        );
+        crate::compiler_inventory::validate_type_projection(row)?;
+    }
     for (field, integer) in [
         ("method_count", true),
         ("impl_block_count", true),
@@ -139,12 +174,12 @@ fn type_health(row: &Value) -> Result<()> {
             value.as_f64().is_some()
         };
         ensure!(
-            if confidence.is_complete() {
+            if confidence.is_complete() && (!compiled || integer) {
                 numeric
             } else {
                 value.is_null()
             },
-            "type-health {field} must be numeric when complete and null when partial"
+            "type-health {field} requires complete counts; compiler inventories have no calibrated structural score"
         );
     }
     for field in [

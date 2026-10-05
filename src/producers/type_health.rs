@@ -12,6 +12,11 @@ use crate::util::round2;
 mod tests;
 
 pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Value> {
+    if let Some(inventory) = &context.compiler_inventory
+        && inventory.has_profiles()
+    {
+        return Ok(inventory.type_rows(context.snapshot.fingerprint["complete"] == true));
+    }
     let confidence = context.type_confidence();
     let metadata = tool_score_metadata("type_health");
     let provenance = provenance();

@@ -303,6 +303,7 @@ pub(crate) struct RunContext {
     pub(crate) correctness_facts: Vec<FileFacts>,
     pub(crate) correctness_paths: Vec<String>,
     pub(crate) identity_resolution: IdentityResolutionSummary,
+    pub(crate) compiler_inventory: Option<crate::compiler_inventory::Inventory>,
 }
 
 impl RunContext {
@@ -312,6 +313,9 @@ impl RunContext {
     }
 
     pub(crate) fn type_confidence(&self) -> serde_json::Value {
+        if let Some(inventory) = &self.compiler_inventory {
+            return inventory.confidence(self.snapshot.fingerprint["complete"] == true);
+        }
         self.type_impl_index().confidence(
             self.source_confidence(),
             self.snapshot.fingerprint["complete"] == true,
@@ -371,6 +375,15 @@ impl RunContext {
         } else {
             helpers::rust_facts_for_files(config, &correctness_files, &targets)?
         };
+        let compiler_requested = tools
+            .iter()
+            .any(|tool| matches!(tool, MeasureTool::CompilerInventory))
+            || (config.compiler_inventory_driver.is_some()
+                && tools
+                    .iter()
+                    .any(|tool| matches!(tool, MeasureTool::TypeHealth)));
+        let compiler_inventory =
+            compiler_requested.then(|| crate::compiler_inventory::Inventory::collect(config));
         Ok(Self {
             snapshot,
             source_files,
@@ -381,6 +394,7 @@ impl RunContext {
             correctness_facts,
             correctness_paths,
             identity_resolution,
+            compiler_inventory,
         })
     }
 }

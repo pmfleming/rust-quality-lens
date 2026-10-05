@@ -3,6 +3,11 @@
 This implements expansion responses and bounded generated-syntax observations toward the required self-analysis scope,
 **not a completed compiler-backed fact pipeline or a T4 pass**.
 
+For authoritative, per-configuration type/impl counts, the separate opt-in
+[compiler inventory backend](compiler-inventory.md) now feeds ordinary type-health.
+It uses analyzed rustc definitions, not these expansion observations. Other
+source/body-level producers still require additional integration.
+
 ```sh
 rqlens measure source-expansion --config rqlens.toml
 rqlens artifact-schema source-expansion
@@ -73,7 +78,11 @@ inventoried by this profile. A zero request count therefore says nothing
 about their absence. `syntax_target` is a syntax inventory label, not verified
 compiler ownership. Backend configuration is not proof of effective cfg values.
 
-## Remaining integration
+## Remaining integration for source/body-level producers
+
+The compiler inventory backend implements configuration, ownership, and attribution
+for its scoped type inventory. The following work still applies to the other
+producers; expansion observations alone do not satisfy it.
 
 1. Integrate effective cfg and target/feature contexts, including test variants
    and build-script cfg; preserve inactive versus unsupported scope explicitly.
@@ -83,7 +92,7 @@ compiler ownership. Backend configuration is not proof of effective cfg values.
 2. Extend bounded syntactic observations to compiler-backed hygiene and origin
    maps; handle recursive and currently declined expansions without treating
    pretty-printed text as an ordinary authored source file.
-3. Resolve impl owners and merge generated/authored facts without double counting,
+3. Extend compiler identities to remaining facts and integrate expanded bodies without double counting,
    changing score meaning, or inventing source locations/safety documentation.
 4. Promote completeness only when all required evidence is covered. Then rerun
    the strict native policy gate, clean CI and the declared platform matrix.

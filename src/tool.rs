@@ -22,6 +22,9 @@ pub(crate) enum MeasureTool {
     /// Opt-in expansion observations; deliberately not part of measure all.
     #[value(name = "source-expansion")]
     SourceExpansion,
+    /// Opt-in compiler-backed declaration and implementation inventory.
+    #[value(name = "compiler-inventory")]
+    CompilerInventory,
     Correctness,
     #[value(name = "correctness-run")]
     CorrectnessRun,
@@ -62,11 +65,15 @@ impl MeasureTool {
         let mut tools = Self::all_tools();
         tools.push(Self::Practices);
         tools.push(Self::SourceExpansion);
+        tools.push(Self::CompilerInventory);
         tools
     }
 
     pub(crate) fn requires_source_facts(&self) -> bool {
-        !matches!(self, Self::All | Self::Practices | Self::SemanticApi)
+        !matches!(
+            self,
+            Self::All | Self::Practices | Self::SemanticApi | Self::CompilerInventory
+        )
     }
 
     pub(crate) fn requires_correctness_facts(&self) -> bool {
@@ -105,6 +112,7 @@ impl MeasureTool {
             Self::ApiHealth => "api_health.json",
             Self::SemanticApi => "semantic_api.json",
             Self::SourceExpansion => "source_expansion.json",
+            Self::CompilerInventory => "compiler_inventory.json",
             Self::Correctness | Self::CorrectnessRun => "correctness_review.json",
             Self::Locality => "locality_metrics.json",
             Self::Leverage => "leverage_metrics.json",
@@ -135,5 +143,17 @@ mod tests {
         assert!(!MeasureTool::Practices.requires_source_facts());
         assert!(!MeasureTool::Hotspots.requires_correctness_facts());
         assert!(!MeasureTool::Coverage.requires_semantic_identity());
+        assert!(!MeasureTool::CompilerInventory.requires_source_facts());
+        assert!(!MeasureTool::CompilerInventory.requires_semantic_identity());
+        assert!(
+            !MeasureTool::all_tools()
+                .iter()
+                .any(|tool| matches!(tool, MeasureTool::CompilerInventory))
+        );
+        assert!(
+            MeasureTool::schema_tools()
+                .iter()
+                .any(|tool| matches!(tool, MeasureTool::CompilerInventory))
+        );
     }
 }

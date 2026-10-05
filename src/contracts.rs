@@ -340,6 +340,30 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
+        MeasureTool::CompilerInventory => object_schema(
+            "compiler_inventory.json",
+            &[
+                "summary",
+                "backend",
+                "inventory_model_version",
+                "profiles",
+                "expected_contexts",
+                "requested_scope",
+                "measurement_confidence",
+            ],
+            json!({
+                "summary": {"type": "object"},
+                "backend": {"const": "rustc-hir"},
+                "inventory_model_version": {"const": 1},
+                "profiles": crate::compiler_inventory::profiles_schema(),
+                "expected_contexts": {"type": "array", "uniqueItems": true, "items": {
+                    "type": "array", "minItems": 3, "maxItems": 3,
+                    "prefixItems": [{"type": "string"}, {"type": "string"}, {"type": "boolean"}]
+                }},
+                "requested_scope": {"type": "object"},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
+        ),
         MeasureTool::SourceExpansion => object_schema(
             "source_expansion.json",
             &[
@@ -415,6 +439,12 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "observed_impl_file_count": {"type": "integer", "minimum": 0},
                 "structural_risk": {"type": ["number", "null"]},
                 "structural_score": {"type": ["number", "null"]},
+                "structural_score_status": {"const": "not_calibrated_for_compiler_inventory"},
+                "definition_id": {"type": "string"},
+                "compiler_context_id": {"type": "string"},
+                "compiler_context": crate::compiler_inventory::context_schema(),
+                "origin": crate::compiler_inventory::origin_schema(),
+                "inventory_model_version": {"const": 1},
                 "measurement_confidence": measurement_confidence_schema(),
                 "signals": {"type": "array", "items": {"type": "string"}},
             }),
