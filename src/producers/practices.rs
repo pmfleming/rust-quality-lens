@@ -13,9 +13,12 @@ mod flakiness;
 mod mutation;
 
 fn behavior_confidence(scope: &str, reasons: &[String]) -> Value {
-    json!({"complete": reasons.is_empty(), "partial": !reasons.is_empty(),
-        "confidence_scope": scope, "required_inputs": ["fresh_structured_execution_results"],
-        "observed_inputs": {}, "missing_input": reasons, "stale_input": [], "unsupported_pattern": []})
+    crate::measurement::evidence_confidence(
+        scope,
+        &["fresh_structured_execution_results"],
+        reasons,
+        &[],
+    )
 }
 
 pub(super) fn produce(config: &LensConfig, context: &crate::facts::RunContext) -> Result<Value> {
@@ -79,7 +82,7 @@ pub(super) fn produce(config: &LensConfig, context: &crate::facts::RunContext) -
             "failed_warnings": failed_warnings,
             "unavailable": unavailable,
             "skipped": skipped,
-            "conformant": failed_errors == 0 && unavailable == 0,
+            "conformant": failed_errors == 0 && unavailable == 0 && incomplete_metrics == 0,
         },
         "checks": checks,
         "measurement_confidence": {

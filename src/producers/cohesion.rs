@@ -1,7 +1,5 @@
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
-use std::process::Command;
 
 use crate::config::LensConfig;
 use crate::facts::RunContext;
@@ -12,20 +10,20 @@ mod structural;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let graph = context.module_graph();
-    let changes = git_changes(config);
-    let total_changes = changes.values().sum::<u64>();
+    let changes = maintenance::churn(config, graph);
+    let total_changes = changes
+        .as_ref()
+        .ok()
+        .map(|changes| changes.values().sum::<u64>());
     let records = context
         .source_facts
         .iter()
         .filter(|fact| fact.source_metrics_available)
         .map(|fact| {
             let path = project_relative_path(&config.project_root, &fact.path);
-            let changed_lines = changes.get(&path).copied().unwrap_or_default();
-            let change_share = if total_changes == 0 {
-                None
-            } else {
-                Some(changed_lines as f64 / total_changes as f64)
-            };
+            let changed_lines = changes.as_ref().ok().map(|changes| changes.get(&path).copied().unwrap_or_default());
+            let change_share = changed_lines.zip(total_changes.filter(|total| *total > 0))
+                .map(|(lines, total)| lines as f64 / total as f64);
             let (outbound, inbound) = graph.dependency_counts(&fact.module_id);
             let dimensions = [
                 fact.source.function_count > 0,
@@ -49,11 +47,11 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
                 "inbound_dependencies": inbound,
                 "changed_lines": changed_lines,
                 "change_share_percent": change_share.map(|share| round2(share * 100.0)),
-                "change_entropy_contribution": change_share.map(entropy_contribution),
+                "change_entropy_contribution": change_share.map(|share| round2(entropy_contribution(share))),
             })
         })
         .collect::<Vec<_>>();
-    let git_available = !changes.is_empty();
+    let git_available = changes.is_ok();
     let maintenance = maintenance::produce(config, graph);
     let structural = structural::produce(config, context);
     let mut confidence: crate::contracts::MeasurementConfidence =
@@ -66,11 +64,26 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
     if structural["measurement_confidence"]["complete"] != true {
         confidence.mark_partial("structural cohesion has unsupported source relationships; see structural.measurement_confidence");
     }
+    let entropy = changes
+        .as_ref()
+        .ok()
+        .zip(total_changes.filter(|total| *total > 0))
+        .map(|(changes, total)| {
+            round2(
+                changes
+                    .values()
+                    .map(|lines| entropy_contribution(*lines as f64 / total as f64))
+                    .sum(),
+            )
+        });
     Ok(json!({
+        "entropy_model_version": 2,
+        "entropy_scope": "unique current measured files; all Git history; renames not followed",
+        "history_error": changes.as_ref().err().map(ToString::to_string),
         "summary": {
             "module_count": records.len(),
             "total_changed_lines": total_changes,
-            "change_entropy": round2(records.iter().filter_map(|record| record["change_entropy_contribution"].as_f64()).sum()),
+            "change_entropy": entropy,
         },
         "records": records,
         "maintenance": maintenance,
@@ -86,7 +99,7 @@ fn cohesion_confidence(context: &RunContext, git_available: bool) -> Result<Valu
     source["observed_inputs"]["git_history"] = json!(git_available);
     let mut confidence: crate::contracts::MeasurementConfidence = serde_json::from_value(source)?;
     if !git_available {
-        confidence.mark_partial("git history unavailable or empty");
+        confidence.mark_partial("git history unavailable or malformed");
     }
     context
         .identity_resolution
@@ -94,36 +107,11 @@ fn cohesion_confidence(context: &RunContext, git_available: bool) -> Result<Valu
     Ok(serde_json::to_value(confidence)?)
 }
 
-fn git_changes(config: &LensConfig) -> BTreeMap<String, u64> {
-    let Ok(output) = crate::command_runner::checked_output(
-        Command::new("git")
-            .args(["log", "--numstat", "--format="])
-            .current_dir(&config.project_root),
-        std::time::Duration::from_secs(config.verification.timeout_seconds),
-    ) else {
-        return BTreeMap::new();
-    };
-    output
-        .stdout
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.splitn(3, '\t');
-            let added = fields.next()?.parse::<u64>().ok()?;
-            let deleted = fields.next()?.parse::<u64>().ok()?;
-            let path = fields.next()?.replace('\\', "/");
-            Some((path, added + deleted))
-        })
-        .fold(BTreeMap::new(), |mut changes, (path, count)| {
-            *changes.entry(path).or_default() += count;
-            changes
-        })
-}
-
 fn entropy_contribution(share: f64) -> f64 {
     if share <= 0.0 {
         0.0
     } else {
-        round2(-share * share.log2())
+        -share * share.log2()
     }
 }
 

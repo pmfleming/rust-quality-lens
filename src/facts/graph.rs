@@ -139,7 +139,9 @@ fn record_dependencies(
 ) {
     let scoped_facts = facts
         .iter()
-        .filter(|candidate| candidate.package_name == fact.package_name)
+        .filter(|candidate| {
+            candidate.package_name == fact.package_name && candidate.target_name == fact.target_name
+        })
         .collect::<Vec<_>>();
     let entry = dependencies.entry(fact.module_id.clone()).or_default();
     let resolved = record_resolved_dependencies(fact, entry, provenance, symbols);
@@ -248,21 +250,23 @@ pub(crate) fn resolve_dependency(
         raw = format!("{source_module}::{stripped}");
     } else if raw.starts_with("super::") {
         relative_base = Some(source_module.to_string());
-        raw = resolve_super_path(raw, source_module);
+        raw = resolve_super_path(raw, source_module)?;
+    } else if let Some(local) = dependency_prefix(&format!("{source_module}::{raw}"), modules, None)
+        .filter(|local| local != source_module)
+    {
+        return Some(local);
     }
     dependency_prefix(&raw, modules, relative_base.as_deref())
 }
 
-fn resolve_super_path(mut raw: String, source_module: &str) -> String {
+fn resolve_super_path(mut raw: String, source_module: &str) -> Option<String> {
     let mut base = source_module.split("::").collect::<Vec<_>>();
-    while raw.starts_with("super::") {
-        base.pop();
-        raw = raw.trim_start_matches("super::").to_string();
+    while let Some(rest) = raw.strip_prefix("super::") {
+        base.pop()?;
+        raw = rest.to_string();
     }
-    base.into_iter()
-        .chain(std::iter::once(raw.as_str()))
-        .collect::<Vec<_>>()
-        .join("::")
+    base.push(&raw);
+    Some(base.join("::"))
 }
 
 fn dependency_prefix(raw: &str, modules: &[String], relative_base: Option<&str>) -> Option<String> {
@@ -307,6 +311,26 @@ mod tests {
         );
         assert_eq!(
             resolve_dependency("super::domain::model", "service::worker", &modules),
+            None
+        );
+        assert_eq!(
+            resolve_dependency("worker::run", "service", &modules),
+            Some("service::worker".into())
+        );
+        assert_eq!(
+            resolve_dependency(
+                "super::super::domain::model::Thing",
+                "service::worker",
+                &modules
+            ),
+            Some("domain::model".into())
+        );
+        assert_eq!(
+            resolve_dependency(
+                "super::super::super::domain::model",
+                "service::worker",
+                &modules
+            ),
             None
         );
         assert!(is_module_path_probe(Some("crate::module::use")));

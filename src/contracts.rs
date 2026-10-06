@@ -209,64 +209,61 @@ fn halstead_schema() -> Value {
 
 fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
     let payload = match tool {
-        MeasureTool::Hotspots => array_schema(
-            "hotspots.json",
+        MeasureTool::Hotspots => hotspot_schema(),
+        tool => other_payload_schema(tool),
+    };
+    envelope_schema(tool, payload)
+}
+
+fn hotspot_schema() -> Value {
+    array_schema(
+        "hotspots.json",
+        "name kind module_key score quality_score score_components measurement_confidence",
+        property_groups(
+            json!({
+                "kind": {"type": "string", "enum": ["module", "function"]},
+                "risk_level": {"type": "string", "enum": ["normal", "watch", "high", "extreme", "unknown"]},
+                "cyclomatic_complexity": {"type": "integer", "minimum": 1},
+                "complexity_metric_model_id": {"type": "string", "const": "rqlens.rust_standard_complexity"},
+                "complexity_metric_model_version": {"type": "integer", "const": 2},
+                "halstead_metric_model_id": {"type": "string", "const": "rqlens.rust_halstead"},
+                "halstead_metric_model_version": {"type": "integer", "const": 1},
+                "halstead_scope": {"type": "string", "enum": ["file", "function_signature_and_body"]},
+                "halstead_status": {"type": "string", "enum": ["measured", "unavailable"]},
+                "halstead": halstead_schema(),
+                "syntax_backend": {"type": "string", "enum": ["tree-sitter-rust", "text"]},
+                "evidence_status": {"type": "string", "enum": ["partial"]},
+                "score_components": {"type": "array", "items": {"type": "object"}},
+                "measurement_confidence": measurement_confidence_schema(),
+            }),
             &[
-                "name",
-                "kind",
-                "module_key",
-                "score",
-                "quality_score",
-                "score_components",
-                "measurement_confidence",
+                (
+                    "name module_key module_id package_name target_name identity_backend parse_status",
+                    json!({"type": "string"}),
+                ),
+                ("score quality_score", json!({"type": ["number", "null"]})),
+                (
+                    "cognitive_complexity syntax_error_count",
+                    json!({"type": "integer", "minimum": 0}),
+                ),
+                (
+                    "cyclomatic_complexity_sum cyclomatic_complexity_max cognitive_complexity_sum cognitive_complexity_max",
+                    json!({"type": ["integer", "null"], "minimum": 0}),
+                ),
+                (
+                    "cyclomatic_complexity_average cognitive_complexity_average halstead_effort",
+                    json!({"type": ["number", "null"], "minimum": 0}),
+                ),
             ],
-            property_groups(
-                json!({
-                    "kind": {"type": "string", "enum": ["module", "function"]},
-                    "risk_level": {"type": "string", "enum": ["normal", "watch", "high", "extreme", "unknown"]},
-                    "cyclomatic_complexity": {"type": "integer", "minimum": 1},
-                    "complexity_metric_model_id": {"type": "string", "const": "rqlens.rust_standard_complexity"},
-                    "complexity_metric_model_version": {"type": "integer", "const": 2},
-                    "halstead_metric_model_id": {"type": "string", "const": "rqlens.rust_halstead"},
-                    "halstead_metric_model_version": {"type": "integer", "const": 1},
-                    "halstead_scope": {"type": "string", "enum": ["file", "function_signature_and_body"]},
-                    "halstead_status": {"type": "string", "enum": ["measured", "unavailable"]},
-                    "halstead": halstead_schema(),
-                    "syntax_backend": {"type": "string", "enum": ["tree-sitter-rust", "text"]},
-                    "evidence_status": {"type": "string", "enum": ["partial"]},
-                    "score_components": {"type": "array", "items": {"type": "object"}},
-                    "measurement_confidence": measurement_confidence_schema(),
-                }),
-                &[
-                    (
-                        "name module_key module_id package_name target_name identity_backend parse_status",
-                        json!({"type": "string"}),
-                    ),
-                    ("score quality_score", json!({"type": ["number", "null"]})),
-                    (
-                        "cognitive_complexity syntax_error_count",
-                        json!({"type": "integer", "minimum": 0}),
-                    ),
-                    (
-                        "cyclomatic_complexity_sum cyclomatic_complexity_max cognitive_complexity_sum cognitive_complexity_max",
-                        json!({"type": ["integer", "null"], "minimum": 0}),
-                    ),
-                    (
-                        "cyclomatic_complexity_average cognitive_complexity_average halstead_effort",
-                        json!({"type": ["number", "null"], "minimum": 0}),
-                    ),
-                ],
-            ),
         ),
+    )
+}
+
+fn other_payload_schema(tool: &MeasureTool) -> Value {
+    match tool {
         MeasureTool::Clones => array_schema(
             "clones.json",
-            &[
-                "engine",
-                "hash",
-                "score",
-                "instances",
-                "measurement_confidence",
-            ],
+            "engine hash score instances measurement_confidence",
             json!({
                 "engine": {"type": "string", "enum": ["token", "ast", "module-responsibility", "test-ast"]},
                 "hash": {"type": "string"},
@@ -280,13 +277,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         ),
         MeasureTool::EscapeHatches => array_schema(
             "rust_escape_hatches.json",
-            &[
-                "module_key",
-                "path",
-                "escape_hatch_score",
-                "total_count",
-                "measurement_confidence",
-            ],
+            "module_key path escape_hatch_score total_count measurement_confidence",
             json!({
                 "module_key": {"type": "string"},
                 "path": {"type": "string"},
@@ -298,7 +289,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         ),
         MeasureTool::Reliability => array_schema(
             "reliability_findings.json",
-            &["rule_id", "category", "severity", "path", "line", "message"],
+            "rule_id category severity path line message",
             property_groups(
                 json!({
                     "category": {"type": "string", "const": "static-finding"},
@@ -317,13 +308,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         MeasureTool::TestQuality => summary_arrays_schema(tool, &["tests", "findings"]),
         MeasureTool::ApiHealth => array_schema(
             "api_health.json",
-            &[
-                "module_key",
-                "path",
-                "public_item_count",
-                "documented_public_item_count",
-                "documentation_percent",
-            ],
+            "module_key path public_item_count documented_public_item_count documentation_percent",
             property_groups(
                 json!({
                     "visibility_scope": {"type": "string", "const": "syntactic_pub"},
@@ -343,15 +328,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         ),
         MeasureTool::CompilerInventory => object_schema(
             "compiler_inventory.json",
-            &[
-                "summary",
-                "backend",
-                "inventory_model_version",
-                "profiles",
-                "expected_contexts",
-                "requested_scope",
-                "measurement_confidence",
-            ],
+            "summary backend inventory_model_version profiles expected_contexts requested_scope measurement_confidence",
             json!({
                 "summary": {"type": "object"},
                 "backend": {"const": "rustc-hir"},
@@ -367,13 +344,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         ),
         MeasureTool::SourceExpansion => object_schema(
             "source_expansion.json",
-            &[
-                "summary",
-                "backend",
-                "scope",
-                "expansions",
-                "measurement_confidence",
-            ],
+            "summary backend scope expansions measurement_confidence",
             json!({
                 "summary": {"type": "object"},
                 "backend": {"const": "rust-analyzer/expandMacro"},
@@ -404,7 +375,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         ),
         MeasureTool::SemanticApi => object_schema(
             "semantic_api.json",
-            &["summary", "items", "measurement_confidence"],
+            "summary items measurement_confidence",
             json!({
                 "summary": {"type": "object"},
                 "items": {"type": "array", "items": {"type": "object"}},
@@ -412,54 +383,10 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
-        MeasureTool::TypeHealth => array_schema(
-            "type_health.json",
-            &[
-                "type_name",
-                "qualified_name",
-                "module_key",
-                "structural_risk",
-                "structural_score",
-                "method_count",
-                "impl_block_count",
-                "impl_file_count",
-                "observed_method_count",
-                "observed_impl_block_count",
-                "observed_impl_file_count",
-                "measurement_confidence",
-            ],
-            property_groups(
-                json!({
-                    "structural_score_status": {"const": "not_calibrated_for_compiler_inventory"},
-                    "compiler_context": crate::compiler_inventory::context_schema(),
-                    "origin": crate::compiler_inventory::origin_schema(),
-                    "inventory_model_version": {"const": 1},
-                    "measurement_confidence": measurement_confidence_schema(),
-                    "signals": {"type": "array", "items": {"type": "string"}},
-                }),
-                &[
-                    (
-                        "type_name qualified_name module_key definition_id compiler_context_id",
-                        json!({"type": "string"}),
-                    ),
-                    (
-                        "method_count impl_block_count impl_file_count",
-                        json!({"type": ["integer", "null"], "minimum": 0}),
-                    ),
-                    (
-                        "observed_method_count observed_impl_block_count observed_impl_file_count",
-                        json!({"type": "integer", "minimum": 0}),
-                    ),
-                    (
-                        "structural_risk structural_score",
-                        json!({"type": ["number", "null"]}),
-                    ),
-                ],
-            ),
-        ),
+        MeasureTool::TypeHealth => type_health_schema(),
         MeasureTool::Correctness | MeasureTool::CorrectnessRun => object_schema(
             "correctness_review.json",
-            &["version", "generated_from", "summary", "tests"],
+            "version generated_from summary tests",
             json!({
                 "version": {"type": "integer"},
                 "generated_from": {"type": "string"},
@@ -472,6 +399,9 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         MeasureTool::Locality | MeasureTool::Leverage => topology_schema(tool),
         MeasureTool::ModuleCohesion => {
             let mut schema = summary_arrays_schema(tool, &["records"]);
+            schema["properties"]["entropy_model_version"] = json!({"const": 2});
+            schema["properties"]["entropy_scope"] = json!({"type": "string"});
+            schema["properties"]["history_error"] = json!({"type": ["string", "null"]});
             schema["properties"]["structural"] = json!({"type": "object", "required": ["model_version", "scope", "records", "measurement_confidence"],
                 "properties": {"model_version": {"const": 1}, "scope": {"type": "string"},
                     "records": {"type": "array", "items": {"type": "object", "required": ["qualified_type_name", "receiver_method_count", "methods", "measurement_confidence"],
@@ -487,7 +417,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         }
         MeasureTool::Map => object_schema(
             "map.json",
-            &["meta", "graph", "modules", "measurement_confidence"],
+            "meta graph modules measurement_confidence",
             json!({
                 "meta": {"type": "object"},
                 "graph": {
@@ -505,7 +435,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         MeasureTool::Coverage => summary_arrays_schema(tool, &["files"]),
         MeasureTool::FunctionRisk => object_schema(
             "function_risk.json",
-            &["summary", "formula", "functions", "measurement_confidence"],
+            "summary formula functions measurement_confidence",
             json!({
                 "summary": {"type": "object"},
                 "formula": {"type": "string"},
@@ -515,13 +445,7 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         ),
         MeasureTool::Practices => object_schema(
             "rust_practices.json",
-            &[
-                "version",
-                "profile",
-                "summary",
-                "checks",
-                "measurement_confidence",
-            ],
+            "version profile summary checks measurement_confidence",
             json!({
                 "version": {"type": "integer"},
                 "profile": {"type": "string"},
@@ -545,9 +469,43 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
-        MeasureTool::All => unreachable!(),
-    };
-    envelope_schema(tool, payload)
+        MeasureTool::Hotspots | MeasureTool::All => unreachable!(),
+    }
+}
+
+fn type_health_schema() -> Value {
+    array_schema(
+        "type_health.json",
+        "type_name qualified_name module_key structural_risk structural_score method_count impl_block_count impl_file_count observed_method_count observed_impl_block_count observed_impl_file_count measurement_confidence",
+        property_groups(
+            json!({
+                "structural_score_status": {"const": "not_calibrated_for_compiler_inventory"},
+                "compiler_context": crate::compiler_inventory::context_schema(),
+                "origin": crate::compiler_inventory::origin_schema(),
+                "inventory_model_version": {"const": 1},
+                "measurement_confidence": measurement_confidence_schema(),
+                "signals": {"type": "array", "items": {"type": "string"}},
+            }),
+            &[
+                (
+                    "type_name qualified_name module_key definition_id compiler_context_id",
+                    json!({"type": "string"}),
+                ),
+                (
+                    "method_count impl_block_count impl_file_count",
+                    json!({"type": ["integer", "null"], "minimum": 0}),
+                ),
+                (
+                    "observed_method_count observed_impl_block_count observed_impl_file_count",
+                    json!({"type": "integer", "minimum": 0}),
+                ),
+                (
+                    "structural_risk structural_score",
+                    json!({"type": ["number", "null"]}),
+                ),
+            ],
+        ),
+    )
 }
 
 fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
@@ -614,7 +572,7 @@ fn summary_arrays_schema(tool: &MeasureTool, arrays: &[&str]) -> Value {
     for name in arrays {
         properties[name] = json!({"type": "array", "items": {"type": "object"}});
     }
-    object_schema(tool.output_file(), &required, properties)
+    object_schema(tool.output_file(), &required.join(" "), properties)
 }
 
 fn topology_schema(tool: &MeasureTool) -> Value {
@@ -635,12 +593,13 @@ fn topology_schema(tool: &MeasureTool) -> Value {
     }
     array_schema(
         tool.output_file(),
-        &["module_key", "path", fields[0], fields[1]],
+        &format!("module_key path {} {}", fields[0], fields[1]),
         properties,
     )
 }
 
-fn array_schema(title: &str, required: &[&str], properties: Value) -> Value {
+fn array_schema(title: &str, required: &str, properties: Value) -> Value {
+    let required: Vec<_> = required.split_whitespace().collect();
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": title,
@@ -654,7 +613,8 @@ fn array_schema(title: &str, required: &[&str], properties: Value) -> Value {
     })
 }
 
-fn object_schema(title: &str, required: &[&str], properties: Value) -> Value {
+fn object_schema(title: &str, required: &str, properties: Value) -> Value {
+    let required: Vec<_> = required.split_whitespace().collect();
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": title,

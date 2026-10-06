@@ -45,10 +45,12 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Value {
 }
 
 fn confidence(reasons: &[String]) -> Value {
-    json!({"complete": reasons.is_empty(), "partial": !reasons.is_empty(),
-        "confidence_scope": "same_file_inherent_method_relationships",
-        "required_inputs": ["parseable_rust_source", "direct_receiver_accesses"],
-        "observed_inputs": {}, "missing_input": [], "stale_input": [], "unsupported_pattern": reasons})
+    crate::measurement::evidence_confidence(
+        "same_file_inherent_method_relationships",
+        &["parseable_rust_source", "direct_receiver_accesses"],
+        &[],
+        reasons,
+    )
 }
 
 #[derive(Default)]
@@ -82,42 +84,16 @@ fn analyze(file: &syn::File) -> (Vec<Value>, Vec<String>) {
     );
     let mut rows = Vec::new();
     for (name, mut group) in groups {
-        if group.methods.is_empty() {
-            continue;
-        }
-        if group.declaration_count != 1 {
-            group
-                .reasons
-                .insert("local struct declaration is missing or ambiguous".into());
-        }
-        let names: BTreeSet<_> = group
-            .methods
-            .iter()
-            .map(|method| method.name.clone())
-            .collect();
-        if names.len() != group.methods.len() {
-            group
-                .reasons
-                .insert("duplicate inherent method names (possibly cfg-dependent)".into());
-        }
-        for method in &group.methods {
-            group.reasons.extend(method.reasons.iter().cloned());
-            if !method.fields.is_subset(&group.fields) {
-                group.reasons.insert("receiver field is not a declared field (possible Deref or unresolved ownership)".into());
-            }
-            if !method.calls.is_subset(&names) {
-                group.reasons.insert(
-                    "receiver call resolves outside the measured inherent-method group".into(),
-                );
-            }
-        }
+        group.validate();
         reasons.extend(
             group
                 .reasons
                 .iter()
                 .map(|reason| format!("{name}: {reason}")),
         );
-        rows.push(group_report(&name, &group));
+        if !group.methods.is_empty() {
+            rows.push(group_report(&name, &group));
+        }
     }
     (rows, reasons)
 }
@@ -176,24 +152,7 @@ fn collect_items(
                 let group = groups
                     .entry(qualified(module, &item.ident.to_string()))
                     .or_default();
-                group.declaration_count += 1;
-                group
-                    .fields
-                    .extend(item.fields.iter().enumerate().map(|(index, field)| {
-                        field
-                            .ident
-                            .as_ref()
-                            .map(ToString::to_string)
-                            .unwrap_or_else(|| index.to_string())
-                    }));
-                if conditional_parent
-                    || conditional(&item.attrs)
-                    || item.fields.iter().any(|field| conditional(&field.attrs))
-                {
-                    group.reasons.insert(
-                        "cfg-dependent declaration inventory is not compiler-selected".into(),
-                    );
-                }
+                group.add_struct(item, conditional_parent);
             }
             syn::Item::Impl(item) => {
                 let Some(name) = type_name(&item.self_ty) else {
@@ -201,43 +160,104 @@ fn collect_items(
                     continue;
                 };
                 let group = groups.entry(qualified(module, &name)).or_default();
-                for method in &item.items {
-                    let syn::ImplItem::Fn(method) = method else {
-                        if matches!(method, syn::ImplItem::Macro(_)) {
-                            group
-                                .reasons
-                                .insert("unexpanded impl macro may contain methods".into());
-                        }
-                        continue;
-                    };
-                    if item.trait_.is_some() {
-                        group.excluded_trait_methods += 1;
-                        continue;
-                    }
-                    if method.sig.receiver().is_none() {
-                        group.excluded_static_methods += 1;
-                        continue;
-                    }
-                    let mut observation = Method {
-                        name: method.sig.ident.to_string(),
-                        line: method.sig.ident.span().start().line,
-                        ..Default::default()
-                    };
-                    if conditional_parent || conditional(&item.attrs) || conditional(&method.attrs)
-                    {
-                        observation
-                            .reasons
-                            .insert("cfg-dependent methods are not compiler-selected".into());
-                    }
-                    observation.visit_block(&method.block);
-                    group.methods.push(observation);
-                }
+                group.add_impl(item, conditional_parent || conditional(&item.attrs));
             }
             syn::Item::Macro(item) if item.ident.is_none() => {
                 reasons.push("unexpanded item macro may contain declarations or impls".into());
             }
             _ => {}
         }
+    }
+}
+
+impl Group {
+    fn validate(&mut self) {
+        if self.methods.is_empty() {
+            return;
+        }
+        if self.declaration_count != 1 {
+            self.reasons
+                .insert("local struct declaration is missing or ambiguous".into());
+        }
+        let names: BTreeSet<_> = self
+            .methods
+            .iter()
+            .map(|method| method.name.as_str())
+            .collect();
+        if names.len() != self.methods.len() {
+            self.reasons
+                .insert("duplicate inherent method names (possibly cfg-dependent)".into());
+        }
+        for method in &self.methods {
+            self.reasons.extend(method.reasons.iter().cloned());
+            if !method.fields.is_subset(&self.fields) {
+                self.reasons.insert("receiver field is not a declared field (possible Deref or unresolved ownership)".into());
+            }
+            if !method
+                .calls
+                .iter()
+                .all(|call| names.contains(call.as_str()))
+            {
+                self.reasons.insert(
+                    "receiver call resolves outside the measured inherent-method group".into(),
+                );
+            }
+        }
+    }
+
+    fn add_struct(&mut self, item: &syn::ItemStruct, conditional_parent: bool) {
+        self.declaration_count += 1;
+        self.fields
+            .extend(item.fields.iter().enumerate().map(|(index, field)| {
+                field
+                    .ident
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| index.to_string())
+            }));
+        if conditional_parent
+            || conditional(&item.attrs)
+            || item.fields.iter().any(|field| conditional(&field.attrs))
+        {
+            self.reasons
+                .insert("cfg-dependent declaration inventory is not compiler-selected".into());
+        }
+    }
+
+    fn add_impl(&mut self, item: &syn::ItemImpl, conditional_parent: bool) {
+        for member in &item.items {
+            match member {
+                syn::ImplItem::Fn(_) if item.trait_.is_some() => self.excluded_trait_methods += 1,
+                syn::ImplItem::Fn(method) if method.sig.receiver().is_none() => {
+                    self.excluded_static_methods += 1
+                }
+                syn::ImplItem::Fn(method) => self
+                    .methods
+                    .push(Method::collect(method, conditional_parent)),
+                syn::ImplItem::Macro(_) => {
+                    self.reasons
+                        .insert("unexpanded impl macro may contain methods".into());
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+impl Method {
+    fn collect(method: &syn::ImplItemFn, conditional_parent: bool) -> Self {
+        let mut observation = Self {
+            name: method.sig.ident.to_string(),
+            line: method.sig.ident.span().start().line,
+            ..Default::default()
+        };
+        if conditional_parent || conditional(&method.attrs) {
+            observation
+                .reasons
+                .insert("cfg-dependent methods are not compiler-selected".into());
+        }
+        observation.visit_block(&method.block);
+        observation
     }
 }
 
@@ -364,7 +384,8 @@ fn components(adjacency: &[BTreeSet<usize>]) -> Vec<Vec<usize>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::analyze;
+    use serde_json::Value;
     fn rows(source: &str) -> anyhow::Result<Vec<Value>> {
         Ok(analyze(&syn::parse_file(source)?).0)
     }
@@ -391,6 +412,12 @@ mod tests {
     }
     #[test]
     fn incomplete_and_stateless_cohorts_abstain_from_ratios() -> anyhow::Result<()> {
+        let (records, limitations) = analyze(&syn::parse_file("struct S; impl S { methods!(); }")?);
+        assert!(records.is_empty());
+        assert!(
+            !limitations.is_empty(),
+            "macro-only impls must not certify a complete empty result"
+        );
         for body in [
             "let alias = self; alias.x",
             "unknown!(self.x)",

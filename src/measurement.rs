@@ -9,7 +9,9 @@ mod scoring;
 mod snapshot;
 pub(crate) use snapshot::InputSnapshot;
 
-pub(crate) use confidence::{source_confidence_from_inventory, source_scan_confidence_with_errors};
+pub(crate) use confidence::{
+    evidence_confidence, source_confidence_from_inventory, source_scan_confidence_with_errors,
+};
 pub(crate) use paths::{
     classify_module, classify_path, module_for_path, test_kind_for_path, title_from_name,
 };

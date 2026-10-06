@@ -37,7 +37,9 @@ prediction or proof that consistently passing tests are non-flaky.
 Executables run in their package directory with `CARGO_MANIFEST_DIR` set. This is
 native libtest execution, not a replacement for Cargo's normal test gate: custom
 Cargo runners, custom harnesses and doctests are not covered. Unsupported listings,
-crashes, missing results and truncated output are explicit incomplete evidence.
+crashes, missing results and truncated output are explicit incomplete evidence,
+including each affected test's `complete` flag. Incomplete enabled behavioral
+metrics prevent practices conformity even when a command exits successfully.
 Stable libtest has no per-test durations; these remain null, not suite-time estimates.
 
 ## Temporal coupling and ownership concentration
@@ -79,6 +81,17 @@ No observations means empty rows and null amplification statistics, not zero ris
 Shallow, missing or malformed Git history is partial. Source/graph limitations are
 also retained in the parent artifact. These metrics are not developer productivity
 scores, a definitive bus factor or calibrated defect predictions.
+
+### Change entropy (model 2)
+
+The legacy `data.summary.change_entropy` is independent of the bounded
+maintenance windows. Its denominator is now churn in **unique current measured
+files**, not repository-wide churn including files absent from the report.
+`data.entropy_model_version = 2` identifies this correction. Contributions are
+summed before rounding; renames are not followed. Zero total churn leaves shares
+and entropy null. Unavailable/malformed Git output leaves churn and entropy null,
+sets `data.history_error`, and makes confidence partial. NUL-delimited paths
+preserve tabs/newlines in filenames. Do not compare model-1 and model-2 values.
 
 ## Structural cohesion
 
@@ -208,7 +221,9 @@ non-Rust workload inputs and prebuilt executables in `fingerprint_inputs` when t
 contents affect a result. Build profile feature scope comes from `[verification]`;
 command profiles run exactly the argv provided and can include build overhead.
 
-Every observation has elapsed milliseconds. Opt-in peak RSS uses the GNU `time`
+Only successful, fully captured observations supply workload metrics. Failed,
+interrupted or truncated execution leaves resource budgets unknown rather than
+healthy; the command still retains its diagnostic elapsed time. Opt-in peak RSS uses the GNU `time`
 executable on Linux; `%M` is converted from KiB to bytes. It is the reported maximum
 for the command/children, **not** the sum of simultaneous process-tree RSS, retained
 heap or a leak measurement. Unsupported platforms or missing GNU time remain

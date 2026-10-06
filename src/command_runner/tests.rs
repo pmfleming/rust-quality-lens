@@ -10,6 +10,7 @@ fn command_availability_and_success_are_explicit() {
     assert_eq!(outcome.exit_code, Some(0));
     assert!(outcome.stdout.starts_with("cargo "));
     assert!(!outcome.stdout_truncated);
+    assert!(outcome.completed());
     let outcome = run(CommandRequest::new(
         "rqlens-command-that-does-not-exist",
         &[],
@@ -17,6 +18,9 @@ fn command_availability_and_success_are_explicit() {
     ));
     assert_eq!(outcome.status, CommandStatus::Unavailable);
     assert!(outcome.reason.is_some());
+    assert!(!outcome.completed());
+    assert!(super::cargo_artifacts("not JSON").is_err());
+    assert!(super::cargo_artifacts(r#"{"reason":"compiler-artifact","package_id":3}"#).is_err());
 }
 
 #[cfg(unix)]
@@ -69,6 +73,7 @@ fn noisy_commands_fail_with_bounded_output() {
     );
     assert_eq!(outcome.status, CommandStatus::Failed);
     assert!(outcome.stdout_truncated);
+    assert!(!outcome.completed());
     assert!(outcome.stdout.len() <= 4096);
     assert!(
         outcome

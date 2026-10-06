@@ -600,6 +600,11 @@ fn structural_cohesion_is_published_with_explicit_scope() {
         config.to_str().unwrap(),
     ]);
     let report = read_json(root.path().join("target/analysis/module_cohesion.json"));
+    assert_eq!(report["entropy_model_version"], 2);
+    assert!(report["summary"]["total_changed_lines"].is_null());
+    assert!(report["summary"]["change_entropy"].is_null());
+    assert!(report["records"][0]["changed_lines"].is_null());
+    assert!(report["history_error"].is_string());
     assert_eq!(report["structural"]["model_version"], 1);
     let row = &report["structural"]["records"][0];
     assert_eq!(row["field_sharing_percent"], 0.0);

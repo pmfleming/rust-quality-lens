@@ -207,7 +207,8 @@ pub(crate) fn schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::ProfileConfig;
+    use anyhow::Result;
     #[test]
     fn profiles_reject_ambiguous_scope_and_impossible_budgets() -> Result<()> {
         let valid = "[[compatibility]]\nid='minimal'\nno_default_features=true\n[[resources]]\nid='build'\nkind='build'\nrelease=true\n";

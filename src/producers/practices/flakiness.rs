@@ -1,6 +1,8 @@
 //! Repeated libtest runs attributed by Cargo package, target and qualified test name.
 use crate::{
-    command_runner::{CommandOutcome, CommandRequest, CommandStatus, run},
+    command_runner::{
+        CommandOutcome, CommandRequest, CommandStatus, cargo_artifacts, observed_result, run,
+    },
     config::LensConfig,
     util::round2,
 };
@@ -24,87 +26,81 @@ pub(super) fn check(config: &LensConfig) -> Value {
     args.extend(["--no-run".into(), "--message-format=json".into()]);
     let build = execute(config, "cargo", &args);
     let mut reasons = Vec::new();
-    let targets = if build.status == CommandStatus::Passed {
-        match executables(&build.stdout) {
-            Ok(targets) => targets,
-            Err(error) => {
-                reasons.push(error.to_string());
-                Vec::new()
-            }
-        }
-    } else {
-        reasons.push("test executable discovery failed".into());
-        Vec::new()
-    };
+    let discovery = (|| {
+        ensure!(
+            build.status == CommandStatus::Passed && build.completed(),
+            "test executable discovery failed"
+        );
+        executables(&build.stdout)
+    })();
+    let targets = observed_result(discovery, &mut reasons).unwrap_or_default();
     let mut evidence = vec![json!({"phase": "build", "command": build})];
     let mut tests = Vec::new();
-    let mut any_failed = false;
-    let mut any_timeout = false;
     for target in targets {
-        let list = execute_target(
-            config,
-            &target,
-            &["--list".into(), "--format=pretty".into()],
-        );
-        let inventory = if list.status == CommandStatus::Passed {
-            parse_inventory(&list.stdout)
-        } else {
-            Err(anyhow::anyhow!(
-                "test listing did not complete successfully"
-            ))
-        };
-        let inventory = match inventory {
-            Ok(inventory) => inventory,
-            Err(error) => {
-                reasons.push(format!("{}: {error}", target.id));
-                evidence.push(json!({"target": target.id, "phase": "list", "command": list}));
-                continue;
-            }
-        };
-        evidence.push(json!({"target": target.id, "phase": "list", "command": list}));
-        let mut counts: BTreeMap<String, Counts> = inventory
-            .into_iter()
-            .map(|name| (name, Counts::default()))
-            .collect();
-        for iteration in 0..runs {
-            let outcome = execute_target(config, &target, &["--format=pretty".into()]);
-            any_failed |= outcome.status == CommandStatus::Failed;
-            any_timeout |= outcome.status == CommandStatus::TimedOut;
-            let statuses = parse_results(&outcome.stdout);
-            let complete = record_run(&mut counts, &statuses);
-            if !complete || outcome.reason.is_some() || !matches!(outcome.exit_code, Some(0 | 101))
-            {
-                reasons.push(format!(
-                    "{} run {}: incomplete libtest results or abnormal execution",
-                    target.id,
-                    iteration + 1
-                ));
-            }
-            evidence.push(json!({"target": target.id, "phase": "run", "iteration": iteration + 1, "command": outcome}));
-        }
-        tests.extend(
-            counts
-                .into_iter()
-                .map(|(name, counts)| counts.row(&target.id, &name, runs)),
-        );
+        let result = repeat_target(config, &target, &mut evidence, &mut reasons);
+        tests.extend(observed_result(result, &mut reasons).into_iter().flatten());
     }
-    let status = if build.status != CommandStatus::Passed {
-        build.status
-    } else if any_timeout {
-        CommandStatus::TimedOut
-    } else if any_failed {
-        CommandStatus::Failed
-    } else if !reasons.is_empty() {
-        CommandStatus::Unavailable
-    } else {
+    let status = [
+        CommandStatus::TimedOut,
+        CommandStatus::Failed,
+        CommandStatus::Unavailable,
+    ]
+    .into_iter()
+    .find(|status| {
+        evidence
+            .iter()
+            .any(|row| row["command"]["status"] == json!(status))
+    })
+    .unwrap_or(if reasons.is_empty() {
         CommandStatus::Passed
-    };
+    } else {
+        CommandStatus::Unavailable
+    });
     json!({"rule_id": rule, "title": "Repeated test runs are stable", "category": "verified-gate",
         "severity": "error", "status": status, "source": source, "tool": "cargo",
         "tool_version": super::cargo_version(), "evidence": {"requested_runs": runs, "commands": evidence},
         "metrics": {"model_version": 1, "scope": "Cargo-discovered libtest executables; doctests excluded",
             "summary": {"test_count": tests.len(), "flaky_test_count": tests.iter().filter(|test| test["flaky"] == true).count()},
             "tests": tests, "measurement_confidence": super::behavior_confidence("per_test_repeated_execution", &reasons)}})
+}
+
+fn repeat_target(
+    config: &LensConfig,
+    target: &Target,
+    evidence: &mut Vec<Value>,
+    reasons: &mut Vec<String>,
+) -> Result<Vec<Value>> {
+    let list = execute_target(config, target, &["--list".into(), "--format=pretty".into()]);
+    evidence.push(json!({"target": target.id, "phase": "list", "command": list}));
+    ensure!(
+        list.status == CommandStatus::Passed && list.completed(),
+        "{}: test listing failed",
+        target.id
+    );
+    let mut counts: BTreeMap<_, _> = parse_inventory(&list.stdout)?
+        .into_iter()
+        .map(|name| (name, Counts::default()))
+        .collect();
+    let mut execution_complete = true;
+    let runs = config.verification.flaky_test_runs;
+    for iteration in 1..=runs {
+        let outcome = execute_target(config, target, &["--format=pretty".into()]);
+        let complete = record_run(&mut counts, &parse_results(&outcome.stdout))
+            && outcome.completed()
+            && matches!(outcome.exit_code, Some(0 | 101));
+        execution_complete &= complete;
+        if !complete {
+            reasons.push(format!(
+                "{} run {iteration}: incomplete libtest results or abnormal execution",
+                target.id
+            ));
+        }
+        evidence.push(json!({"target": target.id, "phase": "run", "iteration": iteration, "command": outcome}));
+    }
+    Ok(counts
+        .into_iter()
+        .map(|(name, counts)| counts.row(&target.id, &name, runs, execution_complete))
+        .collect())
 }
 
 fn execute(config: &LensConfig, program: &str, args: &[String]) -> CommandOutcome {
@@ -131,37 +127,30 @@ struct Target {
 
 fn executables(stdout: &str) -> Result<Vec<Target>> {
     let mut targets = BTreeMap::new();
-    for line in stdout.lines() {
-        let message: Value =
-            serde_json::from_str(line).context("invalid Cargo JSON during test discovery")?;
-        if message["reason"] != "compiler-artifact" || message["profile"]["test"] != true {
-            continue;
-        }
-        let Some(executable) = message["executable"].as_str() else {
+    for artifact in cargo_artifacts(stdout)?
+        .into_iter()
+        .filter(|artifact| artifact.profile.test)
+    {
+        let Some(executable) = artifact.executable else {
             continue;
         };
-        let package = message["package_id"]
-            .as_str()
-            .context("test artifact lacks package identity")?;
-        let name = message["target"]["name"]
-            .as_str()
-            .context("test artifact lacks target name")?;
-        let kind = &message["target"]["kind"];
-        ensure!(kind.is_array(), "test artifact lacks target kind");
-        let id = format!("{package}::{kind}::{name}");
+        let id = format!(
+            "{}::{}::{}",
+            artifact.package_id,
+            json!(artifact.target.kind),
+            artifact.target.name
+        );
         targets.insert(
             id.clone(),
             Target {
                 id,
-                executable: executable.to_string(),
-                directory: std::path::Path::new(
-                    message["manifest_path"]
-                        .as_str()
-                        .context("test artifact lacks manifest path")?,
-                )
-                .parent()
-                .context("invalid test manifest path")?
-                .to_path_buf(),
+                executable: executable.to_string_lossy().into_owned(),
+                directory: artifact
+                    .manifest_path
+                    .context("test artifact lacks manifest path")?
+                    .parent()
+                    .context("invalid test manifest path")?
+                    .to_path_buf(),
             },
         );
     }
@@ -254,20 +243,23 @@ fn record_run(
 }
 
 impl Counts {
-    fn row(&self, target: &str, name: &str, requested: usize) -> Value {
+    fn row(&self, target: &str, name: &str, requested: usize, execution_complete: bool) -> Value {
         let executed = self.passed + self.failed;
         json!({"target_id": target, "qualified_name": name, "requested_runs": requested,
             "passed_runs": self.passed, "failed_runs": self.failed, "ignored_runs": self.ignored,
             "missing_runs": self.missing, "executed_runs": executed,
             "observed_failure_rate_percent": (executed > 0).then(|| round2(100.0 * self.failed as f64 / executed as f64)),
-            "flaky": self.passed > 0 && self.failed > 0, "complete": self.missing == 0,
+            "flaky": self.passed > 0 && self.failed > 0, "complete": self.missing == 0 && execution_complete,
             "duration_seconds": null, "duration_status": "unavailable in stable libtest output"})
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Counts, check, executables, parse_inventory, parse_results, record_run};
+    use crate::config::LensConfig;
+    use anyhow::Result;
+    use serde_json::json;
     #[test]
     fn repeated_results_preserve_missing_and_ignored_observations() -> Result<()> {
         let names = parse_inventory("same: test\nignored: test\n\n2 tests, 0 benchmarks\n")?;
@@ -287,12 +279,16 @@ mod tests {
             &mut counts,
             &parse_results("test ignored ... ignored\n")
         ));
-        let row = counts["same"].row("package::target", "same", 3);
+        let row = counts["same"].row("package::target", "same", 3, true);
         assert_eq!(row["observed_failure_rate_percent"], 50.0);
         assert_eq!(row["missing_runs"], 1);
         assert_eq!(row["flaky"], true);
+        assert_eq!(
+            counts["ignored"].row("target", "ignored", 3, false)["complete"],
+            false
+        );
         assert!(
-            counts["ignored"].row("target", "ignored", 3)["observed_failure_rate_percent"]
+            counts["ignored"].row("target", "ignored", 3, true)["observed_failure_rate_percent"]
                 .is_null()
         );
         assert!(parse_inventory("custom harness output").is_err());

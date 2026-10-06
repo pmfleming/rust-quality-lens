@@ -2,6 +2,18 @@ use serde_json::{Value, json};
 
 use crate::facts::FileFacts;
 
+pub(crate) fn evidence_confidence(
+    scope: &str,
+    required: &[&str],
+    missing: &[String],
+    unsupported: &[String],
+) -> Value {
+    let complete = missing.is_empty() && unsupported.is_empty();
+    json!({"complete": complete, "partial": !complete, "confidence_scope": scope,
+        "required_inputs": required, "observed_inputs": {}, "missing_input": missing,
+        "stale_input": [], "unsupported_pattern": unsupported})
+}
+
 pub(crate) fn source_scan_confidence_with_errors(
     files: &[std::path::PathBuf],
     read_errors: Vec<String>,

@@ -76,13 +76,7 @@ fn execute(
     );
     let missing_target = outcome.stderr.contains("rustup target add")
         || outcome.stdout.contains("target may not be installed");
-    let complete = !missing_target
-        && matches!(
-            outcome.status,
-            CommandStatus::Passed | CommandStatus::Failed
-        )
-        && outcome.reason.is_none()
-        && outcome.exit_code.is_some();
+    let complete = !missing_target && outcome.completed();
     let reasons = if complete {
         Vec::new()
     } else {
@@ -176,7 +170,9 @@ fn invoke(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{arguments, selected_toolchain};
+    use crate::{config::LensConfig, profiles::config::CompatibilityProfile};
+    use anyhow::Result;
     #[test]
     fn explicit_features_override_global_scope_and_msrv_is_resolved() -> Result<()> {
         let mut config = LensConfig::test_config("profile", std::path::Path::new("/project"));

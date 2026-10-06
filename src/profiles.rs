@@ -123,9 +123,12 @@ fn compatibility_summary(rows: &[Value]) -> Value {
 }
 
 fn confidence(scope: &str, reasons: &[String]) -> Value {
-    json!({"complete": reasons.is_empty(), "partial": !reasons.is_empty(), "confidence_scope": scope,
-        "required_inputs": ["declared_profile", "fresh_execution"], "observed_inputs": {},
-        "missing_input": reasons, "stale_input": [], "unsupported_pattern": []})
+    crate::measurement::evidence_confidence(
+        scope,
+        &["declared_profile", "fresh_execution"],
+        reasons,
+        &[],
+    )
 }
 
 pub(crate) fn schema() -> Value {
@@ -145,7 +148,8 @@ pub(crate) fn schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::compatibility_summary;
+    use serde_json::json;
     #[test]
     fn skipped_profiles_remain_in_the_declared_denominator() {
         let rows = vec![

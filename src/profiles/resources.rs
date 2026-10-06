@@ -3,7 +3,9 @@ use super::{
     config::{ResourceKind, ResourceProfile},
 };
 use crate::{
-    command_runner::{CommandOutcome, CommandRequest, CommandStatus, run},
+    command_runner::{
+        CommandOutcome, CommandRequest, CommandStatus, cargo_artifacts, observed_result, run,
+    },
     config::LensConfig,
 };
 use anyhow::{Context, Result, ensure};
@@ -29,92 +31,62 @@ fn execute(config: &LensConfig, profile: &ResourceProfile) -> Result<Value> {
     let directory = tempfile::tempdir()?;
     let target = directory.path().join("target");
     let mut reasons = Vec::new();
-    let profiler = if profile.peak_rss {
-        profiler(config)
-            .map_err(|error| reasons.push(error.to_string()))
-            .ok()
-    } else {
-        None
-    };
-    let phases = if profile.kind == ResourceKind::Build {
-        vec!["cold-build", "warm-noop-build"]
-    } else {
-        vec!["workload"; profile.runs]
+    let profiler = profile
+        .peak_rss
+        .then(|| observed_result(profiler(config), &mut reasons))
+        .flatten();
+    let phases = match profile.kind {
+        ResourceKind::Build => vec!["cold-build", "warm-noop-build"],
+        ResourceKind::Command => vec!["workload"; profile.runs],
     };
     let mut observations = Vec::new();
-    let mut failed = false;
     for (iteration, phase) in phases.iter().enumerate() {
-        let report_path = directory
+        let report = directory
             .path()
             .join(format!("instrumentation-{iteration}.json"));
-        let time_path = directory.path().join(format!("time-{iteration}.txt"));
-        let command = command(config, profile);
+        let timing = directory.path().join(format!("time-{iteration}.txt"));
         let outcome = invoke(
             config,
-            &command,
+            &command(config, profile),
             profiler.as_deref(),
-            &time_path,
-            &report_path,
+            &timing,
+            &report,
             (profile.kind == ResourceKind::Build).then_some(target.as_path()),
         );
-        failed |= outcome.status == CommandStatus::Failed;
         let mut metrics = BTreeMap::new();
-        metrics.insert(
-            "elapsed_ms".to_string(),
-            u64::try_from(outcome.duration_ms).unwrap_or(u64::MAX),
-        );
-        let normal = matches!(
-            outcome.status,
-            CommandStatus::Passed | CommandStatus::Failed
-        ) && outcome.reason.is_none();
-        if !normal {
+        if outcome.status == CommandStatus::Passed && outcome.completed() {
+            metrics.insert("elapsed_ms".into(), u64::try_from(outcome.duration_ms)?);
+            if profiler.is_some() {
+                metrics.extend(
+                    observed_result(
+                        fs::read_to_string(&timing)
+                            .context("fresh GNU time output missing")
+                            .and_then(|text| parse_peak_rss(&text)),
+                        &mut reasons,
+                    )
+                    .map(|rss| ("peak_rss_bytes".into(), rss)),
+                );
+            }
+            metrics.extend(
+                observed_result(read_instrumentation(&report, profile), &mut reasons)
+                    .into_iter()
+                    .flatten(),
+            );
+        } else {
             reasons.push(format!(
-                "{phase} iteration {} did not complete normally",
+                "{phase} iteration {} did not complete successfully",
                 iteration + 1
             ));
         }
-        if profiler.is_some() {
-            match fs::read_to_string(&time_path)
-                .context("fresh GNU time output missing")
-                .and_then(|text| parse_peak_rss(&text))
-            {
-                Ok(rss) => {
-                    metrics.insert("peak_rss_bytes".into(), rss);
-                }
-                Err(error) => reasons.push(error.to_string()),
-            }
-        }
-        if !profile.instrumented_metrics.is_empty() {
-            match fs::read(&report_path)
-                .context("fresh instrumentation report missing")
-                .and_then(|bytes| Ok(serde_json::from_slice::<Value>(&bytes)?))
-                .and_then(|value| instrumented(&value, &profile.instrumented_metrics))
-            {
-                Ok(values) => metrics.extend(values),
-                Err(error) => reasons.push(error.to_string()),
-            }
-        }
-        let artifacts =
-            if profile.kind == ResourceKind::Build && outcome.status == CommandStatus::Passed {
-                match artifacts(config, &outcome.stdout, &target) {
-                    Ok(artifacts) => {
-                        let total: u64 = artifacts
-                            .iter()
-                            .filter_map(|row| row["bytes"].as_u64())
-                            .sum();
-                        metrics.insert("artifact_bytes".into(), total);
-                        artifacts
-                    }
-                    Err(error) => {
-                        reasons.push(error.to_string());
-                        Vec::new()
-                    }
-                }
-            } else {
-                Vec::new()
-            };
+        let artifacts = build_artifacts(
+            config,
+            profile,
+            &outcome,
+            &target,
+            &mut metrics,
+            &mut reasons,
+        );
         let budgets = budget_results(&metrics, &profile.budgets);
-        failed |= budgets.iter().any(|row| row["status"] == "breached");
         if budgets.iter().any(|row| row["status"] == "unknown") {
             reasons.push("a budget has no measurement".into());
         }
@@ -122,26 +94,61 @@ fn execute(config: &LensConfig, profile: &ResourceProfile) -> Result<Value> {
             json!({"phase": phase, "iteration": iteration + 1, "metrics": metrics,
             "command": outcome, "artifacts": artifacts, "budgets": budgets}),
         );
-        // A failed cold build cannot provide a comparable warm build.
         if profile.kind == ResourceKind::Build && outcome.status != CommandStatus::Passed {
-            reasons.push(
-                "successful artifact sizes and the cold/warm build pair are unavailable".into(),
-            );
             break;
         }
     }
-    let status = if failed {
-        "failed"
-    } else if !reasons.is_empty() {
-        "unavailable"
-    } else {
-        "passed"
+    let failed = observations.iter().any(|row| {
+        row["command"]["status"] == "failed"
+            || row["budgets"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|budget| budget["status"] == "breached")
+    });
+    let status = match (failed, reasons.is_empty()) {
+        (true, _) => "failed",
+        (_, false) => "unavailable",
+        _ => "passed",
     };
     Ok(
         json!({"id": profile.id, "profile": profile, "status": status, "observations": observations,
         "profiler": profiler, "scope": "configured commands on this runner; no cross-machine normalization",
         "measurement_confidence": confidence("resource_profile", &reasons)}),
     )
+}
+
+fn read_instrumentation(path: &Path, profile: &ResourceProfile) -> Result<BTreeMap<String, u64>> {
+    if profile.instrumented_metrics.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let value =
+        serde_json::from_slice(&fs::read(path).context("fresh instrumentation report missing")?)?;
+    instrumented(&value, &profile.instrumented_metrics)
+}
+
+fn build_artifacts(
+    config: &LensConfig,
+    profile: &ResourceProfile,
+    outcome: &CommandOutcome,
+    target: &Path,
+    metrics: &mut BTreeMap<String, u64>,
+    reasons: &mut Vec<String>,
+) -> Vec<Value> {
+    if profile.kind != ResourceKind::Build
+        || outcome.status != CommandStatus::Passed
+        || !outcome.completed()
+    {
+        return Vec::new();
+    }
+    let records = observed_result(artifacts(config, &outcome.stdout, target), reasons);
+    if let Some(records) = &records {
+        metrics.insert(
+            "artifact_bytes".into(),
+            records.iter().filter_map(|row| row["bytes"].as_u64()).sum(),
+        );
+    }
+    records.unwrap_or_default()
 }
 
 fn command(config: &LensConfig, profile: &ResourceProfile) -> Vec<String> {
@@ -278,25 +285,15 @@ fn artifacts(config: &LensConfig, stdout: &str, target: &Path) -> Result<Vec<Val
     let mut paths = BTreeSet::new();
     let mut records = Vec::new();
     let canonical_target = target.canonicalize()?;
-    for line in stdout.lines() {
-        let message: Value = serde_json::from_str(line).context("invalid Cargo artifact JSON")?;
-        if message["reason"] != "compiler-artifact"
-            || !message["package_id"]
-                .as_str()
-                .is_some_and(|id| members.contains(id))
-            || message["target"]["kind"]
-                .as_array()
-                .is_some_and(|kinds| kinds.iter().any(|kind| kind == "custom-build"))
-        {
-            continue;
-        }
-        for path in message["filenames"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-        {
-            let path = Path::new(path);
+    for artifact in cargo_artifacts(stdout)?.into_iter().filter(|artifact| {
+        members.contains(artifact.package_id.as_str())
+            && !artifact
+                .target
+                .kind
+                .iter()
+                .any(|kind| kind == "custom-build")
+    }) {
+        for path in &artifact.filenames {
             if path
                 .extension()
                 .is_some_and(|ext| matches!(ext.to_str(), Some("rmeta" | "d" | "pdb")))
@@ -312,7 +309,7 @@ fn artifacts(config: &LensConfig, stdout: &str, target: &Path) -> Result<Vec<Val
             if !paths.insert(canonical.clone()) {
                 continue;
             }
-            records.push(json!({"package_id": message["package_id"], "target": message["target"]["name"], "kind": message["target"]["kind"],
+            records.push(json!({"package_id": artifact.package_id, "target": artifact.target.name, "kind": artifact.target.kind,
                 "path": canonical.strip_prefix(&canonical_target)?.to_string_lossy(), "bytes": fs::metadata(&canonical)?.len()}));
         }
     }
@@ -326,7 +323,12 @@ fn artifacts(config: &LensConfig, stdout: &str, target: &Path) -> Result<Vec<Val
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{budget_results, instrumented, measure, parse_peak_rss};
+    use crate::config::LensConfig;
+    use crate::profiles::config::ResourceProfile;
+    use anyhow::Result;
+    use serde_json::json;
+    use std::collections::BTreeMap;
     #[test]
     fn rss_instrumentation_and_budgets_are_strict() -> Result<()> {
         assert_eq!(
@@ -368,6 +370,13 @@ mod tests {
         assert_eq!(row["observations"].as_array().map(Vec::len), Some(2));
         assert_eq!(row["measurement_confidence"]["complete"], false);
         assert!(row["observations"][0]["metrics"]["allocations"].is_null());
+        let mut profile = profile;
+        profile.command = vec!["cargo".into(), "rqlens-missing-subcommand".into()];
+        profile.instrumented_metrics.clear();
+        profile.budgets.insert("elapsed_ms".into(), u64::MAX);
+        let failed = measure(&config, &profile);
+        assert_eq!(failed["observations"][0]["budgets"][0]["status"], "unknown");
+        assert!(failed["observations"][0]["metrics"]["elapsed_ms"].is_null());
         Ok(())
     }
 }

@@ -6,6 +6,16 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod capture;
+/// Keep failed execution/decoding evidence explicit instead of substituting zero.
+pub(crate) fn observed_result<T>(
+    result: anyhow::Result<T>,
+    missing: &mut Vec<String>,
+) -> Option<T> {
+    result.map_err(|error| missing.push(error.to_string())).ok()
+}
+
+mod cargo;
+pub(crate) use cargo::cargo_artifacts;
 #[cfg(test)]
 mod tests;
 
@@ -37,6 +47,18 @@ pub(crate) struct CommandOutcome {
     pub(crate) stdout: String,
     #[serde(skip)]
     pub(crate) stderr: String,
+}
+
+impl CommandOutcome {
+    /// A completed observation may be a verified failure, but never a timeout,
+    /// spawn/capture failure, or truncated report.
+    pub(crate) fn completed(&self) -> bool {
+        matches!(self.status, CommandStatus::Passed | CommandStatus::Failed)
+            && self.exit_code.is_some()
+            && self.reason.is_none()
+            && !self.stdout_truncated
+            && !self.stderr_truncated
+    }
 }
 
 pub(crate) struct CommandRequest<'a> {

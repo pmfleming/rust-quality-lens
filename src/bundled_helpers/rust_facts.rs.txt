@@ -297,10 +297,6 @@ impl FactVisitor {
         }
     }
 
-    fn scan_attrs(&mut self, attrs: &[Attribute]) {
-        attrs.iter().for_each(|attr| self.scan_attr(attr));
-    }
-
     fn note_type_macro(&mut self, path: &str, span: Span) {
         if path != "macro_rules" {
             self.type_identity_limitations.push(format!(
@@ -702,6 +698,11 @@ impl<'ast> Visit<'ast> for StandardComplexity {
 }
 
 impl<'ast> Visit<'ast> for FactVisitor {
+    fn visit_attribute(&mut self, attr: &'ast Attribute) {
+        self.scan_attr(attr);
+        visit::visit_attribute(self, attr);
+    }
+
     fn visit_file(&mut self, file: &'ast syn::File) {
         self.halstead = Some(halstead::measure(file));
         visit::visit_file(self, file);
@@ -728,7 +729,6 @@ impl<'ast> Visit<'ast> for FactVisitor {
         }
         match i {
             Item::Const(item) => {
-                self.scan_attrs(&item.attrs);
                 self.record_public_api(&item.vis, &item.attrs);
             }
             Item::Enum(item) => self.record_enum(item),
@@ -741,11 +741,9 @@ impl<'ast> Visit<'ast> for FactVisitor {
             Item::Struct(item) => self.record_struct(item),
             Item::Trait(item) => self.record_trait(item),
             Item::Type(item) => {
-                self.scan_attrs(&item.attrs);
                 self.record_public_api(&item.vis, &item.attrs);
             }
             Item::Union(item) => {
-                self.scan_attrs(&item.attrs);
                 self.record_public_api(&item.vis, &item.attrs);
                 self.bump_escape("union", item.union_token.span);
             }
@@ -893,7 +891,6 @@ impl FactVisitor {
     }
 
     fn record_trait(&mut self, item: &syn::ItemTrait) {
-        self.scan_attrs(&item.attrs);
         self.record_public_api(&item.vis, &item.attrs);
         if item.unsafety.is_none() {
             return;
@@ -910,7 +907,6 @@ impl FactVisitor {
     }
 
     fn record_enum(&mut self, item: &ItemEnum) {
-        self.scan_attrs(&item.attrs);
         self.record_public_api(&item.vis, &item.attrs);
         let line = span_start_line(item.enum_token.span);
         let module_key = self.current_module_key();
@@ -939,7 +935,6 @@ impl FactVisitor {
     }
 
     fn record_fn(&mut self, item: &ItemFn) {
-        self.scan_attrs(&item.attrs);
         self.function_count += 1;
         self.record_public_api(&item.vis, &item.attrs);
         if item.sig.unsafety.is_some() {
@@ -967,7 +962,6 @@ impl FactVisitor {
     }
 
     fn record_foreign_mod(&mut self, item: &ItemForeignMod) {
-        self.scan_attrs(&item.attrs);
         self.bump_escape("extern_block", item.abi.extern_token.span);
         for child in &item.items {
             if let ForeignItem::Fn(func) = child {
@@ -977,7 +971,6 @@ impl FactVisitor {
     }
 
     fn record_impl(&mut self, item: &ItemImpl) {
-        self.scan_attrs(&item.attrs);
         self.record_unsafe_impl(item);
         self.record_deref_impl(item);
         let methods = item.items.iter().filter_map(|child| match child {
@@ -1096,7 +1089,6 @@ impl FactVisitor {
     }
 
     fn record_item_macro(&mut self, item: &syn::ItemMacro) {
-        self.scan_attrs(&item.attrs);
         let path = path_to_string(&item.mac.path);
         if path != "macro_rules" {
             self.note_unexpanded_macro(&item.mac, "item");
@@ -1139,7 +1131,6 @@ impl FactVisitor {
     }
 
     fn record_mod(&mut self, item: &syn::ItemMod) {
-        self.scan_attrs(&item.attrs);
         self.record_public_api(&item.vis, &item.attrs);
         let module_key = child_module_key(&self.module_key, &item.ident.to_string());
         self.child_modules.push(module_key.clone());
@@ -1168,7 +1159,6 @@ impl FactVisitor {
     }
 
     fn record_static(&mut self, item: &ItemStatic) {
-        self.scan_attrs(&item.attrs);
         self.record_public_api(&item.vis, &item.attrs);
         if matches!(item.mutability, syn::StaticMutability::Mut(_)) {
             self.bump_escape("static_mut", item.static_token.span);
@@ -1176,7 +1166,6 @@ impl FactVisitor {
     }
 
     fn record_struct(&mut self, item: &ItemStruct) {
-        self.scan_attrs(&item.attrs);
         self.record_public_api(&item.vis, &item.attrs);
         let (shape, field_count) = match &item.fields {
             Fields::Named(fields) => ("named", fields.named.len()),
@@ -1201,7 +1190,6 @@ impl FactVisitor {
     }
 
     fn record_use(&mut self, item: &ItemUse) {
-        self.scan_attrs(&item.attrs);
         self.record_public_api(&item.vis, &item.attrs);
         collect_use_tree(
             ("", None),
@@ -1978,6 +1966,20 @@ fn local() {
                 .iter()
                 .any(|dependency| dependency == "service")
         );
+    }
+
+    #[test]
+    fn attributes_are_counted_once_at_every_ast_level() {
+        let result = facts(
+            r#"
+#![allow(clippy::unwrap_used)]
+#[allow(dead_code)] struct S { #[allow(unused)] field: u8 }
+impl S { #[expect(unused)] fn method(&self) {} }
+#[allow(unused)] mod nested { #![allow(unused)] }
+"#,
+        );
+        assert_eq!(result.escape_counts.get("clippy_suppression"), Some(&1));
+        assert_eq!(result.escape_counts.get("lint_suppression"), Some(&5));
     }
 
     #[test]

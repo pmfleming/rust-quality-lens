@@ -91,10 +91,8 @@ fn normalize(document: &Value) -> Result<Value> {
         if outcome["scenario"] == "Baseline" {
             continue;
         }
-        let mutant = outcome["scenario"]["Mutant"]
-            .as_object()
-            .context("unsupported mutation scenario")?;
-        let mutant = Value::Object(mutant.clone());
+        let mutant = &outcome["scenario"]["Mutant"];
+        ensure!(mutant.is_object(), "unsupported mutation scenario");
         let status = match outcome["summary"].as_str() {
             Some("CaughtMutant") => "killed",
             Some("MissedMutant") => "survived",
@@ -133,7 +131,9 @@ fn normalize(document: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::normalize;
+    use anyhow::Result;
+    use serde_json::json;
     #[test]
     fn mutation_denominator_and_locations_are_explicit() -> Result<()> {
         let mut rows = vec![json!({"scenario": "Baseline", "summary": "Success"})];

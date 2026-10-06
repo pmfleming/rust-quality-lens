@@ -217,7 +217,17 @@ fn live_compiler_integrates_cfg_macros_derives_attributes_and_owners() -> Result
         "fresh builds must not leak temporary paths, PID order or duplicate captures"
     );
 
-    let types = measure(root.path(), "type-health", "type_health.json")?;
+    validate_type_health(root.path())?;
+    let syntax = measure(root.path(), "hotspots", "hotspots.json")?;
+    assert_eq!(
+        syntax["measurement_confidence"]["partial"], true,
+        "declarations must not certify source/body rule coverage"
+    );
+    validate_feature_contexts(root.path(), &driver)
+}
+
+fn validate_type_health(root: &Path) -> Result<()> {
+    let types = measure(root, "type-health", "type_health.json")?;
     assert_eq!(types["measurement_confidence"]["complete"], true, "{types}");
     let rows = types["records"].as_array().context("type rows")?;
     for row in rows {
@@ -253,27 +263,19 @@ fn live_compiler_integrates_cfg_macros_derives_attributes_and_owners() -> Result
         }
         assert!(row["structural_risk"].is_null());
     }
-    assert_eq!(
-        rows.iter()
-            .filter(|row| row["type_name"] == "Generated")
-            .count(),
-        2,
-        "one definition per normal/test context, not authored+generated duplicates"
-    );
-    assert_eq!(
-        rows.iter()
-            .filter(|row| row["type_name"] == "AttributeGenerated")
-            .count(),
-        2
-    );
-    let syntax = measure(root.path(), "hotspots", "hotspots.json")?;
-    assert_eq!(
-        syntax["measurement_confidence"]["partial"], true,
-        "declarations must not certify source/body rule coverage"
-    );
+    for name in ["Generated", "AttributeGenerated"] {
+        assert_eq!(
+            rows.iter().filter(|row| row["type_name"] == name).count(),
+            2,
+            "one definition per normal/test context, not authored+generated duplicates"
+        );
+    }
+    Ok(())
+}
 
-    configure(root.path(), Some(&driver), true)?;
-    let featured = measure(root.path(), "type-health", "type_health.json")?;
+fn validate_feature_contexts(root: &Path, driver: &Path) -> Result<()> {
+    configure(root, Some(driver), true)?;
+    let featured = measure(root, "type-health", "type_health.json")?;
     let featured = featured["records"].as_array().context("featured rows")?;
     assert!(featured.iter().any(|row| row["type_name"] == "Extra"));
     assert!(!featured.iter().any(|row| row["type_name"] == "DefaultOnly"));
@@ -287,10 +289,10 @@ fn live_compiler_integrates_cfg_macros_derives_attributes_and_owners() -> Result
     );
 
     fs::write(
-        root.path().join("src/lib.rs"),
+        root.join("src/lib.rs"),
         "pub struct StillObserved; compile_error!(\"failed compilation\");",
     )?;
-    let failed = measure(root.path(), "type-health", "type_health.json")?;
+    let failed = measure(root, "type-health", "type_health.json")?;
     assert_eq!(failed["measurement_confidence"]["partial"], true);
     assert!(
         failed["records"]

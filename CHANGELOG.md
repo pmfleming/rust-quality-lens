@@ -51,6 +51,8 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Changed
 
+- Self-review refactors share Cargo artifact decoding and confidence reporting, simplify schema construction, and split complex Halstead/cohesion/profile/test paths. Self-measurement now includes compiler-helper sources and all current integration-test files; retained comparisons use the same expanded scope on both revisions.
+
 - Raised the workspace MSRV from Rust 1.88 to Rust 1.95, upgraded manifest/configuration parsing to TOML 1.1, and replaced the standard artifact envelope v2 with toolchain-aware v3.
 - Bumped the standard raw complexity metric to version 2 to count match guards without changing calibrated hotspot or architecture-risk scoring.
 - Split command orchestration and architecture-map scoring behind focused boundaries, tightened the self-metric baseline, and reduced maximum function hotspot score, cyclomatic/cognitive complexity, dependency pressure, duplication, and source size.
@@ -67,6 +69,10 @@ All notable changes to this project will be documented here. The format follows 
 - Token clone windows are scoped to extracted function spans, keeping repeated data declarations out of executable-code duplication evidence; source and test AST clone extraction now share one helper pass.
 
 ### Fixed
+
+- Resolve nested relative module dependencies and repeated `super::` ascents within the Cargo target; invalidate semantic caches. Scan attributes once at every AST level, including previously missed crate-level lint suppressions.
+- Change-entropy model 2 restricts the denominator to unique measured paths and rounds only the final sum; missing/malformed Git history remains null. Macro-only cohesion groups no longer certify complete empty evidence.
+- Incomplete execution cannot produce healthy resource budgets or complete per-test flakiness evidence; enabled incomplete behavioral metrics prevent practices conformity.
 
 - Generated definitions now prefer their measured local macro origin over an external generator; virtual definitions remain unresolved. Glob navigation uses the module token while preserving star escape evidence.
 - Removed duplicate analyzer feature arguments that prevented Cargo build-script loading.

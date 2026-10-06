@@ -47,47 +47,49 @@ impl Counts {
 
     fn scan(&mut self, stream: TokenStream) {
         let tokens = stream.into_iter().collect::<Vec<_>>();
-        let mut index = 0;
-        while index < tokens.len() {
-            if let Some(end) = attribute_end(&tokens, index) {
-                index = end;
-                continue;
-            }
-            match &tokens[index] {
-                TokenTree::Group(group) => {
-                    match group.delimiter() {
-                        Delimiter::Parenthesis => self.operator("()"),
-                        Delimiter::Brace => self.operator("{}"),
-                        Delimiter::Bracket => self.operator("[]"),
-                        Delimiter::None => {}
-                    }
-                    self.scan(group.stream());
-                }
-                TokenTree::Ident(ident) => {
-                    let spelling = ident.to_string();
-                    if is_keyword_operator(&spelling) {
-                        self.operator(spelling);
-                    } else {
-                        self.operand("ident", spelling);
-                    }
-                }
-                TokenTree::Literal(literal) => self.operand("literal", literal),
-                TokenTree::Punct(punct) => {
-                    if punct.as_char() == '\''
-                        && punct.spacing() == Spacing::Joint
-                        && let Some(TokenTree::Ident(lifetime)) = tokens.get(index + 1)
-                    {
-                        self.operand("lifetime", lifetime);
-                        index += 1;
-                    } else {
-                        let (operator, consumed) = punctuation(&tokens[index..]);
-                        self.operator(operator);
-                        index += consumed - 1;
-                    }
-                }
-            }
-            index += 1;
+        let mut remaining = tokens.as_slice();
+        while !remaining.is_empty() {
+            let consumed =
+                attribute_end(remaining, 0).unwrap_or_else(|| self.scan_token(remaining));
+            remaining = &remaining[consumed..];
         }
+    }
+
+    // Called only with the nonempty remainder of a token stream.
+    fn scan_token(&mut self, tokens: &[TokenTree]) -> usize {
+        match &tokens[0] {
+            TokenTree::Group(group) => {
+                match group.delimiter() {
+                    Delimiter::Parenthesis => self.operator("()"),
+                    Delimiter::Brace => self.operator("{}"),
+                    Delimiter::Bracket => self.operator("[]"),
+                    Delimiter::None => {}
+                }
+                self.scan(group.stream());
+            }
+            TokenTree::Ident(ident) => {
+                let spelling = ident.to_string();
+                if is_keyword_operator(&spelling) {
+                    self.operator(spelling);
+                } else {
+                    self.operand("ident", spelling);
+                }
+            }
+            TokenTree::Literal(literal) => self.operand("literal", literal),
+            TokenTree::Punct(punct) => {
+                if punct.as_char() == '\''
+                    && punct.spacing() == Spacing::Joint
+                    && let Some(TokenTree::Ident(lifetime)) = tokens.get(1)
+                {
+                    self.operand("lifetime", lifetime);
+                    return 2;
+                }
+                let (operator, consumed) = punctuation(tokens);
+                self.operator(operator);
+                return consumed;
+            }
+        }
+        1
     }
 
     fn finish(self) -> HalsteadMetrics {
@@ -241,12 +243,13 @@ fn is_keyword_operator(value: &str) -> bool {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::{HalsteadMetrics, measure};
 
-    fn file(source: &str) -> HalsteadMetrics {
-        measure(&syn::parse_file(source).unwrap())
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+    fn file(source: &str) -> syn::Result<HalsteadMetrics> {
+        syn::parse_file(source).map(|file| measure(&file))
     }
 
     fn assert_counts(metrics: &HalsteadMetrics, counts: [usize; 4]) {
@@ -262,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn matches_published_mozilla_rust_example() {
+    fn matches_published_mozilla_rust_example() -> TestResult {
         // Independently tabulated in rust-code-analysis's Rust Halstead test.
         let metrics = file(
             r#"fn main() {
@@ -270,54 +273,66 @@ mod tests {
             let avg = (a + b + c) / 3;
             println!("{}", avg);
         }"#,
-        );
+        )?;
         assert_counts(&metrics, [10, 23, 9, 15]);
         assert_eq!(metrics.vocabulary, 19);
         assert_eq!(metrics.length, 38);
         assert!((metrics.volume - 161.42124551085624).abs() < 1e-10);
-        assert!((metrics.difficulty.unwrap() - 8.333333333333334).abs() < 1e-10);
-        assert!((metrics.effort.unwrap() - 1345.177045923802).abs() < 1e-10);
+        assert!(
+            metrics
+                .difficulty
+                .is_some_and(|value| (value - 8.333333333333334).abs() < 1e-10)
+        );
+        assert!(
+            metrics
+                .effort
+                .is_some_and(|value| (value - 1345.177045923802).abs() < 1e-10)
+        );
+        Ok(())
     }
 
     #[test]
-    fn hand_counted_repeated_operands_and_operators() {
+    fn hand_counted_repeated_operands_and_operators() -> TestResult {
         // Operators: fn, (), :, ->, {}, +, +; operands: f, x, i32, i32, x, x, 1.
-        let metrics = file("fn f(x: i32) -> i32 { x + x + 1 }");
+        let metrics = file("fn f(x: i32) -> i32 { x + x + 1 }")?;
         assert_counts(&metrics, [6, 7, 4, 7]);
         assert_eq!(metrics.difficulty, Some(5.25));
         assert_eq!(metrics.effort, Some(5.25 * 14.0 * 10_f64.log2()));
+        Ok(())
     }
 
     #[test]
-    fn ignores_layout_comments_and_attributes_not_literal_contents() {
-        let plain = file("fn f() { let x = 1; x + x; }");
+    fn ignores_layout_comments_and_attributes_not_literal_contents() -> TestResult {
+        let plain = file("fn f() { let x = 1; x + x; }")?;
         let decorated = file(
             "#![allow(unused)]\n/// doc operators + -\n#[inline]\nfn f ( ) { /* x */ let x=1; // hello\nx + x; }",
-        );
+        )?;
         assert_eq!(
-            serde_json::to_value(plain).unwrap(),
-            serde_json::to_value(decorated).unwrap()
+            serde_json::to_value(plain)?,
+            serde_json::to_value(decorated)?
         );
         let literals =
-            file(r##"fn f() { ("+ // fn", r#"+ // fn"#, b"+ // fn", 'x', b'x', 1u8, 1); }"##);
+            file(r##"fn f() { ("+ // fn", r#"+ // fn"#, b"+ // fn", 'x', b'x', 1u8, 1); }"##)?;
         assert_counts(&literals, [5, 11, 8, 8]);
+        Ok(())
     }
 
     #[test]
-    fn handles_compound_operators_generics_lifetimes_and_raw_identifiers() {
-        let syntax: syn::Expr = syn::parse_str("a >>= 1").unwrap();
+    fn handles_compound_operators_generics_lifetimes_and_raw_identifiers() -> TestResult {
+        let syntax: syn::Expr = syn::parse_str("a >>= 1")?;
         assert_counts(&measure(&syntax), [1, 1, 2, 2]);
-        let syntax: syn::Expr = syn::parse_str("a && b || a != b").unwrap();
+        let syntax: syn::Expr = syn::parse_str("a && b || a != b")?;
         assert_counts(&measure(&syntax), [3, 3, 2, 4]);
-        let ty: syn::Type = syn::parse_str("Vec<Vec<&'a r#type>>").unwrap();
+        let ty: syn::Type = syn::parse_str("Vec<Vec<&'a r#type>>")?;
         // Generic closing angles are separate syntax tokens, not a shift.
         assert_counts(&measure(&ty), [3, 5, 3, 4]);
-        let reference: syn::Expr = syn::parse_str("&&x").unwrap();
+        let reference: syn::Expr = syn::parse_str("&&x")?;
         assert_counts(&measure(&reference), [1, 2, 1, 1]);
+        Ok(())
     }
 
     #[test]
-    fn rust_expression_taxonomy_has_hand_counted_cases() {
+    fn rust_expression_taxonomy_has_hand_counted_cases() -> TestResult {
         for (source, expected) in [
             ("f(x, x)", [2, 2, 2, 3]),
             ("xs[i]?", [2, 2, 2, 2]),
@@ -334,35 +349,37 @@ mod tests {
             ("pair.0", [1, 1, 2, 2]),
             ("-1 + 1u8 + 0x1", [2, 3, 3, 3]),
         ] {
-            let syntax: syn::Expr = syn::parse_str(source).unwrap();
+            let syntax: syn::Expr = syn::parse_str(source)?;
             assert_counts(&measure(&syntax), expected);
         }
-        assert_counts(&file("const X: i32 = 1;"), [4, 4, 3, 3]);
+        assert_counts(&file("const X: i32 = 1;")?, [4, 4, 3, 3]);
+        Ok(())
     }
 
     #[test]
-    fn zero_and_undefined_cases_are_explicit_and_json_safe() {
-        let empty = file("// no program");
+    fn zero_and_undefined_cases_are_explicit_and_json_safe() -> TestResult {
+        let empty = file("// no program")?;
         assert_counts(&empty, [0, 0, 0, 0]);
         assert_eq!(empty.effort, Some(0.0));
-        let operators = measure(&syn::parse_str::<syn::Expr>("{}").unwrap());
+        let operators = measure(&syn::parse_str::<syn::Expr>("{}")?);
         assert_counts(&operators, [1, 1, 0, 0]);
         assert_eq!(operators.volume, 0.0);
         assert_eq!(operators.difficulty, None);
         assert_eq!(operators.effort, None);
         assert_eq!(
-            serde_json::to_value(operators).unwrap()["effort"],
+            serde_json::to_value(operators)?["effort"],
             serde_json::Value::Null
         );
-        let operand = measure(&syn::parse_str::<syn::Expr>("42").unwrap());
+        let operand = measure(&syn::parse_str::<syn::Expr>("42")?);
         assert_eq!(operand.effort, Some(0.0));
+        Ok(())
     }
 
     #[test]
-    fn whole_file_counts_union_vocabulary_and_do_not_sum_effort() {
-        let one = file("fn a() { 1 }");
-        let two = file("fn b() { 1 }");
-        let combined = file("fn a() { 1 } fn b() { 1 }");
+    fn whole_file_counts_union_vocabulary_and_do_not_sum_effort() -> TestResult {
+        let one = file("fn a() { 1 }")?;
+        let two = file("fn b() { 1 }")?;
+        let combined = file("fn a() { 1 } fn b() { 1 }")?;
         assert_counts(&combined, [3, 6, 3, 4]);
         assert_eq!(
             combined.total_operators,
@@ -373,8 +390,9 @@ mod tests {
             one.distinct_operators + two.distinct_operators
         );
         assert_ne!(
-            combined.effort.unwrap(),
-            one.effort.unwrap() + two.effort.unwrap()
+            combined.effort,
+            one.effort.zip(two.effort).map(|(a, b)| a + b)
         );
+        Ok(())
     }
 }

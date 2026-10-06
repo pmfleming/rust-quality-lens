@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "status": "improvement_checkpoint_with_remaining_gates",
+  "baseline_revision": "2e82dff",
+  "candidate": "working tree after baseline revision; see containing commit",
+  "frozen_evaluator_sha256": "0028f5195ee074034499d8c6ec9a9ff60ad49962f54c78285a7eed6eedd33e36",
+  "corrected_evaluator_sha256": "801d29b5dc7972812d7bbfe9ca0a4e5c3804002852677f5ff70474c2cc83797c",
+  "local_evidence_root": "target/self-review-4",
+  "source_roots": [
+    "src", "rust_helpers/src", "compiler_helpers/src", "compiler_helpers/build.rs",
+    "tests/cli.rs", "tests/compiler_inventory.rs", "tests/source_expansion.rs",
+    "tests/trust.rs", "tests/profiles.rs"
+  ],
+  "baseline_numeric_hotspot_rows_equal_across_evaluators": 1250,
+  "numeric_parity_fields": ["sloc", "cognitive_complexity", "cyclomatic_complexity", "halstead", "halstead_effort", "score"],
+  "common_results": {
+    "before": {
+      "source_nonblank_lines": 27590,
+      "functions": 1137,
+      "modules": 113,
+      "cognitive_max": 33,
+      "cognitive_sum": 1824,
+      "cyclomatic_max": 27,
+      "cyclomatic_sum": 3902,
+      "halstead_effort_max": 440764.00132356863,
+      "halstead_effort_sum": 16613220.428130753,
+      "token_clone_groups": 80,
+      "ast_clone_groups": 0,
+      "duplicated_lines": 1144,
+      "duplication_percent": 4.15
+    },
+    "after": {
+      "source_nonblank_lines": 27749,
+      "functions": 1157,
+      "modules": 114,
+      "cognitive_max": 16,
+      "cognitive_sum": 1773,
+      "cyclomatic_max": 21,
+      "cyclomatic_sum": 3945,
+      "halstead_effort_max": 284198.72536779393,
+      "halstead_effort_sum": 16200950.36684367,
+      "token_clone_groups": 76,
+      "ast_clone_groups": 0,
+      "duplicated_lines": 1103,
+      "duplication_percent": 3.97
+    }
+  },
+  "frozen_evaluator": {
+    "before": {"escape_occurrences": 9, "mean_locality": 97.69690265486726, "mean_leverage": 20.353982300884955},
+    "after": {"escape_occurrences": 0, "mean_locality": 97.69736842105263, "mean_leverage": 20.70175438596491}
+  },
+  "corrected_evaluator": {
+    "before": {"escape_occurrences": 12, "mean_locality": 96.74115044247787, "mean_leverage": 24.601769911504423},
+    "after": {"escape_occurrences": 3, "mean_locality": 96.72368421052632, "mean_leverage": 25.0}
+  },
+  "baseline_entropy_correction": {
+    "old_model": {"total_changed_lines": 118612, "entropy_bits": 3.15},
+    "model_2": {"total_changed_lines": 53256, "entropy_bits": 5.93},
+    "interpretation": "measurement correction on identical source/history, not refactoring gain"
+  },
+  "hotspots_artifact_sha256": {
+    "before": "72472037decdc25ce02c580e6e7cd2cacf8c70a7a6f24476f3cf52f613540b83",
+    "after_frozen": "8b98800ed4e5af5351ec452c58568f6858575ff57fb264a0019383813509244c",
+    "corrected_before": "1471dfe0a6c804df086d7406d34330a125493bb0330f77b414401921e1ee94f9",
+    "after_corrected": "782271a311c487fb4680e721b839cf3400b8d1af8013f199e3d0ab3df7c1b424"
+  },
+  "validation": {
+    "rust_tests_passed": 167,
+    "rust_tests_ignored": 3,
+    "python_acceptance_unit_tests_passed": 14,
+    "format_check": "passed",
+    "bundled_helpers": "passed",
+    "workspace_check": "passed",
+    "workspace_clippy_deny_warnings": "passed",
+    "rustdoc_deny_warnings": "passed",
+    "verify": "passed; 17 passed checks, 11 skipped",
+    "measure_all": "passed",
+    "correctness_run": "executed; catalog attribution remains partial",
+    "package_smoke": "passed",
+    "strict_check": "failed: partial evidence and incomplete test attribution; no observed test failures",
+    "self_metrics": "failed: first reported failure is hotspot score ceiling"
+  },
+  "unmet_objectives": [
+    "Scoped nonblank Rust LOC increased by 159",
+    "Aggregate cyclomatic complexity increased by 43",
+    "Corrected mean locality decreased slightly",
+    "Three crate-level integration-test lint suppressions remain",
+    "No full unused-dependency audit or live mutation campaign; required tools unavailable"
+  ],
+  "calibration": "No score coefficients changed; no independent predictive calibration or cross-daemon campaign claimed"
+}

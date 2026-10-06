@@ -21,9 +21,12 @@ pub(super) fn produce(config: &LensConfig, graph: &ModuleGraph) -> Value {
 }
 
 fn confidence(reasons: &[String]) -> Value {
-    json!({"complete": reasons.is_empty(), "partial": !reasons.is_empty(),
-        "confidence_scope": "bounded_git_maintenance_history", "required_inputs": ["git_history", "current_module_paths"],
-        "observed_inputs": {}, "missing_input": reasons, "stale_input": [], "unsupported_pattern": []})
+    crate::measurement::evidence_confidence(
+        "bounded_git_maintenance_history",
+        &["git_history", "current_module_paths"],
+        reasons,
+        &[],
+    )
 }
 
 fn git(config: &LensConfig, args: &[String]) -> Result<String> {
@@ -34,6 +37,42 @@ fn git(config: &LensConfig, args: &[String]) -> Result<String> {
         Duration::from_secs(config.verification.timeout_seconds),
     )?
     .stdout)
+}
+
+pub(super) fn churn(config: &LensConfig, graph: &ModuleGraph) -> Result<BTreeMap<String, u64>> {
+    let text = git(
+        config,
+        &[
+            "log",
+            "--numstat",
+            "-z",
+            "--format=",
+            "--no-renames",
+            "--relative",
+        ]
+        .map(str::to_string),
+    )?;
+    let paths: BTreeSet<_> = graph
+        .modules
+        .values()
+        .map(|module| project_relative_path(&config.project_root, &module.path))
+        .collect();
+    measured_churn(&text, &paths)
+}
+
+fn measured_churn(text: &str, paths: &BTreeSet<String>) -> Result<BTreeMap<String, u64>> {
+    let mut changes = BTreeMap::new();
+    for row in text.split('\0').filter(|row| !row.is_empty()) {
+        let mut fields = row.splitn(3, '\t');
+        let added = fields.next().context("missing added lines")?;
+        let deleted = fields.next().context("missing deleted lines")?;
+        let path = fields.next().context("missing numstat path")?;
+        if paths.contains(path) {
+            *changes.entry(path.to_string()).or_default() +=
+                added.parse::<u64>()? + deleted.parse::<u64>()?;
+        }
+    }
+    Ok(changes)
 }
 
 fn collect(config: &LensConfig, graph: &ModuleGraph) -> Result<Value> {
@@ -190,28 +229,7 @@ fn analyze(commits: &[Commit], graph: &ModuleGraph, config: &LensConfig, end: i6
         if modules.is_empty() {
             continue;
         }
-        window.commits += 1;
-        window.changed_modules.push(modules.len());
-        window
-            .author_last_seen
-            .entry(commit.author.clone())
-            .and_modify(|time| *time = (*time).max(commit.timestamp))
-            .or_insert(commit.timestamp);
-        let modules: Vec<_> = modules.into_iter().collect();
-        for (index, module) in modules.iter().enumerate() {
-            *window
-                .module_authors
-                .entry(module.clone())
-                .or_default()
-                .entry(commit.author.clone())
-                .or_default() += 1;
-            for other in &modules[index + 1..] {
-                *window
-                    .pairs
-                    .entry((module.clone(), other.clone()))
-                    .or_default() += 1;
-            }
-        }
+        window.record(commit, modules);
     }
     let recent_report = window_report(&recent, graph);
     let previous_report = window_report(&previous, graph);
@@ -234,6 +252,31 @@ fn analyze(commits: &[Commit], graph: &ModuleGraph, config: &LensConfig, end: i6
             "days_per_window": config.history.window_days},
         "filters": {"max_commit_files": config.history.max_commit_files, "exclude_paths": config.history.exclude_paths},
         "recent": recent_report, "previous": previous_report, "previous_owner_activity": owner_activity})
+}
+
+impl Window {
+    fn record(&mut self, commit: &Commit, modules: BTreeSet<String>) {
+        self.commits += 1;
+        self.changed_modules.push(modules.len());
+        self.author_last_seen
+            .entry(commit.author.clone())
+            .and_modify(|time| *time = (*time).max(commit.timestamp))
+            .or_insert(commit.timestamp);
+        for (index, module) in modules.iter().enumerate() {
+            *self
+                .module_authors
+                .entry(module.clone())
+                .or_default()
+                .entry(commit.author.clone())
+                .or_default() += 1;
+            for other in modules.iter().skip(index + 1) {
+                *self
+                    .pairs
+                    .entry((module.clone(), other.clone()))
+                    .or_default() += 1;
+            }
+        }
+    }
 }
 
 fn primary_author(authors: &BTreeMap<String, usize>) -> Option<(&String, &usize)> {
@@ -300,8 +343,12 @@ fn median(values: &[usize]) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::facts::{FileFacts, module_graph};
+    use super::{Commit, analyze, excluded, git, measured_churn, parse_log, produce};
+    use crate::{
+        config::LensConfig,
+        facts::{FileFacts, module_graph},
+    };
+    use anyhow::{Context, Result};
     #[test]
     fn known_history_has_exact_ownership_and_pairwise_probabilities() {
         let mut config = LensConfig::test_config("history", std::path::Path::new("/project"));
@@ -349,6 +396,17 @@ mod tests {
     }
     #[test]
     fn nul_paths_and_empty_history_do_not_invent_ownership() -> Result<()> {
+        let paths = ["src/a.rs".into(), "src/with\nnewline.rs".into()]
+            .into_iter()
+            .collect();
+        let changes = measured_churn("1\t2\tsrc/a.rs\0", &paths)?;
+        assert_eq!(changes["src/a.rs"], 3);
+        assert_eq!(measured_churn("1000\t0\tREADME.md\0", &paths)?.len(), 0);
+        assert_eq!(
+            measured_churn("1\t0\tsrc/with\nnewline.rs\0", &paths)?["src/with\nnewline.rs"],
+            1
+        );
+        assert!(measured_churn("broken", &paths).is_err());
         let header = format!(
             "\0{}\0ada\0{}\0\0\nsrc/with\nnewline.rs\0\0{}\0bob\0{}\0\0",
             "a".repeat(40),

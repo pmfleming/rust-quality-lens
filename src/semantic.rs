@@ -15,7 +15,7 @@ use crate::util::{lock_file, normalize_slashes, write_json};
 
 pub(crate) mod expansion;
 
-const CACHE_VERSION: u64 = 13;
+const CACHE_VERSION: u64 = 14;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct IdentityResolutionSummary {
@@ -516,11 +516,15 @@ fn is_semantic_candidate(raw: &str, source: &FileFacts, facts: &[FileFacts]) -> 
     if matches!(first, "crate" | "self" | "super") {
         return true;
     }
+    let relative = format!("{}::{first}", source.module_key);
     let local_module = facts
         .iter()
-        .filter(|fact| fact.package_name == source.package_name)
-        .filter_map(|fact| fact.module_key.split("::").next())
-        .any(|module| module == first);
+        .filter(|fact| {
+            fact.package_name == source.package_name && fact.target_name == source.target_name
+        })
+        .any(|fact| {
+            fact.module_key == relative || fact.module_key.split("::").next() == Some(first)
+        });
     let workspace_package = facts.iter().any(|fact| {
         fact.package_name.replace('-', "_") == first && fact.package_name != source.package_name
     });
@@ -1337,6 +1341,13 @@ mod tests {
             assert!(!is_semantic_candidate(raw_path, &source, &facts));
         }
         assert!(is_semantic_candidate("crate::domain", &source, &facts));
+        let source = FileFacts::test_fact("/project/src/service.rs", "service");
+        let child = FileFacts::test_fact("/project/src/service/worker.rs", "service::worker");
+        assert!(is_semantic_candidate(
+            "worker::run",
+            &source,
+            &[source.clone(), child]
+        ));
     }
 
     fn required_config(root: &std::path::Path, name: &str) -> anyhow::Result<LensConfig> {
