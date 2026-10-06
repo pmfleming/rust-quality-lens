@@ -12,10 +12,10 @@ use std::path::Path;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::{
-    Attribute, BinOp, ExprBinary, ExprBreak, ExprCall, ExprClosure, ExprContinue, ExprForLoop,
-    ExprIf, ExprLoop, ExprMatch, ExprPath, ExprRawAddr, ExprTry, ExprWhile, Fields, ForeignItem,
-    ImplItem, ImplItemFn, Item, ItemEnum, ItemFn, ItemForeignMod, ItemImpl, ItemStatic, ItemStruct,
-    ItemUse, ReturnType, Type, TypePath, UseTree,
+    Attribute, BinOp, ExprBinary, ExprBreak, ExprCall, ExprClosure, ExprContinue, ExprIf,
+    ExprMatch, ExprPath, ExprRawAddr, ExprTry, Fields, ForeignItem, ImplItem, ImplItemFn, Item,
+    ItemEnum, ItemFn, ItemForeignMod, ItemImpl, ItemStatic, ItemStruct, ItemUse, ReturnType, Type,
+    TypePath, UseTree,
 };
 
 // One representation for collection and finalized wire facts; traversal-only
@@ -527,28 +527,23 @@ impl FunctionComplexity {
     }
 }
 
-macro_rules! branch_visitor {
-    ($method:ident, $visit:ident, $expression:ty) => {
-        fn $method(&mut self, expression: &'ast $expression) {
-            self.enter_branch(1);
-            visit::$visit(self, expression);
+impl<'ast> Visit<'ast> for FunctionComplexity {
+    fn visit_expr(&mut self, expression: &'ast syn::Expr) {
+        let pressure = match expression {
+            syn::Expr::If(_) | syn::Expr::ForLoop(_) | syn::Expr::While(_) | syn::Expr::Loop(_) => {
+                Some(1)
+            }
+            syn::Expr::Match(expr) => Some(expr.arms.len().saturating_sub(1).max(1)),
+            _ => None,
+        };
+        if let Some(pressure) = pressure {
+            self.enter_branch(pressure);
+        }
+        visit::visit_expr(self, expression);
+        if pressure.is_some() {
             self.leave_branch();
         }
-    };
-}
-
-impl<'ast> Visit<'ast> for FunctionComplexity {
-    branch_visitor!(visit_expr_if, visit_expr_if, ExprIf);
-
-    fn visit_expr_match(&mut self, expression: &'ast ExprMatch) {
-        self.enter_branch(expression.arms.len().saturating_sub(1).max(1));
-        visit::visit_expr_match(self, expression);
-        self.leave_branch();
     }
-
-    branch_visitor!(visit_expr_for_loop, visit_expr_for_loop, ExprForLoop);
-    branch_visitor!(visit_expr_while, visit_expr_while, ExprWhile);
-    branch_visitor!(visit_expr_loop, visit_expr_loop, ExprLoop);
 
     fn visit_expr_binary(&mut self, expression: &'ast ExprBinary) {
         if matches!(expression.op, BinOp::And(_) | BinOp::Or(_)) {
@@ -604,28 +599,6 @@ impl StandardComplexity {
     }
 }
 
-macro_rules! standard_structure_visitor {
-    ($method:ident, $visit:ident, $expression:ty) => {
-        fn $method(&mut self, expression: &'ast $expression) {
-            self.cyclomatic_complexity += 1;
-            self.enter_cognitive_structure();
-            visit::$visit(self, expression);
-            self.leave_cognitive_structure();
-        }
-    };
-}
-
-macro_rules! standard_jump_visitor {
-    ($method:ident, $visit:ident, $expression:ty) => {
-        fn $method(&mut self, expression: &'ast $expression) {
-            if expression.label.is_some() {
-                self.cognitive_complexity += 1;
-            }
-            visit::$visit(self, expression);
-        }
-    };
-}
-
 impl<'ast> Visit<'ast> for StandardComplexity {
     fn visit_arm(&mut self, arm: &'ast syn::Arm) {
         if arm.guard.is_some() {
@@ -664,9 +637,20 @@ impl<'ast> Visit<'ast> for StandardComplexity {
         self.leave_cognitive_structure();
     }
 
-    standard_structure_visitor!(visit_expr_for_loop, visit_expr_for_loop, ExprForLoop);
-    standard_structure_visitor!(visit_expr_while, visit_expr_while, ExprWhile);
-    standard_structure_visitor!(visit_expr_loop, visit_expr_loop, ExprLoop);
+    fn visit_expr(&mut self, expression: &'ast syn::Expr) {
+        let is_loop = matches!(
+            expression,
+            syn::Expr::ForLoop(_) | syn::Expr::While(_) | syn::Expr::Loop(_)
+        );
+        if is_loop {
+            self.cyclomatic_complexity += 1;
+            self.enter_cognitive_structure();
+        }
+        visit::visit_expr(self, expression);
+        if is_loop {
+            self.leave_cognitive_structure();
+        }
+    }
 
     fn visit_expr_binary(&mut self, expression: &'ast ExprBinary) {
         if matches!(expression.op, BinOp::And(_) | BinOp::Or(_)) {
@@ -693,8 +677,15 @@ impl<'ast> Visit<'ast> for StandardComplexity {
         self.cognitive_nesting = self.cognitive_nesting.saturating_sub(1);
     }
 
-    standard_jump_visitor!(visit_expr_break, visit_expr_break, ExprBreak);
-    standard_jump_visitor!(visit_expr_continue, visit_expr_continue, ExprContinue);
+    fn visit_expr_break(&mut self, expression: &'ast ExprBreak) {
+        self.cognitive_complexity += usize::from(expression.label.is_some());
+        visit::visit_expr_break(self, expression);
+    }
+
+    fn visit_expr_continue(&mut self, expression: &'ast ExprContinue) {
+        self.cognitive_complexity += usize::from(expression.label.is_some());
+        visit::visit_expr_continue(self, expression);
+    }
 }
 
 impl<'ast> Visit<'ast> for FactVisitor {

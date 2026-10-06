@@ -130,6 +130,7 @@ pub(crate) fn run_tests(config: &LensConfig) -> Result<HashMap<String, TestStatu
     let outcome = run(request);
     let mut statuses = parse_cargo_test_statuses(&outcome.stdout);
     let status = match outcome.status {
+        CommandStatus::Passed if !outcome.completed() => "incomplete".to_string(),
         CommandStatus::Passed => run_status(true, &outcome.stdout, &outcome.stderr),
         CommandStatus::Failed => run_status(false, &outcome.stdout, &outcome.stderr),
         CommandStatus::Unavailable => "unavailable".to_string(),
@@ -208,7 +209,12 @@ fn record_test_status(
         stdout_tail: None,
         stderr_tail: None,
     };
-    statuses.insert(name.to_string(), record.clone());
+    // Cargo writes target headers to stderr: stdout alone cannot attribute a
+    // repeated qualified name to a target. Never let the last result win.
+    statuses
+        .entry(name.to_string())
+        .and_modify(|prior| prior.status = "unknown".into())
+        .or_insert_with(|| record.clone());
     if let Some(path) = current_path {
         statuses.insert(format!("{path}::{name}"), record);
     }
@@ -226,7 +232,7 @@ fn test_status(status: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{correctness_paths, run_status};
+    use super::{correctness_paths, parse_cargo_test_statuses, run_status};
     use crate::config::LensConfig;
     use crate::facts::{FileFacts, ModuleFileFact};
     use crate::util::normalize_slashes;
@@ -298,6 +304,15 @@ path = "tests/integration.rs"
                 .any(|path| normalize_slashes(path).contains("not-a-rust-target.rs"))
         );
         Ok(())
+    }
+
+    #[test]
+    fn duplicate_test_names_cannot_overwrite_failed_evidence() {
+        let results = parse_cargo_test_statuses(
+            "test tests::same ... FAILED\ntest tests::same ... ok\ntest unique ... ok\n",
+        );
+        assert_eq!(results["tests::same"].status, "unknown");
+        assert_eq!(results["unique"].status, "passed");
     }
 
     #[test]

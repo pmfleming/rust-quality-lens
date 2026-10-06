@@ -120,11 +120,15 @@ fn captures_both_streams_environment_working_directory_and_exit_status() -> anyh
     Ok(())
 }
 
-#[cfg(windows)]
 #[test]
 fn timeout_terminates_descendants_holding_output_handles() {
-    let args = vec!["/C".to_string(), "ping -n 30 127.0.0.1".to_string()];
-    let mut request = CommandRequest::new("cmd", &args, Path::new("."));
+    let (program, arguments) = if cfg!(windows) {
+        ("cmd", ["/C", "ping -n 30 127.0.0.1"])
+    } else {
+        ("sh", ["-c", "sleep 30 & wait"])
+    };
+    let args = arguments.map(str::to_string);
+    let mut request = CommandRequest::new(program, &args, Path::new("."));
     request.timeout = Duration::from_millis(100);
     let started = Instant::now();
     assert_eq!(run(request).status, CommandStatus::TimedOut);
