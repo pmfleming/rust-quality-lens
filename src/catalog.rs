@@ -220,7 +220,7 @@ fn task_definitions() -> Vec<TaskDefinition> {
             category: "quality",
             subcategory: "architecture",
             title: "Module Cohesion and Change Entropy",
-            description: "Reports responsibility spread, dependency pressure, and Git change entropy without treating them as defect predictions.",
+            description: "Reports declaration diversity, Git change entropy, pairwise temporal coupling, change amplification and recent ownership concentration without treating them as defect predictions.",
         },
         TaskDefinition {
             tool: MeasureTool::Correctness,

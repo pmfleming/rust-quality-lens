@@ -20,6 +20,7 @@ struct RawConfig {
     rust: Option<RawRustConfig>,
     verification: Option<VerificationConfig>,
     architecture: Option<ArchitectureConfig>,
+    history: Option<HistoryConfig>,
     policy: Option<PolicyConfig>,
 }
 
@@ -152,6 +153,47 @@ impl VerificationConfig {
             arguments.extend(["--features".to_string(), self.features.join(",")]);
         }
         arguments
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct HistoryConfig {
+    pub(crate) window_days: u32,
+    pub(crate) max_commit_files: usize,
+    pub(crate) exclude_paths: Vec<String>,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            window_days: 90,
+            max_commit_files: 50,
+            exclude_paths: Vec::new(),
+        }
+    }
+}
+
+impl HistoryConfig {
+    fn validate(&self) -> Result<()> {
+        anyhow::ensure!(
+            self.window_days > 0 && self.window_days <= 36500,
+            "history.window_days must be between 1 and 36500"
+        );
+        anyhow::ensure!(
+            self.max_commit_files > 0,
+            "history.max_commit_files must be positive"
+        );
+        for path in &self.exclude_paths {
+            anyhow::ensure!(
+                !path.is_empty()
+                    && !Path::new(path).is_absolute()
+                    && !path.split('/').any(|part| matches!(part, ".." | "."))
+                    && !path.contains(['*', '?', '\\']),
+                "history.exclude_paths must be project-relative file/directory prefixes, not globs"
+            );
+        }
+        Ok(())
     }
 }
 
@@ -408,6 +450,7 @@ pub(crate) struct LensConfig {
     pub(crate) compiler_inventory_target: Option<String>,
     pub(crate) verification: VerificationConfig,
     pub(crate) architecture: ArchitectureConfig,
+    pub(crate) history: HistoryConfig,
     pub(crate) policy: PolicyConfig,
 }
 
@@ -433,6 +476,7 @@ impl LensConfig {
             compiler_inventory_target: None,
             verification: Default::default(),
             architecture: Default::default(),
+            history: Default::default(),
             policy: Default::default(),
         }
     }
@@ -571,6 +615,8 @@ impl LensConfig {
         validate_unused_dependency_backend(&verification.unused_dependency_backend)?;
         let architecture = raw.architecture.unwrap_or_default();
         architecture.validate()?;
+        let history = raw.history.unwrap_or_default();
+        history.validate()?;
         let policy = raw.policy.unwrap_or_default();
         policy.validate()?;
         let project_name = raw.project_name.unwrap_or_else(|| {
@@ -600,6 +646,7 @@ impl LensConfig {
             compiler_inventory_target: rust.compiler_inventory_target,
             verification,
             architecture,
+            history,
             policy,
         })
     }
@@ -922,6 +969,14 @@ pub(crate) fn config_schema() -> Value {
                     "fuzz_seconds": {"type": "integer", "minimum": 1, "default": 30},
                     "sanitizers": {"type": "array", "items": {"type": "string", "enum": ["address", "leak", "memory", "thread"]}, "default": []},
                     "miri": {"type": "boolean", "default": false}
+                }
+            },
+            "history": {
+                "type": "object", "additionalProperties": false,
+                "properties": {
+                    "window_days": {"type": "integer", "minimum": 1, "maximum": 36500, "default": 90},
+                    "max_commit_files": {"type": "integer", "minimum": 1, "default": 50},
+                    "exclude_paths": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": [], "description": "Project-relative file/directory prefixes; no globs. Excluded from maintenance history."}
                 }
             },
             "architecture": {

@@ -6,6 +6,8 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Added
 
+- Bounded recent/previous Git maintenance windows with pairwise co-change support/lift, change amplification, contributor concentration/entropy and prior-owner activity. Configurable bulk-commit/path exclusions and shallow-history confidence accompany the raw observations.
+
 - Structured fresh cargo-mutants outcomes with explicit mutation-score denominators, and Cargo-qualified per-test repeated-run flakiness evidence. Missing or unsupported structured results make practices evidence partial.
 
 - Opt-in pinned rustc HIR inventory and compiler-backed type-health: expanded macros/attributes/derives, effective target/features/cfg, compiler-resolved impl ownership, explicit invocation attribution, and per-context deduplication. Unsupported or failed builds remain partial; source-calibrated scores and other producers' completeness are not changed.

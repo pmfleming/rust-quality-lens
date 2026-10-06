@@ -7,6 +7,8 @@ use crate::config::LensConfig;
 use crate::facts::RunContext;
 use crate::util::{project_relative_path, round2};
 
+mod maintenance;
+
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let graph = context.module_graph();
     let changes = git_changes(config);
@@ -50,6 +52,14 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         })
         .collect::<Vec<_>>();
     let git_available = !changes.is_empty();
+    let maintenance = maintenance::produce(config, graph);
+    let mut confidence: crate::contracts::MeasurementConfidence =
+        serde_json::from_value(cohesion_confidence(context, git_available)?)?;
+    if maintenance["measurement_confidence"]["complete"] != true {
+        confidence.mark_partial(
+            "maintenance history is incomplete; see maintenance.measurement_confidence",
+        );
+    }
     Ok(json!({
         "summary": {
             "module_count": records.len(),
@@ -57,7 +67,8 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
             "change_entropy": round2(records.iter().filter_map(|record| record["change_entropy_contribution"].as_f64()).sum()),
         },
         "records": records,
-        "measurement_confidence": cohesion_confidence(context, git_available)?,
+        "maintenance": maintenance,
+        "measurement_confidence": confidence,
     }))
 }
 

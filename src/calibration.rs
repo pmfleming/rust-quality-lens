@@ -194,6 +194,7 @@ fn calibration_config(
         compiler_inventory_target: None,
         verification: Default::default(),
         architecture: Default::default(),
+        history: Default::default(),
         policy: Default::default(),
     })
 }

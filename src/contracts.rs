@@ -469,7 +469,13 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
             }),
         ),
         MeasureTool::Locality | MeasureTool::Leverage => topology_schema(tool),
-        MeasureTool::ModuleCohesion => summary_arrays_schema(tool, &["records"]),
+        MeasureTool::ModuleCohesion => {
+            let mut schema = summary_arrays_schema(tool, &["records"]);
+            schema["properties"]["maintenance"] = json!({"type": "object", "required": ["model_version", "recent", "previous", "measurement_confidence"],
+                "properties": {"model_version": {"const": 1}, "recent": {"type": ["object", "null"]}, "previous": {"type": ["object", "null"]},
+                    "measurement_confidence": measurement_confidence_schema()}});
+            schema
+        }
         MeasureTool::Map => object_schema(
             "map.json",
             &["meta", "graph", "modules", "measurement_confidence"],
