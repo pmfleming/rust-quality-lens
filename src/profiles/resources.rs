@@ -4,7 +4,8 @@ use super::{
 };
 use crate::{
     command_runner::{
-        CommandOutcome, CommandRequest, CommandStatus, cargo_artifacts, observed_result, run,
+        CargoArtifact, CommandOutcome, CommandRequest, CommandStatus, cargo_artifacts,
+        observed_result, run,
     },
     config::LensConfig,
 };
@@ -13,7 +14,7 @@ use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     time::Duration,
 };
 
@@ -29,7 +30,6 @@ pub(super) fn measure(config: &LensConfig, profile: &ResourceProfile) -> Value {
 
 fn execute(config: &LensConfig, profile: &ResourceProfile) -> Result<Value> {
     let directory = tempfile::tempdir()?;
-    let target = directory.path().join("target");
     let mut reasons = Vec::new();
     let profiler = profile
         .peak_rss
@@ -41,60 +41,18 @@ fn execute(config: &LensConfig, profile: &ResourceProfile) -> Result<Value> {
     };
     let mut observations = Vec::new();
     for (iteration, phase) in phases.iter().enumerate() {
-        let report = directory
-            .path()
-            .join(format!("instrumentation-{iteration}.json"));
-        let timing = directory.path().join(format!("time-{iteration}.txt"));
-        let outcome = invoke(
-            config,
-            &command(config, profile),
-            profiler.as_deref(),
-            &timing,
-            &report,
-            (profile.kind == ResourceKind::Build).then_some(target.as_path()),
-        );
-        let mut metrics = BTreeMap::new();
-        if outcome.status == CommandStatus::Passed && outcome.completed() {
-            metrics.insert("elapsed_ms".into(), u64::try_from(outcome.duration_ms)?);
-            if profiler.is_some() {
-                metrics.extend(
-                    observed_result(
-                        fs::read_to_string(&timing)
-                            .context("fresh GNU time output missing")
-                            .and_then(|text| parse_peak_rss(&text)),
-                        &mut reasons,
-                    )
-                    .map(|rss| ("peak_rss_bytes".into(), rss)),
-                );
-            }
-            metrics.extend(
-                observed_result(read_instrumentation(&report, profile), &mut reasons)
-                    .into_iter()
-                    .flatten(),
-            );
-        } else {
-            reasons.push(format!(
-                "{phase} iteration {} did not complete successfully",
-                iteration + 1
-            ));
-        }
-        let artifacts = build_artifacts(
+        let observation = observe(
             config,
             profile,
-            &outcome,
-            &target,
-            &mut metrics,
+            directory.path(),
+            profiler.as_deref(),
+            iteration,
+            phase,
             &mut reasons,
-        );
-        let budgets = budget_results(&metrics, &profile.budgets);
-        if budgets.iter().any(|row| row["status"] == "unknown") {
-            reasons.push("a budget has no measurement".into());
-        }
-        observations.push(
-            json!({"phase": phase, "iteration": iteration + 1, "metrics": metrics,
-            "command": outcome, "artifacts": artifacts, "budgets": budgets}),
-        );
-        if profile.kind == ResourceKind::Build && outcome.status != CommandStatus::Passed {
+        )?;
+        let passed = observation["command"]["status"] == "passed";
+        observations.push(observation);
+        if profile.kind == ResourceKind::Build && !passed {
             break;
         }
     }
@@ -116,6 +74,76 @@ fn execute(config: &LensConfig, profile: &ResourceProfile) -> Result<Value> {
         "profiler": profiler, "scope": "configured commands on this runner; no cross-machine normalization",
         "measurement_confidence": confidence("resource_profile", &reasons)}),
     )
+}
+
+fn observe(
+    config: &LensConfig,
+    profile: &ResourceProfile,
+    directory: &Path,
+    profiler: Option<&str>,
+    iteration: usize,
+    phase: &str,
+    reasons: &mut Vec<String>,
+) -> Result<Value> {
+    let target = directory.join("target");
+    let report = directory.join(format!("instrumentation-{iteration}.json"));
+    let timing = directory.join(format!("time-{iteration}.txt"));
+    let outcome = invoke(
+        config,
+        &command(config, profile),
+        profiler,
+        &timing,
+        &report,
+        (profile.kind == ResourceKind::Build).then_some(target.as_path()),
+    );
+    let mut metrics = if outcome.status == CommandStatus::Passed && outcome.completed() {
+        resource_metrics(
+            profile,
+            outcome.duration_ms,
+            &timing,
+            &report,
+            profiler.is_some(),
+            reasons,
+        )?
+    } else {
+        reasons.push(format!(
+            "{phase} iteration {} did not complete successfully",
+            iteration + 1
+        ));
+        BTreeMap::new()
+    };
+    let artifacts = build_artifacts(config, profile, &outcome, &target, &mut metrics, reasons);
+    let budgets = budget_results(&metrics, &profile.budgets);
+    if budgets.iter().any(|row| row["status"] == "unknown") {
+        reasons.push("a budget has no measurement".into());
+    }
+    Ok(
+        json!({"phase": phase, "iteration": iteration + 1, "metrics": metrics,
+        "command": outcome, "artifacts": artifacts, "budgets": budgets}),
+    )
+}
+
+fn resource_metrics(
+    profile: &ResourceProfile,
+    elapsed: u128,
+    timing: &Path,
+    report: &Path,
+    peak_rss: bool,
+    reasons: &mut Vec<String>,
+) -> Result<BTreeMap<String, u64>> {
+    let mut metrics = BTreeMap::from([("elapsed_ms".into(), u64::try_from(elapsed)?)]);
+    if peak_rss {
+        let rss = fs::read_to_string(timing)
+            .context("fresh GNU time output missing")
+            .and_then(|text| parse_peak_rss(&text));
+        metrics.extend(observed_result(rss, reasons).map(|rss| ("peak_rss_bytes".into(), rss)));
+    }
+    metrics.extend(
+        observed_result(read_instrumentation(report, profile), reasons)
+            .into_iter()
+            .flatten(),
+    );
+    Ok(metrics)
 }
 
 fn read_instrumentation(path: &Path, profile: &ResourceProfile) -> Result<BTreeMap<String, u64>> {
@@ -293,25 +321,7 @@ fn artifacts(config: &LensConfig, stdout: &str, target: &Path) -> Result<Vec<Val
                 .iter()
                 .any(|kind| kind == "custom-build")
     }) {
-        for path in &artifact.filenames {
-            if path
-                .extension()
-                .is_some_and(|ext| matches!(ext.to_str(), Some("rmeta" | "d" | "pdb")))
-                || !path.is_file()
-            {
-                continue;
-            }
-            let canonical = path.canonicalize()?;
-            ensure!(
-                canonical.starts_with(&canonical_target),
-                "build artifact escaped isolated target directory"
-            );
-            if !paths.insert(canonical.clone()) {
-                continue;
-            }
-            records.push(json!({"package_id": artifact.package_id, "target": artifact.target.name, "kind": artifact.target.kind,
-                "path": canonical.strip_prefix(&canonical_target)?.to_string_lossy(), "bytes": fs::metadata(&canonical)?.len()}));
-        }
+        append_artifacts(&artifact, &canonical_target, &mut paths, &mut records)?;
     }
     ensure!(
         !records.is_empty(),
@@ -319,6 +329,33 @@ fn artifacts(config: &LensConfig, stdout: &str, target: &Path) -> Result<Vec<Val
     );
     records.sort_by(|a, b| a["path"].as_str().cmp(&b["path"].as_str()));
     Ok(records)
+}
+
+fn append_artifacts(
+    artifact: &CargoArtifact,
+    target: &Path,
+    paths: &mut BTreeSet<PathBuf>,
+    records: &mut Vec<Value>,
+) -> Result<()> {
+    for path in artifact.filenames.iter().filter(|path| build_output(path)) {
+        let canonical = path.canonicalize()?;
+        ensure!(
+            canonical.starts_with(target),
+            "build artifact escaped isolated target directory"
+        );
+        if paths.insert(canonical.clone()) {
+            records.push(json!({"package_id": artifact.package_id, "target": artifact.target.name, "kind": artifact.target.kind,
+                "path": canonical.strip_prefix(target)?.to_string_lossy(), "bytes": fs::metadata(&canonical)?.len()}));
+        }
+    }
+    Ok(())
+}
+
+fn build_output(path: &Path) -> bool {
+    path.is_file()
+        && !path
+            .extension()
+            .is_some_and(|ext| matches!(ext.to_str(), Some("rmeta" | "d" | "pdb")))
 }
 
 #[cfg(test)]

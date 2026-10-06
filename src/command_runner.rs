@@ -15,7 +15,7 @@ pub(crate) fn observed_result<T>(
 }
 
 mod cargo;
-pub(crate) use cargo::cargo_artifacts;
+pub(crate) use cargo::{CargoArtifact, cargo_artifacts};
 #[cfg(test)]
 mod tests;
 

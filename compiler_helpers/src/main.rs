@@ -40,12 +40,7 @@ fn main() -> ExitCode {
     }
     let primary = env::var("CARGO_PRIMARY_PACKAGE").as_deref() == Ok("1");
     let Some(destination) = env::var_os("RQLENS_COMPILER_CAPTURE").filter(|_| primary) else {
-        return Command::new(compiler)
-            .args(&args[1..])
-            .status()
-            .map_or(ExitCode::FAILURE, |status| {
-                ExitCode::from(status.code().unwrap_or(1) as u8)
-            });
+        return delegate(&args);
     };
     let sources = args
         .iter()
@@ -62,12 +57,7 @@ fn main() -> ExitCode {
     )
     .expect("build script inventory");
     if build_scripts.contains(&source) {
-        return Command::new(compiler)
-            .args(&args[1..])
-            .status()
-            .map_or(ExitCode::FAILURE, |status| {
-                ExitCode::from(status.code().unwrap_or(1) as u8)
-            });
+        return delegate(&args);
     }
     let mut callback = Inventory {
         destination: PathBuf::from(destination),
@@ -87,6 +77,16 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     exit
+}
+
+// Called after main has established a nonempty compiler argv.
+fn delegate(args: &[String]) -> ExitCode {
+    Command::new(&args[0])
+        .args(&args[1..])
+        .status()
+        .map_or(ExitCode::FAILURE, |status| {
+            ExitCode::from(status.code().unwrap_or(1) as u8)
+        })
 }
 
 struct Inventory {

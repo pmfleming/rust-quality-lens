@@ -108,6 +108,26 @@ struct Selection {
 }
 
 impl Selection {
+    fn select_targets(
+        &mut self,
+        package: &Package,
+        manifest: PathBuf,
+        enabled: &BTreeSet<String>,
+        all_targets: bool,
+    ) -> Result<()> {
+        for target in package
+            .targets
+            .iter()
+            .filter(|target| target.required_features.is_subset(enabled))
+        {
+            let source = fs::canonicalize(&target.src_path)?;
+            for &test in target.modes(all_targets)? {
+                self.units.insert((manifest.clone(), source.clone(), test));
+            }
+        }
+        Ok(())
+    }
+
     fn new(metadata: &CargoInventory, config: &LensConfig) -> Result<Self> {
         let scope = &config.verification;
         let members = if scope.workspace {
@@ -144,18 +164,7 @@ impl Selection {
                     .is_none(),
                 "ambiguous selected package"
             );
-            for target in package
-                .targets
-                .iter()
-                .filter(|target| target.required_features.is_subset(enabled))
-            {
-                let source = fs::canonicalize(&target.src_path)?;
-                for &test in target.modes(scope.all_targets)? {
-                    selected
-                        .units
-                        .insert((manifest.clone(), source.clone(), test));
-                }
-            }
+            selected.select_targets(package, manifest, enabled, scope.all_targets)?;
         }
         ensure!(
             !selected.units.is_empty(),

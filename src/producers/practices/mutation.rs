@@ -23,22 +23,7 @@ pub(super) fn check(config: &LensConfig) -> Value {
             "category": "verified-gate", "source": source, "evidence": {"reason": error.to_string()}});
         }
     };
-    let mut arguments = vec![
-        "mutants".into(),
-        "--no-times".into(),
-        "--output".into(),
-        directory.path().to_string_lossy().into_owned(),
-    ];
-    if config.verification.workspace {
-        arguments.push("--workspace".into());
-        for package in &config.verification.exclude {
-            arguments.extend(["--exclude".into(), package.clone()]);
-        }
-    }
-    arguments.extend(config.verification.cargo_feature_arguments());
-    if config.verification.locked {
-        arguments.extend(["--".into(), "--locked".into()]);
-    }
+    let arguments = mutation_arguments(config, directory.path());
     let mut check = super::cargo_check(
         config,
         rule,
@@ -68,6 +53,26 @@ pub(super) fn check(config: &LensConfig) -> Value {
     metrics["measurement_confidence"] = super::behavior_confidence("mutation_outcomes", &reasons);
     check["metrics"] = metrics;
     check
+}
+
+fn mutation_arguments(config: &LensConfig, directory: &std::path::Path) -> Vec<String> {
+    let mut args = vec![
+        "mutants".into(),
+        "--no-times".into(),
+        "--output".into(),
+        directory.to_string_lossy().into_owned(),
+    ];
+    if config.verification.workspace {
+        args.push("--workspace".into());
+        for package in &config.verification.exclude {
+            args.extend(["--exclude".into(), package.clone()]);
+        }
+    }
+    args.extend(config.verification.cargo_feature_arguments());
+    if config.verification.locked {
+        args.extend(["--".into(), "--locked".into()]);
+    }
+    args
 }
 
 fn normalize(document: &Value) -> Result<Value> {

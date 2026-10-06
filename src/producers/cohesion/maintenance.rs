@@ -149,20 +149,7 @@ fn parse_log(text: &str) -> Result<Vec<Commit>> {
             .to_string();
         let timestamp = tokens.next().context("missing Git timestamp")?.parse()?;
         ensure!(tokens.next() == Some(""), "missing Git header separator");
-        let mut paths = Vec::new();
-        while let Some(path) = tokens.peek() {
-            if path.is_empty() {
-                break;
-            }
-            let path = tokens.next().context("missing Git path")?;
-            let path = if paths.is_empty() {
-                path.strip_prefix('\n').unwrap_or(path)
-            } else {
-                path
-            };
-            ensure!(!path.is_empty(), "empty Git path");
-            paths.push(path.to_string());
-        }
+        let paths = commit_paths(&mut tokens)?;
         commits.push(Commit {
             author,
             timestamp,
@@ -170,6 +157,23 @@ fn parse_log(text: &str) -> Result<Vec<Commit>> {
         });
     }
     Ok(commits)
+}
+
+fn commit_paths<'a>(
+    tokens: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>,
+) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    while tokens.peek().is_some_and(|path| !path.is_empty()) {
+        let path = tokens.next().context("missing Git path")?;
+        let path = if paths.is_empty() {
+            path.strip_prefix('\n').unwrap_or(path)
+        } else {
+            path
+        };
+        ensure!(!path.is_empty(), "empty Git path");
+        paths.push(path.to_string());
+    }
+    Ok(paths)
 }
 
 #[derive(Default)]
@@ -202,35 +206,7 @@ fn analyze(commits: &[Commit], graph: &ModuleGraph, config: &LensConfig, end: i6
             .or_default()
             .insert(module.id.clone());
     }
-    let mut recent = Window::default();
-    let mut previous = Window::default();
-    for commit in commits {
-        if commit.timestamp > end || commit.timestamp <= end - 2 * seconds {
-            continue;
-        }
-        let window = if commit.timestamp > boundary {
-            &mut recent
-        } else {
-            &mut previous
-        };
-        // Count every file before exclusions so bulk changes cannot appear narrow.
-        if commit.paths.len() > config.history.max_commit_files {
-            window.excluded_large_commits += 1;
-            continue;
-        }
-        let modules: BTreeSet<_> = commit
-            .paths
-            .iter()
-            .filter(|path| !excluded(path, &config.history))
-            .filter_map(|path| by_path.get(path))
-            .flatten()
-            .cloned()
-            .collect();
-        if modules.is_empty() {
-            continue;
-        }
-        window.record(commit, modules);
-    }
+    let (recent, previous) = collect_windows(commits, config, &by_path, end);
     let recent_report = window_report(&recent, graph);
     let previous_report = window_report(&previous, graph);
     let owner_activity: Vec<_> = previous
@@ -252,6 +228,44 @@ fn analyze(commits: &[Commit], graph: &ModuleGraph, config: &LensConfig, end: i6
             "days_per_window": config.history.window_days},
         "filters": {"max_commit_files": config.history.max_commit_files, "exclude_paths": config.history.exclude_paths},
         "recent": recent_report, "previous": previous_report, "previous_owner_activity": owner_activity})
+}
+
+fn collect_windows(
+    commits: &[Commit],
+    config: &LensConfig,
+    by_path: &BTreeMap<String, BTreeSet<String>>,
+    end: i64,
+) -> (Window, Window) {
+    let seconds = i64::from(config.history.window_days) * 86400;
+    let mut recent = Window::default();
+    let mut previous = Window::default();
+    for commit in commits
+        .iter()
+        .filter(|commit| commit.timestamp <= end && commit.timestamp > end - 2 * seconds)
+    {
+        let window = if commit.timestamp > end - seconds {
+            &mut recent
+        } else {
+            &mut previous
+        };
+        // Count every file before exclusions so bulk changes cannot appear narrow.
+        if commit.paths.len() > config.history.max_commit_files {
+            window.excluded_large_commits += 1;
+            continue;
+        }
+        let modules: BTreeSet<_> = commit
+            .paths
+            .iter()
+            .filter(|path| !excluded(path, &config.history))
+            .filter_map(|path| by_path.get(path))
+            .flatten()
+            .cloned()
+            .collect();
+        if !modules.is_empty() {
+            window.record(commit, modules);
+        }
+    }
+    (recent, previous)
 }
 
 impl Window {

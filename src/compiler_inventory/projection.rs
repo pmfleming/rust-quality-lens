@@ -34,26 +34,8 @@ pub(crate) fn validate_type_projection(row: &Value) -> Result<()> {
         .context("missing compiler type ID")?;
     let origin: Origin = serde_json::from_value(row["origin"].clone())?;
     let impls: Vec<ImplRecord> = serde_json::from_value(row["implementations"].clone())?;
-    let mut ids = BTreeSet::new();
-    definition(&mut ids, id, &origin)?;
-    let mut methods = BTreeSet::new();
-    let mut files = BTreeSet::new();
-    for imp in &impls {
-        definition(&mut ids, &imp.id, &imp.origin)?;
-        ensure!(
-            imp.owner_kind == "local_adt" && imp.owner_id.as_deref() == Some(id),
-            "type projection uses a different compiler owner"
-        );
-        for method in &imp.method_ids {
-            ensure!(
-                !method.is_empty() && methods.insert(method),
-                "duplicate compiler method in type projection"
-            );
-        }
-        if let Some(location) = &imp.origin.location {
-            files.insert(&location.path);
-        }
-    }
+    let methods = validate_implementations(&impls, id, &origin)?;
+    let files = impl_files(impls.iter());
     let complete = row["measurement_confidence"]["complete"] == true;
     ensure!(
         !complete
@@ -70,7 +52,7 @@ pub(crate) fn validate_type_projection(row: &Value) -> Result<()> {
         "implementation file attribution differs from compiler origins"
     );
     for (field, observed, count) in [
-        ("method_count", "observed_method_count", methods.len()),
+        ("method_count", "observed_method_count", methods),
         ("impl_block_count", "observed_impl_block_count", impls.len()),
         ("impl_file_count", "observed_impl_file_count", files.len()),
     ] {
@@ -80,6 +62,32 @@ pub(crate) fn validate_type_projection(row: &Value) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn validate_implementations(impls: &[ImplRecord], id: &str, origin: &Origin) -> Result<usize> {
+    let mut ids = BTreeSet::new();
+    definition(&mut ids, id, origin)?;
+    let mut methods = BTreeSet::new();
+    for imp in impls {
+        definition(&mut ids, &imp.id, &imp.origin)?;
+        ensure!(
+            imp.owner_kind == "local_adt" && imp.owner_id.as_deref() == Some(id),
+            "type projection uses a different compiler owner"
+        );
+        for method in &imp.method_ids {
+            ensure!(
+                !method.is_empty() && methods.insert(method),
+                "duplicate compiler method in type projection"
+            );
+        }
+    }
+    Ok(methods.len())
+}
+
+fn impl_files<'a>(impls: impl Iterator<Item = &'a ImplRecord>) -> BTreeSet<&'a std::path::PathBuf> {
+    impls
+        .filter_map(|imp| imp.origin.location.as_ref().map(|location| &location.path))
+        .collect()
 }
 
 fn type_row(profile: &Profile, ty: &TypeRecord, confidence: &Value) -> Value {
@@ -92,10 +100,7 @@ fn type_row(profile: &Profile, ty: &TypeRecord, confidence: &Value) -> Value {
         .iter()
         .flat_map(|imp| &imp.method_ids)
         .collect::<BTreeSet<_>>();
-    let files = impls
-        .iter()
-        .filter_map(|imp| imp.origin.location.as_ref().map(|location| &location.path))
-        .collect::<BTreeSet<_>>();
+    let files = impl_files(impls.iter().copied());
     let location = ty.origin.location.as_ref();
     let context_id = profile.context_id();
     let module = ty

@@ -22,3 +22,13 @@ cohesion. Their current source-only backends cannot prove arbitrary macro-genera
 ownership or aliased/cfg-dependent receiver relationships. No confidence flag was
 weakened to conceal this limitation. Source/rule/test completeness is repaired;
 full type/structural completeness is **not** claimed.
+
+## 2. Function hotspot ceiling
+
+Split resource sampling/decoding, Git parsing/window collection, compiler target
+selection/projection validation, configuration reading and mutation arguments into
+focused helpers. Reuse compiler-command delegation instead of duplicating it.
+Every measured function now scores at most **69.66**, below the unchanged 70 gate
+(previous maximum 118.05). Workspace tests and Clippy pass. The excluded pinned
+nightly compiler adapter cannot be executed here: rustup/rustc-dev is unavailable;
+its delegation-only change is source-reviewed and formatted, not claimed live-tested.

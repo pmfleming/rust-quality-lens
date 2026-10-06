@@ -554,19 +554,7 @@ impl LensConfig {
     }
 
     pub(crate) fn load(path: Option<PathBuf>) -> Result<Self> {
-        let config_path = resolve_config_input(path)?;
-        let config_dir = config_path
-            .as_deref()
-            .and_then(Path::parent)
-            .map(Path::to_path_buf)
-            .unwrap_or(std::env::current_dir()?);
-        let raw = match &config_path {
-            Some(path) => toml::from_str::<RawConfig>(
-                &fs::read_to_string(path)
-                    .with_context(|| format!("reading config {}", path.display()))?,
-            )?,
-            _ => RawConfig::default(),
-        };
+        let (raw, config_dir) = read_config(path)?;
         let project_root =
             resolve_config_path(raw.project_root.unwrap_or_else(|| ".".into()), &config_dir);
         let project_root = fs::canonicalize(&project_root).unwrap_or(project_root);
@@ -811,6 +799,23 @@ pub(crate) fn discover_config(start: impl AsRef<Path>) -> Option<PathBuf> {
             return None;
         }
     }
+}
+
+fn read_config(path: Option<PathBuf>) -> Result<(RawConfig, PathBuf)> {
+    let path = resolve_config_input(path)?;
+    let directory = path
+        .as_deref()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or(std::env::current_dir()?);
+    let raw = match path {
+        Some(path) => toml::from_str(
+            &fs::read_to_string(&path)
+                .with_context(|| format!("reading config {}", path.display()))?,
+        )?,
+        None => RawConfig::default(),
+    };
+    Ok((raw, directory))
 }
 
 fn resolve_config_input(path: Option<PathBuf>) -> Result<Option<PathBuf>> {

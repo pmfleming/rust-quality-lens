@@ -176,39 +176,7 @@ fn live_compiler_integrates_cfg_macros_derives_attributes_and_owners() -> Result
     let mut first = measure(root.path(), "compiler-inventory", "compiler_inventory.json")?;
     assert_eq!(first["measurement_confidence"]["complete"], true, "{first}");
     assert_eq!(first["summary"]["context_count"], 2);
-    for profile in first["data"]["profiles"].as_array().context("profiles")? {
-        assert!(
-            profile["cfg"]
-                .as_array()
-                .context("cfg")?
-                .iter()
-                .any(|cfg| cfg == "from_build_script")
-        );
-        for name in ["Included", "IncludedNested", "AttributePass"] {
-            let included = profile["types"]
-                .as_array()
-                .context("types")?
-                .iter()
-                .find(|ty| ty["name"] == name)
-                .context("generated type")?;
-            assert_eq!(
-                included["origin"]["location_kind"], "invocation_anchor",
-                "{included}"
-            );
-            assert_eq!(
-                included["origin"]["location"]["path"],
-                root.path().join("src/lib.rs").to_string_lossy().as_ref()
-            );
-        }
-        assert_eq!(
-            profile["types"]
-                .as_array()
-                .context("types")?
-                .iter()
-                .any(|ty| ty["name"] == "TestOnly"),
-            profile["test"] == true
-        );
-    }
+    validate_profile_origins(root.path(), &first)?;
     let mut second = measure(root.path(), "compiler-inventory", "compiler_inventory.json")?;
     normalize(&mut first);
     normalize(&mut second);
@@ -224,6 +192,41 @@ fn live_compiler_integrates_cfg_macros_derives_attributes_and_owners() -> Result
         "declarations must not certify source/body rule coverage"
     );
     validate_feature_contexts(root.path(), &driver)
+}
+
+fn validate_profile_origins(root: &Path, inventory: &Value) -> Result<()> {
+    for profile in inventory["data"]["profiles"]
+        .as_array()
+        .context("profiles")?
+    {
+        assert!(
+            profile["cfg"]
+                .as_array()
+                .context("cfg")?
+                .iter()
+                .any(|cfg| cfg == "from_build_script")
+        );
+        let types = profile["types"].as_array().context("types")?;
+        for name in ["Included", "IncludedNested", "AttributePass"] {
+            let included = types
+                .iter()
+                .find(|ty| ty["name"] == name)
+                .context("generated type")?;
+            assert_eq!(
+                included["origin"]["location_kind"], "invocation_anchor",
+                "{included}"
+            );
+            assert_eq!(
+                included["origin"]["location"]["path"],
+                root.join("src/lib.rs").to_string_lossy().as_ref()
+            );
+        }
+        assert_eq!(
+            types.iter().any(|ty| ty["name"] == "TestOnly"),
+            profile["test"] == true
+        );
+    }
+    Ok(())
 }
 
 fn validate_type_health(root: &Path) -> Result<()> {
