@@ -27,6 +27,8 @@ pub(crate) enum Commands {
     Check(CheckArgs),
     Calibrate(ProjectReportArgs),
     Performance(PerformanceArgs),
+    /// Execute configured compatibility and resource profiles (opt-in, potentially expensive).
+    Profiles(ProfileArgs),
     Outcomes(OutcomesArgs),
     Telemetry(TelemetryArgs),
     Ingest(IngestArgs),
@@ -110,6 +112,18 @@ pub(crate) struct PerformanceArgs {
     pub(crate) baseline: Option<PathBuf>,
     #[arg(long)]
     pub(crate) no_run: bool,
+    #[arg(long)]
+    pub(crate) config: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub(crate) struct ProfileArgs {
+    /// Reject skipped profiles and any incomplete measurement after writing the report.
+    #[arg(long)]
+    pub(crate) require_complete: bool,
+    /// Print the quality_profiles.json schema without executing commands.
+    #[arg(long)]
+    pub(crate) schema: bool,
     #[arg(long)]
     pub(crate) config: Option<PathBuf>,
 }

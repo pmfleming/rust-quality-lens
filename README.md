@@ -17,7 +17,8 @@ design, validation protocol, and risk-model history.
   mode)
 
 Coverage, auditing, mutation, fuzzing, sanitizers, and Miri require their
-corresponding optional tools. Missing tools are reported explicitly and never
+corresponding optional tools. Opt-in resource peak-RSS profiles require GNU time
+on Linux; compatibility profiles may require installed rustup toolchains. Missing tools are reported explicitly and never
 count as passing.
 
 For opt-in compiler-expanded type inventory, build the separately pinned
@@ -228,6 +229,7 @@ are rejected rather than silently sanitized into another report's filename.
 | Read an existing diff | `rqlens review --diff-file pr.diff` |
 | Capture Criterion results | `rqlens performance` |
 | Compare benchmark results | `rqlens performance --baseline baseline/analysis` |
+| Execute declared compatibility/resource profiles | `rqlens profiles --require-complete` |
 | Collect repository outcomes | `rqlens outcomes` |
 | Import reviewed outcome labels | `rqlens outcomes --labels reviewed-outcomes.json` |
 | Ingest operational signals | `rqlens telemetry --input production-signals.json --max-age-hours 24` |
@@ -253,6 +255,9 @@ not defect probabilities. Telemetry retains explicit status, source, window,
 and freshness rather than turning missing or stale observations into a pass.
 Observation age is checked with exact durations both at ingestion and whenever
 operational policy consumes the evidence.
+
+See [extended metrics](docs/extended-metrics.md) for structured mutation/flakiness,
+maintenance history, structural cohesion, and opt-in compatibility/resource profiles.
 
 Use `<command> --help` for input contracts and command-specific options.
 

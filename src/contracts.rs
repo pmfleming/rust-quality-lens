@@ -175,7 +175,7 @@ pub(crate) struct ReviewMeasurement {
 pub(crate) fn artifact_schemas(tool: &MeasureTool) -> Value {
     match tool {
         MeasureTool::All => {
-            let schemas = MeasureTool::schema_tools()
+            let mut schemas = MeasureTool::schema_tools()
                 .into_iter()
                 .map(|tool| {
                     (
@@ -184,6 +184,7 @@ pub(crate) fn artifact_schemas(tool: &MeasureTool) -> Value {
                     )
                 })
                 .collect::<serde_json::Map<_, _>>();
+            schemas.insert("quality_profiles.json".into(), crate::profiles::schema());
             json!({
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "title": "rust-quality-lens artifact schemas",

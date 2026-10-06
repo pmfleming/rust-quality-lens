@@ -21,6 +21,7 @@ struct RawConfig {
     verification: Option<VerificationConfig>,
     architecture: Option<ArchitectureConfig>,
     history: Option<HistoryConfig>,
+    profiles: Option<crate::profiles::ProfileConfig>,
     policy: Option<PolicyConfig>,
 }
 
@@ -451,6 +452,7 @@ pub(crate) struct LensConfig {
     pub(crate) verification: VerificationConfig,
     pub(crate) architecture: ArchitectureConfig,
     pub(crate) history: HistoryConfig,
+    pub(crate) profiles: crate::profiles::ProfileConfig,
     pub(crate) policy: PolicyConfig,
 }
 
@@ -477,6 +479,7 @@ impl LensConfig {
             verification: Default::default(),
             architecture: Default::default(),
             history: Default::default(),
+            profiles: Default::default(),
             policy: Default::default(),
         }
     }
@@ -617,6 +620,8 @@ impl LensConfig {
         architecture.validate()?;
         let history = raw.history.unwrap_or_default();
         history.validate()?;
+        let profiles = raw.profiles.unwrap_or_default();
+        profiles.validate()?;
         let policy = raw.policy.unwrap_or_default();
         policy.validate()?;
         let project_name = raw.project_name.unwrap_or_else(|| {
@@ -647,6 +652,7 @@ impl LensConfig {
             verification,
             architecture,
             history,
+            profiles,
             policy,
         })
     }
@@ -891,6 +897,16 @@ miri = false
 # deny = ["app::lib::infrastructure::**"]
 # level = "error"
 
+# Optional executed profiles (run separately with `rqlens profiles`):
+# [[profiles.compatibility]]
+# id = "minimum-default"
+# toolchain = "msrv"
+# operation = "check"
+# [[profiles.resources]]
+# id = "release-build"
+# kind = "build"
+# release = true
+
 # Stable rule limits prevent new findings while allowing an explicit baseline:
 # [policy.rules."rust.reliability.expect"]
 # level = "error"
@@ -971,6 +987,7 @@ pub(crate) fn config_schema() -> Value {
                     "miri": {"type": "boolean", "default": false}
                 }
             },
+            "profiles": crate::profiles::config::schema(),
             "history": {
                 "type": "object", "additionalProperties": false,
                 "properties": {

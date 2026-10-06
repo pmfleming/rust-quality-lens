@@ -27,6 +27,7 @@ mod outcomes;
 mod performance;
 mod policy;
 mod producers;
+mod profiles;
 #[cfg(test)]
 mod refactor_behavior_tests;
 mod review;

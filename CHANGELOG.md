@@ -6,6 +6,8 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Added
 
+- Opt-in `profiles` command and versioned `quality_profiles.json`: executed MSRV/toolchain/target/feature compatibility rows, isolated cold/warm build timings and artifact sizes, command workload timing, Linux GNU-time peak RSS, fresh instrumented allocation/instruction counters and per-observation resource budgets. Skipped configurations retain their declared denominator; missing tools/results remain partial.
+
 - Relationship-based structural cohesion for same-file inherent receiver methods: shared-field pairs, internal-call connectivity and responsibility clusters, with null scores for unsupported or inapplicable source patterns. Declaration diversity remains separate and calibrated scores are unchanged.
 
 - Bounded recent/previous Git maintenance windows with pairwise co-change support/lift, change amplification, contributor concentration/entropy and prior-owner activity. Configurable bulk-commit/path exclusions and shallow-history confidence accompany the raw observations.

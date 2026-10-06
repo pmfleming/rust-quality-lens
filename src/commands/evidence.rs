@@ -19,6 +19,11 @@ pub(super) fn run(command: Commands) -> Result<()> {
             ),
             "performance evidence",
         ),
+        Commands::Profiles(args) if args.schema => super::print_json(&crate::profiles::schema()),
+        Commands::Profiles(args) => write_report(
+            crate::profiles::run(&LensConfig::load(args.config)?, args.require_complete),
+            "quality profiles",
+        ),
         Commands::Outcomes(args) => write_report(
             outcomes::collect(&LensConfig::load(args.config)?, args.labels),
             "repository outcomes",

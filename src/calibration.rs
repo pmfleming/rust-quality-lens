@@ -195,6 +195,7 @@ fn calibration_config(
         verification: Default::default(),
         architecture: Default::default(),
         history: Default::default(),
+        profiles: Default::default(),
         policy: Default::default(),
     })
 }

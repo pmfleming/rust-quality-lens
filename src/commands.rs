@@ -11,6 +11,7 @@ pub(crate) fn run(command: Commands) -> Result<()> {
     match command {
         Commands::Calibrate(_)
         | Commands::Performance(_)
+        | Commands::Profiles(_)
         | Commands::Outcomes(_)
         | Commands::Telemetry(_)
         | Commands::Ingest(_)

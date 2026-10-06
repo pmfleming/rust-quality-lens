@@ -115,3 +115,117 @@ unknown fields, ambiguous ownership and cfg-dependent inventories are explicit
 limitations. Observed relationships remain visible, but affected ratios are null
 and confidence is partial. These source-only observations are not compiler-backed,
 and do not change existing calibrated risk scores.
+
+## Executed compatibility and resource profiles
+
+Profiles are deliberately opt-in and are **not** run by `measure all`:
+
+```bash
+rqlens profiles --config rqlens.toml
+rqlens profiles --require-complete
+rqlens profiles --schema
+```
+
+They write `quality_profiles.json`, a separate versioned artifact with the input
+fingerprint, runner/toolchain environment, commands, per-profile confidence and
+explicit declared-profile denominators. Failures, unavailable tools and resource
+budget breaches produce a nonzero exit **after writing evidence**. Profiles for
+other host OSes are skipped and remain in the denominator; `--require-complete`
+also rejects these skips and all other partial evidence. Each report describes one
+runner; cross-runner matrix aggregation and baseline regression comparison are not
+implemented. This command's gates are separate from `rqlens check` policies.
+
+### Compatibility
+
+```toml
+[[profiles.compatibility]]
+id = "minimum-default"
+toolchain = "msrv"
+operation = "check"
+
+[[profiles.compatibility]]
+id = "active-minimal-tests"
+toolchain = "active"
+operation = "test"
+no_default_features = true
+features = []
+
+[[profiles.compatibility]]
+id = "wasm-minimal"
+toolchain = "stable"
+host_os = "linux"
+target = "wasm32-unknown-unknown"
+operation = "check"
+no_default_features = true
+```
+
+`active` uses the current Cargo/compiler. `msrv` resolves the effective root or
+workspace `rust-version`, then executes that compiler, not merely a metadata
+comparison. Other names select installed toolchains through `rustup run`. An exact
+version matching the active compiler can run without rustup. Missing toolchains or
+target support remain unavailable; RQLens never installs them automatically.
+
+Each row overrides feature selection explicitly; workspace, all-targets, exclusions
+and lockfile policy are inherited from `[verification]`. Cargo target defaults apply
+when `target` is omitted. Builds use isolated target directories. `operation="test"`
+executes configured Cargo tests, while `check` claims compilation only. It does not
+claim doctest or runtime compatibility from cross-compilation. `no_std`/`alloc`
+coverage requires declaring feature/target combinations that exercise those modes.
+
+### Resources
+
+```toml
+[[profiles.resources]]
+id = "release-size-and-build"
+kind = "build"
+release = true
+peak_rss = true
+budgets = { artifact_bytes = 20000000 }
+
+[[profiles.resources]]
+id = "parser-workload"
+kind = "command"
+command = ["target/release/parser-bench", "fixtures/large.json"]
+runs = 3
+peak_rss = true
+instrumented_metrics = ["allocations", "allocated_bytes"]
+budgets = { elapsed_ms = 2000, peak_rss_bytes = 100000000, allocations = 5000 }
+```
+
+Build profiles execute one cold build in a fresh target directory, then one warm
+**no-source-change** build in the same directory with Cargo incremental mode enabled.
+The latter is a warm/no-op cost, not a fabricated incremental-edit benchmark. External
+compiler caches and OS caches are not cleared. Existing project target directories
+are never cleaned. Output artifact records retain per-file sizes, package, target
+and kind; `artifact_bytes` sums current workspace outputs excluding external
+packages, build-script executables and `.rmeta`/`.d`/`.pdb` metadata. It is not a
+stripped binary-size estimate or an attribution of dependency code inside binaries.
+Temporary build outputs are removed after measurement.
+
+Command profiles execute an argv directly (no implicit shell) in the project root.
+Use trusted projects and commands: build scripts and workloads execute code. Declare
+non-Rust workload inputs and prebuilt executables in `fingerprint_inputs` when their
+contents affect a result. Build profile feature scope comes from `[verification]`;
+command profiles run exactly the argv provided and can include build overhead.
+
+Every observation has elapsed milliseconds. Opt-in peak RSS uses the GNU `time`
+executable on Linux; `%M` is converted from KiB to bytes. It is the reported maximum
+for the command/children, **not** the sum of simultaneous process-tree RSS, retained
+heap or a leak measurement. Unsupported platforms or missing GNU time remain
+partial, never zero. Command tails, status, profiler and runner provenance are retained.
+
+Allocations, allocated bytes, instructions and cache misses require instrumentation.
+The workload/adapter must write a fresh report to the unique path supplied in
+`RQLENS_RESOURCE_REPORT` on **each** invocation:
+
+```json
+{"schema_version":1,"metrics":{"allocations":250,"allocated_bytes":16384}}
+```
+
+Use allocator instrumentation or an appropriate profiler adapter to supply real
+counters. RQLens validates and normalizes them; it does not derive them from source
+or claim a profiler ran merely because JSON exists. All requested counters must be
+nonnegative integers; missing reports, missing counters or unsupported versions are
+partial. Each run uses a new file path, preventing reuse of old results. Budgets
+apply independently to each observation and unknown measurements cannot pass a
+budget. Measurements are workload/profile/environment-specific, not universal scores.
