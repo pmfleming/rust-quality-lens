@@ -471,6 +471,14 @@ fn artifact_schema_for_tool(tool: &MeasureTool) -> Value {
         MeasureTool::Locality | MeasureTool::Leverage => topology_schema(tool),
         MeasureTool::ModuleCohesion => {
             let mut schema = summary_arrays_schema(tool, &["records"]);
+            schema["properties"]["structural"] = json!({"type": "object", "required": ["model_version", "scope", "records", "measurement_confidence"],
+                "properties": {"model_version": {"const": 1}, "scope": {"type": "string"},
+                    "records": {"type": "array", "items": {"type": "object", "required": ["qualified_type_name", "receiver_method_count", "methods", "measurement_confidence"],
+                        "properties": {"field_sharing_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                            "connected_pair_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                            "component_count": {"type": ["integer", "null"], "minimum": 1},
+                            "measurement_confidence": measurement_confidence_schema()}}},
+                    "measurement_confidence": measurement_confidence_schema()}});
             schema["properties"]["maintenance"] = json!({"type": "object", "required": ["model_version", "recent", "previous", "measurement_confidence"],
                 "properties": {"model_version": {"const": 1}, "recent": {"type": ["object", "null"]}, "previous": {"type": ["object", "null"]},
                     "measurement_confidence": measurement_confidence_schema()}});

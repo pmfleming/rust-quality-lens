@@ -582,6 +582,36 @@ fn review_uses_diff_file_scope() {
 }
 
 #[test]
+fn structural_cohesion_is_published_with_explicit_scope() {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir(root.path().join("src")).unwrap();
+    fs::write(
+        root.path().join("Cargo.toml"),
+        "[package]\nname='cohesion-fixture'\nversion='0.1.0'\nedition='2024'\n",
+    )
+    .unwrap();
+    fs::write(root.path().join("src/lib.rs"), "pub struct State { x: i32, y: i32 } impl State { pub fn x(&self) -> i32 { self.x } pub fn y(&self) -> i32 { self.y } }").unwrap();
+    let config = root.path().join("rqlens.toml");
+    fs::write(&config, "[rust]\nidentity_resolution='disabled'\n").unwrap();
+    run(&[
+        "measure",
+        "module-cohesion",
+        "--config",
+        config.to_str().unwrap(),
+    ]);
+    let report = read_json(root.path().join("target/analysis/module_cohesion.json"));
+    assert_eq!(report["structural"]["model_version"], 1);
+    let row = &report["structural"]["records"][0];
+    assert_eq!(row["field_sharing_percent"], 0.0);
+    assert_eq!(row["component_count"], 2);
+    assert_eq!(row["measurement_confidence"]["complete"], true);
+    assert_eq!(
+        report["maintenance"]["measurement_confidence"]["complete"],
+        false
+    );
+}
+
+#[test]
 fn measurement_bundle_preserves_contracts_scores_and_attribution() {
     let analysis = measure_fixture("all", "tests/fixtures/mini_rust_project/rqlens.toml");
     generated_artifacts_keep_expected_top_level_shapes(&analysis);

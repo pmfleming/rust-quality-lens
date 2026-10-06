@@ -8,6 +8,7 @@ use crate::facts::RunContext;
 use crate::util::{project_relative_path, round2};
 
 mod maintenance;
+mod structural;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let graph = context.module_graph();
@@ -41,6 +42,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
                 "path": path,
                 "dimension_basis": "syntactic declaration categories, not inferred responsibilities",
                 "calibration": "uncalibrated-advisory",
+                "declaration_category_count": dimensions,
                 "responsibility_dimension_count": dimensions,
                 "responsibility_focus": round2((1.0 - dimensions.saturating_sub(1) as f64 / 3.0).max(0.0) * 100.0),
                 "outbound_dependencies": outbound,
@@ -53,12 +55,16 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         .collect::<Vec<_>>();
     let git_available = !changes.is_empty();
     let maintenance = maintenance::produce(config, graph);
+    let structural = structural::produce(config, context);
     let mut confidence: crate::contracts::MeasurementConfidence =
         serde_json::from_value(cohesion_confidence(context, git_available)?)?;
     if maintenance["measurement_confidence"]["complete"] != true {
         confidence.mark_partial(
             "maintenance history is incomplete; see maintenance.measurement_confidence",
         );
+    }
+    if structural["measurement_confidence"]["complete"] != true {
+        confidence.mark_partial("structural cohesion has unsupported source relationships; see structural.measurement_confidence");
     }
     Ok(json!({
         "summary": {
@@ -68,6 +74,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         },
         "records": records,
         "maintenance": maintenance,
+        "structural": structural,
         "measurement_confidence": confidence,
     }))
 }

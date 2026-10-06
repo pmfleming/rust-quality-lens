@@ -79,3 +79,39 @@ No observations means empty rows and null amplification statistics, not zero ris
 Shallow, missing or malformed Git history is partial. Source/graph limitations are
 also retained in the parent artifact. These metrics are not developer productivity
 scores, a definitive bus factor or calibrated defect predictions.
+
+## Structural cohesion
+
+`rqlens measure module-cohesion` also writes `data.structural`. The old
+`responsibility_focus` and `responsibility_dimension_count` fields remain for
+compatibility and still mean declaration-category diversity, not actual cohesion.
+`declaration_category_count` makes that meaning explicit.
+
+Structural model v1 groups receiver methods across inherent impl blocks of a
+locally declared struct **within one file and lexical module**. Each record has
+Cargo module/package/target identity, qualified type name, method source lines,
+directly accessed fields (including tuple fields), and `self.method()` calls.
+Trait methods and static functions/constructors are excluded and counted.
+
+For `n` receiver methods there are `n * (n - 1) / 2` possible unordered pairs:
+
+- `field_sharing_percent`: pairs directly accessing at least one common field,
+  divided by possible pairs. This is a TCC-like observation, not a canonical
+  language-independent TCC implementation.
+- `connected_pair_percent`: pairs in the same connected component of the graph
+  whose edges are shared fields **or** direct internal receiver calls. This makes
+  delegation and indirect connectivity visible without pretending they share fields.
+- `component_count` and `observed_components`: separate method clusters, analogous
+  to LCOM4-style relationship evidence.
+
+Fewer than two methods or no directly observed receiver state is not applicable:
+ratios/component count are null, not a penalty for stateless utilities. This is
+not whole-type or whole-module semantic cohesion: other files, trait impls and
+generated methods are outside the scope. Reads and writes both count as access;
+no claim of alias analysis or mutation-flow resolution is made.
+
+Macro bodies, whole-receiver aliases/escapes/destructuring, calls outside the group,
+unknown fields, ambiguous ownership and cfg-dependent inventories are explicit
+limitations. Observed relationships remain visible, but affected ratios are null
+and confidence is partial. These source-only observations are not compiler-backed,
+and do not change existing calibrated risk scores.

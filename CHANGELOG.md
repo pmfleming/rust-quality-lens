@@ -6,6 +6,8 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Added
 
+- Relationship-based structural cohesion for same-file inherent receiver methods: shared-field pairs, internal-call connectivity and responsibility clusters, with null scores for unsupported or inapplicable source patterns. Declaration diversity remains separate and calibrated scores are unchanged.
+
 - Bounded recent/previous Git maintenance windows with pairwise co-change support/lift, change amplification, contributor concentration/entropy and prior-owner activity. Configurable bulk-commit/path exclusions and shallow-history confidence accompany the raw observations.
 
 - Structured fresh cargo-mutants outcomes with explicit mutation-score denominators, and Cargo-qualified per-test repeated-run flakiness evidence. Missing or unsupported structured results make practices evidence partial.
