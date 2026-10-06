@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+use anyhow::Context;
 
 use serde_json::Value;
 use std::{
@@ -7,49 +7,59 @@ use std::{
     process::{Command, Output},
 };
 
-fn invoke(config: &Path, complete: bool) -> Output {
+fn invoke(config: &Path, complete: bool) -> anyhow::Result<Output> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_rqlens"));
     command.args(["profiles", "--config"]).arg(config);
     if complete {
         command.arg("--require-complete");
     }
-    command.output().expect("run profiles CLI")
+    command.output().context("run profiles CLI")
 }
 
-fn fixture() -> tempfile::TempDir {
-    let root = tempfile::tempdir().unwrap();
-    fs::create_dir(root.path().join("src")).unwrap();
-    fs::write(root.path().join("Cargo.toml"), "[package]\nname='profile-fixture'\nversion='0.1.0'\nedition='2024'\nrust-version='1.95'\n[features]\nextra=[]\n").unwrap();
+fn fixture() -> anyhow::Result<tempfile::TempDir> {
+    let root = tempfile::tempdir()?;
+    fs::create_dir(root.path().join("src"))?;
+    fs::write(
+        root.path().join("Cargo.toml"),
+        "[package]\nname='profile-fixture'\nversion='0.1.0'\nedition='2024'\nrust-version='1.95'\n[features]\nextra=[]\n",
+    )?;
     fs::write(
         root.path().join("src/lib.rs"),
         "pub fn answer() -> u32 { 42 } #[test] fn works() { assert_eq!(answer(), 42); }",
-    )
-    .unwrap();
+    )?;
     // Synthetic backend counters exercise the report protocol, not an allocator claim.
-    fs::write(root.path().join("src/main.rs"), r###"fn main() {
+    fs::write(
+        root.path().join("src/main.rs"),
+        r###"fn main() {
         if let Ok(path) = std::env::var("RQLENS_RESOURCE_REPORT") {
             std::fs::write(path, r##"{"schema_version":1,"metrics":{"allocations":2,"allocated_bytes":64}}"##).unwrap();
         }
-    }"###).unwrap();
-    root
+    }"###,
+    )?;
+    Ok(root)
 }
 
-fn report(root: &Path) -> Value {
-    serde_json::from_slice(&fs::read(root.join("target/analysis/quality_profiles.json")).unwrap())
-        .unwrap()
-}
-
-#[test]
-fn profiles_execute_real_builds_tests_and_fresh_instrumentation() {
-    let root = fixture();
-    let config = root.path().join("rqlens.toml");
-    let peak = cfg!(target_os = "linux")
+fn gnu_time_available() -> bool {
+    cfg!(target_os = "linux")
         && Command::new("time")
             .arg("--version")
             .output()
             .is_ok_and(|output| {
                 output.status.success() && String::from_utf8_lossy(&output.stdout).contains("GNU")
-            });
+            })
+}
+
+fn report(root: &Path) -> anyhow::Result<Value> {
+    Ok(serde_json::from_slice(&fs::read(
+        root.join("target/analysis/quality_profiles.json"),
+    )?)?)
+}
+
+#[test]
+fn profiles_execute_real_builds_tests_and_fresh_instrumentation() -> anyhow::Result<()> {
+    let root = fixture()?;
+    let config = root.path().join("rqlens.toml");
+    let peak = gnu_time_available();
     fs::write(
         &config,
         format!(
@@ -78,15 +88,14 @@ instrumented_metrics = ["allocations", "allocated_bytes"]
 budgets = {{ allocations = 2 }}
 "#
         ),
-    )
-    .unwrap();
-    let output = invoke(&config, true);
+    )?;
+    let output = invoke(&config, true)?;
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let report = report(root.path());
+    let report = report(root.path())?;
     assert_eq!(report["measurement_confidence"]["complete"], true);
     assert_eq!(
         report["summary"]["compatibility"]["declared_profiles_pass_percent"],
@@ -103,7 +112,12 @@ budgets = {{ allocations = 2 }}
     let build = &report["data"]["resources"][0]["observations"];
     assert_eq!(build[0]["phase"], "cold-build");
     assert_eq!(build[1]["phase"], "warm-noop-build");
-    assert!(build[0]["metrics"]["artifact_bytes"].as_u64().unwrap() > 0);
+    assert!(
+        build[0]["metrics"]["artifact_bytes"]
+            .as_u64()
+            .context("fixture value")?
+            > 0
+    );
     assert_eq!(
         build[0]["metrics"]["artifact_bytes"],
         build[1]["metrics"]["artifact_bytes"]
@@ -113,7 +127,7 @@ budgets = {{ allocations = 2 }}
     }
     for observation in report["data"]["resources"][1]["observations"]
         .as_array()
-        .unwrap()
+        .context("fixture value")?
     {
         assert_eq!(observation["metrics"]["allocations"], 2);
         assert_eq!(observation["metrics"]["allocated_bytes"], 64);
@@ -121,36 +135,39 @@ budgets = {{ allocations = 2 }}
     }
     let schema = Command::new(env!("CARGO_BIN_EXE_rqlens"))
         .args(["profiles", "--schema"])
-        .output()
-        .unwrap();
+        .output()?;
     assert!(schema.status.success());
     assert_eq!(
-        serde_json::from_slice::<Value>(&schema.stdout).unwrap()["title"],
+        serde_json::from_slice::<Value>(&schema.stdout).context("fixture value")?["title"],
         "quality_profiles.json"
     );
+
+    Ok(())
 }
 
 #[test]
-fn skipped_and_failed_profiles_write_evidence_without_passing_silently() {
-    let root = fixture();
+fn skipped_and_failed_profiles_write_evidence_without_passing_silently() -> anyhow::Result<()> {
+    let root = fixture()?;
     let config = root.path().join("rqlens.toml");
     fs::write(
         &config,
         "[[profiles.compatibility]]\nid='elsewhere'\nhost_os='another-os'\noperation='test'\n",
-    )
-    .unwrap();
-    assert!(invoke(&config, false).status.success());
-    assert!(!invoke(&config, true).status.success());
-    let document = report(root.path());
+    )?;
+    assert!(invoke(&config, false)?.status.success());
+    assert!(!invoke(&config, true)?.status.success());
+    let document = report(root.path())?;
     assert_eq!(document["measurement_confidence"]["complete"], false);
     assert_eq!(
         document["summary"]["compatibility"]["declared_profiles_pass_percent"],
         0.0
     );
     assert_eq!(document["summary"]["compatibility"]["executed_profiles"], 0);
-    fs::write(&config, "[[profiles.resources]]\nid='budget'\nkind='command'\ncommand=['cargo','run','--quiet']\ninstrumented_metrics=['allocations']\nbudgets={allocations=1}\n").unwrap();
-    assert!(!invoke(&config, false).status.success());
-    let document = report(root.path());
+    fs::write(
+        &config,
+        "[[profiles.resources]]\nid='budget'\nkind='command'\ncommand=['cargo','run','--quiet']\ninstrumented_metrics=['allocations']\nbudgets={allocations=1}\n",
+    )?;
+    assert!(!invoke(&config, false)?.status.success());
+    let document = report(root.path())?;
     assert_eq!(document["data"]["resources"][0]["status"], "failed");
     assert_eq!(
         document["data"]["resources"][0]["observations"][0]["budgets"][0]["status"],
@@ -163,21 +180,19 @@ fn skipped_and_failed_profiles_write_evidence_without_passing_silently() {
     fs::write(
         &config,
         "[[profiles.compatibility]]\nid='missing'\ntoolchain='9.99.0'\n",
-    )
-    .unwrap();
-    assert!(!invoke(&config, false).status.success());
+    )?;
+    assert!(!invoke(&config, false)?.status.success());
     assert_eq!(
-        report(root.path())["data"]["compatibility"][0]["status"],
+        report(root.path())?["data"]["compatibility"][0]["status"],
         "unavailable"
     );
-    fs::write(&config, "[[profiles.compatibility]]\nid='broken-build'\n").unwrap();
+    fs::write(&config, "[[profiles.compatibility]]\nid='broken-build'\n")?;
     fs::write(
         root.path().join("src/lib.rs"),
         "compile_error!(\"deliberate fixture failure\");",
-    )
-    .unwrap();
-    assert!(!invoke(&config, false).status.success());
-    let document = report(root.path());
+    )?;
+    assert!(!invoke(&config, false)?.status.success());
+    let document = report(root.path())?;
     assert_eq!(document["data"]["compatibility"][0]["status"], "failed");
     assert_eq!(
         document["data"]["compatibility"][0]["compilation_confirmed"],
@@ -187,4 +202,6 @@ fn skipped_and_failed_profiles_write_evidence_without_passing_silently() {
         document["data"]["compatibility"][0]["measurement_confidence"]["complete"],
         true
     );
+
+    Ok(())
 }

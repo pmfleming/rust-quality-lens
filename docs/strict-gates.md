@@ -41,3 +41,16 @@ router and artifact-name helper while preserving exhaustive top-level routing.
 The maximum cyclomatic complexity is now **19 ≤ 20** and maximum cognitive
 complexity is **11 ≤ 11**. The hotspot ceiling remains satisfied. Workspace tests,
 Clippy, existing artifact conformance and golden-output regressions pass.
+
+## 4. Zero escape occurrences
+
+Remove all three integration-test blanket lint suppressions. Test setup, command
+execution, artifact decoding and lookups now propagate errors through `anyhow::Result`
+instead of panicking through unwrap/expect. Fallible iterator collection validates
+JSON shapes before predicates run. Split the resulting long integration scenarios
+into focused assertion helpers so steps 2–3 stay green. Fixture-program literals
+are unchanged. Comparing the step-3 and step-4 test logs shows the identical 172
+test identities/statuses: **169 passed, 3 ignored**. Workspace Clippy passes without
+suppressions, the escape artifact has **zero records**, and the hotspot/cognitive/
+cyclomatic ceilings still pass. This checkpoint adds some explicit error-handling
+LOC; the next checkpoint addresses reduction without deleting test coverage.
