@@ -9,6 +9,15 @@ use std::time::Duration;
 use crate::command_runner::{CommandOutcome, CommandRequest, CommandStatus, run};
 use crate::{config::LensConfig, toolchain::parse_version as parse_rust_version};
 
+mod flakiness;
+mod mutation;
+
+fn behavior_confidence(scope: &str, reasons: &[String]) -> Value {
+    json!({"complete": reasons.is_empty(), "partial": !reasons.is_empty(),
+        "confidence_scope": scope, "required_inputs": ["fresh_structured_execution_results"],
+        "observed_inputs": {}, "missing_input": reasons, "stale_input": [], "unsupported_pattern": []})
+}
+
 pub(super) fn produce(config: &LensConfig, context: &crate::facts::RunContext) -> Result<Value> {
     let toolchain = &context.snapshot.toolchain;
     let mut checks = official_checks(config);
@@ -17,8 +26,8 @@ pub(super) fn produce(config: &LensConfig, context: &crate::facts::RunContext) -
         unused_dependencies_check(config),
         semver_check(config),
         feature_matrix_check(config),
-        mutation_check(config),
-        flaky_test_check(config),
+        mutation::check(config),
+        flakiness::check(config),
         miri_check(config),
     ]);
     checks.extend(fuzz_checks(config));
@@ -46,6 +55,10 @@ pub(super) fn produce(config: &LensConfig, context: &crate::facts::RunContext) -
         .iter()
         .filter(|check| matches!(check["status"].as_str(), Some("unavailable" | "timed-out")))
         .count();
+    let incomplete_metrics = checks
+        .iter()
+        .filter(|check| check["metrics"]["measurement_confidence"]["complete"] == false)
+        .count();
     let passed = checks
         .iter()
         .filter(|check| check["status"] == "passed")
@@ -70,12 +83,12 @@ pub(super) fn produce(config: &LensConfig, context: &crate::facts::RunContext) -
         },
         "checks": checks,
         "measurement_confidence": {
-            "complete": unavailable == 0,
-            "partial": unavailable > 0,
+            "complete": unavailable == 0 && incomplete_metrics == 0,
+            "partial": unavailable > 0 || incomplete_metrics > 0,
             "confidence_scope": "verified_practices",
             "required_inputs": ["cargo", "rustfmt", "clippy", "rustdoc"],
             "observed_inputs": {"completed_checks": passed + failed_errors + failed_warnings},
-            "missing_input": checks.iter().filter(|check| check["status"] == "unavailable").filter_map(|check| check["rule_id"].as_str()).collect::<Vec<_>>(),
+            "missing_input": checks.iter().filter(|check| check["status"] == "unavailable" || check["metrics"]["measurement_confidence"]["complete"] == false).filter_map(|check| check["rule_id"].as_str()).collect::<Vec<_>>(),
             "stale_input": [],
             "unsupported_pattern": checks.iter().filter(|check| check["status"] == "timed-out").filter_map(|check| check["rule_id"].as_str()).collect::<Vec<_>>(),
         }
@@ -282,93 +295,6 @@ fn feature_matrix_check(config: &LensConfig) -> Value {
         "https://github.com/taiki-e/cargo-hack",
         BTreeMap::new(),
     )
-}
-
-fn mutation_check(config: &LensConfig) -> Value {
-    if !config.verification.mutation {
-        return skipped_check(
-            "rust.tests.mutation",
-            "Tests reject generated code mutations",
-            "enable verification.mutation to require cargo-mutants",
-            "https://mutants.rs/",
-        );
-    }
-    let mut arguments = vec!["mutants".to_string(), "--no-times".to_string()];
-    if config.verification.workspace {
-        arguments.push("--workspace".to_string());
-        for package in &config.verification.exclude {
-            arguments.extend(["--exclude".to_string(), package.clone()]);
-        }
-    }
-    arguments.extend(config.verification.cargo_feature_arguments());
-    cargo_check(
-        config,
-        "rust.tests.mutation",
-        "Tests reject generated code mutations",
-        arguments,
-        "https://mutants.rs/",
-        BTreeMap::new(),
-    )
-}
-
-fn flaky_test_check(config: &LensConfig) -> Value {
-    let runs = config.verification.flaky_test_runs;
-    if runs <= 1 {
-        return skipped_check(
-            "rust.tests.flaky-repeat",
-            "Repeated test runs are stable",
-            "set verification.flaky_test_runs above 1 to detect intermittent failures",
-            "https://doc.rust-lang.org/cargo/commands/cargo-test.html",
-        );
-    }
-    let arguments = config.verification.cargo_arguments("test", true, false);
-    let mut outcomes = Vec::new();
-    for _ in 0..runs {
-        let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
-        request.timeout = Duration::from_secs(config.verification.timeout_seconds);
-        outcomes.push(run(request));
-    }
-    let passed = outcomes
-        .iter()
-        .filter(|outcome| outcome.status == CommandStatus::Passed)
-        .count();
-    let status = repeated_test_status(&outcomes, passed, runs);
-    json!({
-        "rule_id": "rust.tests.flaky-repeat",
-        "title": "Repeated test runs are stable",
-        "category": "verified-gate",
-        "severity": "error",
-        "status": status,
-        "source": "https://doc.rust-lang.org/cargo/commands/cargo-test.html",
-        "tool": "cargo",
-        "tool_version": cargo_version(),
-        "evidence": {
-            "requested_runs": runs,
-            "passed_runs": passed,
-            "failed_runs": runs.saturating_sub(passed),
-            "inconsistent": passed > 0 && passed < runs,
-            "runs": outcomes,
-        },
-    })
-}
-
-fn repeated_test_status(outcomes: &[CommandOutcome], passed: usize, runs: usize) -> &'static str {
-    if outcomes.iter().any(|outcome| {
-        outcome.status == CommandStatus::Unavailable
-            || (outcome.status == CommandStatus::Failed
-                && cargo_tool_is_unavailable(&outcome.stderr))
-    }) {
-        "unavailable"
-    } else if outcomes
-        .iter()
-        .any(|outcome| outcome.status == CommandStatus::TimedOut)
-    {
-        "timed-out"
-    } else if passed == runs {
-        "passed"
-    } else {
-        "failed"
-    }
 }
 
 fn fuzz_checks(config: &LensConfig) -> Vec<Value> {
