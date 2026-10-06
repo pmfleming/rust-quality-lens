@@ -22,6 +22,23 @@ mod test_quality;
 mod topology;
 mod type_health;
 
+fn produce_semantic(
+    tool: &MeasureTool,
+    config: &LensConfig,
+    context: &RunContext,
+) -> Result<Value> {
+    match tool {
+        MeasureTool::SemanticApi => semantic_api::produce(config),
+        MeasureTool::SourceExpansion => crate::semantic::expansion::produce(config, context),
+        MeasureTool::CompilerInventory => context
+            .compiler_inventory
+            .as_ref()
+            .map(|inventory| inventory.report(context.snapshot.fingerprint["complete"] == true))
+            .ok_or_else(|| anyhow::anyhow!("compiler inventory was not requested")),
+        _ => unreachable!("non-semantic tool routed to semantic backend"),
+    }
+}
+
 fn with_fact_identity(fact: &crate::facts::FileFacts, mut record: Value) -> Value {
     if let Some(object) = record.as_object_mut() {
         object.insert("module_id".to_string(), json!(fact.module_id));
@@ -46,13 +63,9 @@ pub(crate) fn produce_measurement(
         MeasureTool::ArchitectureRules => architecture_rules::produce(config, context),
         MeasureTool::TestQuality => test_quality::produce(config, context),
         MeasureTool::ApiHealth => api_health::produce(config, context),
-        MeasureTool::SemanticApi => semantic_api::produce(config),
-        MeasureTool::SourceExpansion => crate::semantic::expansion::produce(config, context),
-        MeasureTool::CompilerInventory => context
-            .compiler_inventory
-            .as_ref()
-            .map(|inventory| inventory.report(context.snapshot.fingerprint["complete"] == true))
-            .ok_or_else(|| anyhow::anyhow!("compiler inventory was not requested")),
+        MeasureTool::SemanticApi
+        | MeasureTool::SourceExpansion
+        | MeasureTool::CompilerInventory => produce_semantic(tool, config, context),
         MeasureTool::Correctness | MeasureTool::CorrectnessRun => {
             correctness::produce(config, context, matches!(tool, MeasureTool::CorrectnessRun))
         }

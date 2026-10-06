@@ -32,3 +32,12 @@ Every measured function now scores at most **69.66**, below the unchanged 70 gat
 (previous maximum 118.05). Workspace tests and Clippy pass. The excluded pinned
 nightly compiler adapter cannot be executed here: rustup/rustc-dev is unavailable;
 its delegation-only change is source-reviewed and formatted, not claimed live-tested.
+
+## 3. Complexity ceilings
+
+The remaining cyclomatic outliers were exhaustive tool dispatch/name matches,
+not deeply nested algorithms. Give the three semantic backends their own small
+router and artifact-name helper while preserving exhaustive top-level routing.
+The maximum cyclomatic complexity is now **19 ≤ 20** and maximum cognitive
+complexity is **11 ≤ 11**. The hotspot ceiling remains satisfied. Workspace tests,
+Clippy, existing artifact conformance and golden-output regressions pass.

@@ -100,6 +100,15 @@ impl MeasureTool {
             .map_or_else(|| format!("{self:?}"), |value| value.get_name().to_string())
     }
 
+    fn semantic_output_file(&self) -> &'static str {
+        match self {
+            Self::SemanticApi => "semantic_api.json",
+            Self::SourceExpansion => "source_expansion.json",
+            Self::CompilerInventory => "compiler_inventory.json",
+            _ => unreachable!("non-semantic tool has no semantic artifact"),
+        }
+    }
+
     pub(crate) fn output_file(&self) -> &'static str {
         match self {
             Self::Hotspots => "hotspots.json",
@@ -110,9 +119,9 @@ impl MeasureTool {
             Self::ArchitectureRules => "architecture_rules.json",
             Self::TestQuality => "test_quality.json",
             Self::ApiHealth => "api_health.json",
-            Self::SemanticApi => "semantic_api.json",
-            Self::SourceExpansion => "source_expansion.json",
-            Self::CompilerInventory => "compiler_inventory.json",
+            Self::SemanticApi | Self::SourceExpansion | Self::CompilerInventory => {
+                self.semantic_output_file()
+            }
             Self::Correctness | Self::CorrectnessRun => "correctness_review.json",
             Self::Locality => "locality_metrics.json",
             Self::Leverage => "leverage_metrics.json",
