@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "status": "partial_completion",
+  "baseline_revision": "c0ef487",
+  "step_commits": {
+    "1": "c7d1e00",
+    "2": "9576d34",
+    "3": "32f5095",
+    "4": "b7a410b",
+    "5": "containing commit"
+  },
+  "local_evidence_root": "target/strict-gates",
+  "thresholds_and_source_roots_unchanged": true,
+  "before": {"hotspot_max": 118.05, "cognitive_max": 16, "cyclomatic_max": 21, "escape_records": 3, "source_nonblank_lines": 27749, "unknown_test_statuses": 1},
+  "after": {"hotspot_max": 69.66, "cognitive_max": 11, "cyclomatic_max": 19, "escape_records": 0, "source_nonblank_lines": 27925, "unknown_test_statuses": 0, "configured_rule_violations": 0, "ast_clone_groups": 0, "token_clone_groups": 81, "duplication_percent": 3.87, "map_locality": 97},
+  "step_5_size_reduction": {"before": 28007, "after": 27925, "removed_lines": 82},
+  "open_gates": {
+    "partial_evidence": ["type_health.json", "module_cohesion.json"],
+    "source_nonblank_lines": {"maximum": 22500, "observed": 27925, "excess": 5425}
+  },
+  "validation": {
+    "workspace_tests_passed": 169,
+    "workspace_tests_ignored": 3,
+    "python_acceptance_unit_tests_passed": 14,
+    "test_inventory_and_statuses_preserved_between_steps_3_4_5": true,
+    "clone_fixture_rust_manifest_and_config_bytes_preserved": true,
+    "workspace_check": "passed",
+    "workspace_clippy_deny_warnings": "passed",
+    "formatting": "passed",
+    "bundled_helpers": "passed",
+    "rustdoc_deny_warnings": "passed",
+    "measure_all": "passed",
+    "verify": "passed; 17 passed checks, 11 skipped",
+    "package_smoke": "passed",
+    "compiler_build_script": "compiled; missing RUSTC exits unsuccessfully without panic",
+    "pinned_rustc_private_adapter": "not executed: pinned toolchain/rustc-dev unavailable",
+    "strict_policy": "failed only on partial type/cohesion evidence",
+    "self_metrics": "failed on size ceiling; other nine conditions pass"
+  },
+  "interpretation": "Steps 2-4 pass. Step 1 is incomplete for type/cohesion backends; step 5 reduces local duplication but does not meet the LOC target. No predictive calibration or live mutation campaign claimed."
+}

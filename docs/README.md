@@ -36,6 +36,8 @@ Risk scores from different model versions are not directly comparable. Artifacts
 
 ## Project notes
 
+- [Strict-gate checkpoints](strict-gates.md): per-step commits, closed hotspot/complexity/escape gates, remaining type/cohesion evidence and LOC debt
+
 - [Self-review after extended metrics](self-refactoring-4.md): frozen/corrected-evaluator comparisons, measurement corrections, remaining locality/LOC debt, and validation
 
 - [Self-refactoring after Halstead and compiler inventory](self-refactoring-3.md): frozen-evaluator results, cross-daemon parity, trade-offs, and remaining strict gates

@@ -21,43 +21,35 @@ use std::{
     process::{Command, ExitCode},
 };
 
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 fn main() -> ExitCode {
+    execute().unwrap_or_else(|error| {
+        eprintln!("compiler inventory: {error}");
+        ExitCode::FAILURE
+    })
+}
+
+fn execute() -> Result<ExitCode> {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
     if args == ["--compiler-info"] {
         println!(
             "{}",
             json!({"schema_version": 1, "backend": "rustc-hir", "rustc": env!("RQLENS_DRIVER_RUSTC"), "compiler_version": env!("RQLENS_DRIVER_VERSION"), "host": env!("RQLENS_DRIVER_HOST")})
         );
-        return ExitCode::SUCCESS;
+        return Ok(ExitCode::SUCCESS);
     }
-    let Some(compiler) = args.first() else {
-        return ExitCode::FAILURE;
-    };
-    let expected = fs::canonicalize(env!("RQLENS_DRIVER_RUSTC"));
-    if fs::canonicalize(compiler).ok() != expected.ok() {
-        eprintln!("compiler adapter invoked with an incompatible compiler or nested wrapper");
-        return ExitCode::FAILURE;
-    }
+    validate_compiler(&args)?;
     let primary = env::var("CARGO_PRIMARY_PACKAGE").as_deref() == Ok("1");
     let Some(destination) = env::var_os("RQLENS_COMPILER_CAPTURE").filter(|_| primary) else {
-        return delegate(&args);
+        return Ok(delegate(&args));
     };
-    let sources = args
-        .iter()
-        .skip(1)
-        .filter(|arg| arg.ends_with(".rs") && PathBuf::from(arg).is_file())
-        .collect::<Vec<_>>();
-    if sources.len() != 1 {
-        eprintln!("compiler inventory requires exactly one source root");
-        return ExitCode::FAILURE;
-    }
-    let source = fs::canonicalize(sources[0]).expect("source exists");
+    let source = source_root(&args)?;
     let build_scripts: Vec<PathBuf> = serde_json::from_str(
         &env::var("RQLENS_COMPILER_BUILD_SCRIPTS").unwrap_or_else(|_| "[]".into()),
-    )
-    .expect("build script inventory");
+    )?;
     if build_scripts.contains(&source) {
-        return delegate(&args);
+        return Ok(delegate(&args));
     }
     let mut callback = Inventory {
         destination: PathBuf::from(destination),
@@ -73,10 +65,32 @@ fn main() -> ExitCode {
     let exit =
         rustc_driver::catch_with_exit_code(|| rustc_driver::run_compiler(&args, &mut callback));
     if exit == ExitCode::SUCCESS && !callback.captured {
-        eprintln!("compiler completed without an analyzed inventory");
-        return ExitCode::FAILURE;
+        return Err("compiler completed without an analyzed inventory".into());
     }
-    exit
+    Ok(exit)
+}
+
+fn validate_compiler(args: &[String]) -> Result<()> {
+    let compiler = args.first().ok_or("missing compiler argument")?;
+    let expected = fs::canonicalize(env!("RQLENS_DRIVER_RUSTC"))?;
+    if fs::canonicalize(compiler)? != expected {
+        return Err(
+            "compiler adapter invoked with an incompatible compiler or nested wrapper".into(),
+        );
+    }
+    Ok(())
+}
+
+fn source_root(args: &[String]) -> Result<PathBuf> {
+    let sources = args
+        .iter()
+        .skip(1)
+        .filter(|arg| arg.ends_with(".rs") && PathBuf::from(arg).is_file())
+        .collect::<Vec<_>>();
+    if sources.len() != 1 {
+        return Err("compiler inventory requires exactly one source root".into());
+    }
+    Ok(fs::canonicalize(sources[0])?)
 }
 
 // Called after main has established a nonempty compiler argv.
@@ -97,6 +111,20 @@ struct Inventory {
 
 impl Callbacks for Inventory {
     fn after_analysis<'tcx>(&mut self, _compiler: &Compiler, tcx: TyCtxt<'tcx>) -> Compilation {
+        match self.capture(tcx) {
+            Ok(()) => self.captured = true,
+            Err(error) => {
+                self.captured = false;
+                eprintln!("compiler capture failed: {error}");
+                return Compilation::Stop;
+            }
+        }
+        Compilation::Continue
+    }
+}
+
+impl Inventory {
+    fn capture(&self, tcx: TyCtxt<'_>) -> Result<()> {
         let mut types = Vec::new();
         let mut impls = Vec::new();
         let mut functions = Vec::new();
@@ -128,13 +156,14 @@ impl Callbacks for Inventory {
             .collect::<Vec<_>>();
         cfg.sort();
         let test = cfg.iter().any(|entry| entry == "test");
-        let manifest =
-            fs::canonicalize(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest directory"))
-                .expect("manifest directory exists");
+        let manifest = fs::canonicalize(
+            env::var_os("CARGO_MANIFEST_DIR").ok_or("Cargo manifest directory missing")?,
+        )?;
+        let package_name = env::var("CARGO_PKG_NAME")?;
         let record = json!({
             "schema_version": 1, "backend": "rustc-hir",
             "compiler_version": env!("RQLENS_DRIVER_VERSION"),
-            "package_name": env::var("CARGO_PKG_NAME").expect("Cargo package name"),
+            "package_name": package_name,
             "manifest_dir": manifest, "source_root": self.source,
             "crate_name": tcx.crate_name(LOCAL_CRATE).to_string(),
             "target_triple": tcx.sess.opts.target_triple.to_string(),
@@ -147,14 +176,9 @@ impl Callbacks for Inventory {
             .join(format!("{}.json", std::process::id()));
         assert!(!path.exists(), "duplicate compiler capture filename");
         let temp = path.with_extension("tmp");
-        fs::write(
-            &temp,
-            serde_json::to_vec(&record).expect("serializable inventory"),
-        )
-        .expect("write compiler inventory");
-        fs::rename(temp, path).expect("publish compiler inventory");
-        self.captured = true;
-        Compilation::Continue
+        fs::write(&temp, serde_json::to_vec(&record)?)?;
+        fs::rename(temp, path)?;
+        Ok(())
     }
 }
 

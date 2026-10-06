@@ -54,3 +54,44 @@ test identities/statuses: **169 passed, 3 ignored**. Workspace Clippy passes wit
 suppressions, the escape artifact has **zero records**, and the hotspot/cognitive/
 cyclomatic ceilings still pass. This checkpoint adds some explicit error-handling
 LOC; the next checkpoint addresses reduction without deleting test coverage.
+
+## 5. LOC reduction checkpoint — budget still exceeded
+
+Factor repeated clone-fixture source through parameterized templates and share
+fallible JSON-array access. The generated fixture's five Rust files, manifest and
+configuration are byte-for-byte identical to the pre-refactor fixture; no test
+identity/status changed. This removes duplicated scaffolding without moving code
+outside the measured roots or deleting cases.
+
+Complete source evidence also exposed eleven pre-existing compiler-helper `expect`
+findings. Propagate probe/capture/publication errors instead; capture failure stops
+the driver and cannot certify an inventory. Compiler path validation now fails
+closed if canonicalization fails. The build script compiles on the available
+compiler and a missing-RUSTC probe exits unsuccessfully without panicking. Full
+rustc-private adapter execution still requires the unavailable pinned toolchain.
+
+Step-5 scoped LOC falls **28,007 → 27,925** (82 lines). The 22,500 ceiling is **not
+met**: another 5,425 lines would need genuine removal. Across the entire campaign,
+LOC rises from 27,749 to 27,925 due to explicit error handling and decomposition.
+No threshold was raised and no source roots, features or tests were removed. A
+larger architectural reduction is still required; this is not a completed size gate.
+
+## Final validation
+
+- Maximum hotspot **69.66**, cognitive **11**, cyclomatic **19**: pass.
+- Escape records **0**, AST clones **0**, token clone groups **81**, duplication
+  **3.87%**, map locality **97** and observed-reuse formula: pass their self-gates.
+- **169 Rust tests pass**, three environment-dependent tests remain ignored;
+  **14 Python acceptance unit tests pass**. Test inventory/status comparison and
+  byte-for-byte generated-fixture comparison pass.
+- Workspace check, Clippy with warnings denied, formatting (including the separate
+  compiler-helper crate), bundled-helper parity, rustdoc with warnings denied,
+  `measure all`, `verify`, packaging smoke and whitespace checks pass.
+- Configured rules have **zero violations**, all test statuses are known, and
+  practices report 17 passed / 11 skipped checks. Strict policy now fails only for
+  partial `type_health.json` and `module_cohesion.json` evidence.
+- `check-self-metrics.sh` now reaches and fails only the LOC ceiling; all its other
+  conditions were also evaluated independently and pass.
+
+[Retained results](../acceptance/strict-gates-results.json). Steps 2–4 are closed;
+step 1 still needs stronger type/cohesion backends and step 5 remains over budget.

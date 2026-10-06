@@ -37,6 +37,10 @@ fn measure_fixture(tool: &str, config: &str) -> anyhow::Result<PathBuf> {
         .join("target/analysis"))
 }
 
+fn json_array(value: &Value) -> anyhow::Result<&Vec<Value>> {
+    value.as_array().context("expected a JSON array")
+}
+
 fn read_json(path: impl AsRef<Path>) -> anyhow::Result<Value> {
     let value = read_document(path)?;
     Ok(value
@@ -90,88 +94,38 @@ output_dir = "target/analysis"
 "#,
     )
     .context("test config should be written")?;
-    fs::write(
-        root.join("src").join("lib.rs"),
-        r#"
-pub mod alpha;
-pub mod beta;
-
-pub fn repeated_one(input: usize) -> usize {
+    let repeated = |name| {
+        format!(
+            r#"pub fn repeated_{name}(input: usize) -> usize {{
     let first = input + 1;
     let second = first + 2;
     let third = second + 3;
     let fourth = third + 4;
-    if fourth > 10 {
+    if fourth > 10 {{
         fourth
-    } else {
+    }} else {{
         input
-    }
-}
-
-pub fn repeated_two(input: usize) -> usize {
-    let first = input + 1;
-    let second = first + 2;
-    let third = second + 3;
-    let fourth = third + 4;
-    if fourth > 10 {
-        fourth
-    } else {
-        input
-    }
-}
-"#,
-    )
-    .context("test source should be written")?;
+    }}
+}}
+"#
+        )
+    };
     fs::write(
-        root.join("src").join("alpha.rs"),
-        r#"
-pub fn read_alpha(input: usize) -> usize {
-    let first = input + 1;
-    let second = first + 2;
-    if second > 10 {
-        second
-    } else {
-        input
+        root.join("src/lib.rs"),
+        format!(
+            "\npub mod alpha;\npub mod beta;\n\n{}\n{}",
+            repeated("one"),
+            repeated("two")
+        ),
+    )?;
+    for (module, increment, threshold) in [("alpha", 1, 10), ("beta", 5, 30)] {
+        let read = clone_function(&format!("read_{module}"), increment, threshold);
+        let write = clone_function(&format!("write_{module}"), increment + 2, threshold + 10);
+        fs::write(
+            root.join(format!("src/{module}.rs")),
+            format!("\n{read}\n{write}"),
+        )?;
     }
-}
-
-pub fn write_alpha(input: usize) -> usize {
-    let first = input + 3;
-    let second = first + 4;
-    if second > 20 {
-        second
-    } else {
-        input
-    }
-}
-"#,
-    )
-    .context("alpha source should be written")?;
-    fs::write(
-        root.join("src").join("beta.rs"),
-        r#"
-pub fn read_beta(input: usize) -> usize {
-    let first = input + 5;
-    let second = first + 6;
-    if second > 30 {
-        second
-    } else {
-        input
-    }
-}
-
-pub fn write_beta(input: usize) -> usize {
-    let first = input + 7;
-    let second = first + 8;
-    if second > 40 {
-        second
-    } else {
-        input
-    }
-}
-"#,
-    )
-    .context("beta source should be written")?;
     let duplicated_test = |threshold: usize| {
         format!(
             r#"
@@ -191,6 +145,22 @@ fn duplicated_setup() {{
     fs::write(root.join("tests").join("dup_b.rs"), duplicated_test(20))
         .context("second duplicated test should be written")?;
     Ok(root)
+}
+
+fn clone_function(name: &str, increment: usize, threshold: usize) -> String {
+    let second = increment + 1;
+    format!(
+        r#"pub fn {name}(input: usize) -> usize {{
+    let first = input + {increment};
+    let second = first + {second};
+    if second > {threshold} {{
+        second
+    }} else {{
+        input
+    }}
+}}
+"#
+    )
 }
 
 fn write_architecture_fixture(name: &str, artifacts: bool) -> anyhow::Result<PathBuf> {
@@ -394,9 +364,7 @@ fn report(value: i32) {
 }
 
 fn node_data<'a>(payload: &'a Value, id: &str) -> anyhow::Result<&'a Value> {
-    payload["graph"]["nodes"]
-        .as_array()
-        .context("fixture value")?
+    json_array(&payload["graph"]["nodes"])?
         .iter()
         .map(|node| &node["data"])
         .find(|data| data["id"] == id || data["module_key"] == id)
@@ -412,9 +380,7 @@ fn catalog_lists_board_compatible_tasks() -> anyhow::Result<()> {
     ])?;
     let payload: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(payload["project_name"], "mini-rust-project");
-    let ids: Vec<&str> = payload["tasks"]
-        .as_array()
-        .context("fixture value")?
+    let ids: Vec<&str> = json_array(&payload["tasks"])?
         .iter()
         .map(|task| task["id"].as_str().context("task ID"))
         .collect::<anyhow::Result<_>>()?;
@@ -491,9 +457,7 @@ fn artifact_schema_prints_known_output_contracts() -> anyhow::Result<()> {
         &properties["hotspots.json"]["properties"]["records"]["items"]["properties"];
     assert_eq!(hotspot_fields["halstead_metric_model_version"]["const"], 1);
     assert!(
-        hotspot_fields["halstead"]["required"]
-            .as_array()
-            .context("fixture value")?
+        json_array(&hotspot_fields["halstead"]["required"])?
             .iter()
             .any(|field| field == "distinct_operands")
     );
@@ -502,17 +466,13 @@ fn artifact_schema_prints_known_output_contracts() -> anyhow::Result<()> {
     let map_schema: Value = serde_json::from_slice(&map_output.stdout)?;
     assert_eq!(map_schema["title"], "map.json artifact envelope");
     assert!(
-        map_schema["required"]
-            .as_array()
-            .context("fixture value")?
+        json_array(&map_schema["required"])?
             .iter()
             .any(|key| key == "toolchain")
     );
     assert_eq!(map_schema["properties"]["schema_version"]["const"], 3);
     assert!(
-        map_schema["properties"]["data"]["required"]
-            .as_array()
-            .context("fixture value")?
+        json_array(&map_schema["properties"]["data"]["required"])?
             .iter()
             .any(|key| key == "graph")
     );
@@ -601,13 +561,7 @@ fn review_uses_diff_file_scope() -> anyhow::Result<()> {
         serde_json::json!([[1, 1]])
     );
     assert!(payload["change_evidence"]["status"].is_string());
-    assert!(
-        payload["measurements"]
-            .as_array()
-            .context("fixture value")?
-            .len()
-            >= 4
-    );
+    assert!(json_array(&payload["measurements"])?.len() >= 4);
 
     Ok(())
 }
@@ -668,9 +622,7 @@ fn measurement_bundle_preserves_contracts_scores_and_attribution() -> anyhow::Re
 fn function_risk_uses_current_coverage(analysis: &Path) -> anyhow::Result<()> {
     // A fresh synthetic coverage artifact, not whatever a previous run left behind.
     let mut document = read_document(analysis.join("hotspots.json"))?;
-    let function = document["records"]
-        .as_array()
-        .context("fixture value")?
+    let function = json_array(&document["records"])?
         .iter()
         .find(|row| row["kind"] == "function")
         .context("fixture value")?
@@ -703,9 +655,7 @@ fn function_risk_uses_current_coverage(analysis: &Path) -> anyhow::Result<()> {
     )?;
     let report = read_json(analysis.join("function_risk.json"))?;
     assert_eq!(report["measurement_confidence"]["complete"], true);
-    let measured = report["functions"]
-        .as_array()
-        .context("fixture value")?
+    let measured = json_array(&report["functions"])?
         .iter()
         .find(|row| row["name"] == function["name"])
         .context("fixture value")?;
@@ -722,22 +672,14 @@ fn function_risk_uses_current_coverage(analysis: &Path) -> anyhow::Result<()> {
 
 fn generated_artifacts_keep_expected_top_level_shapes(analysis: &Path) -> anyhow::Result<()> {
     let hotspots = read_json(analysis.join("hotspots.json"))?;
-    assert!(
-        hotspots
-            .as_array()
-            .context("fixture value")?
-            .iter()
-            .all(|row| {
-                row.get("module_key").is_some()
-                    && row.get("kind").is_some()
-                    && row.get("score").is_some()
-                    && row.get("score_components").is_some()
-                    && row.get("measurement_confidence").is_some()
-            })
-    );
-    let function = hotspots
-        .as_array()
-        .context("fixture value")?
+    assert!(json_array(&hotspots)?.iter().all(|row| {
+        row.get("module_key").is_some()
+            && row.get("kind").is_some()
+            && row.get("score").is_some()
+            && row.get("score_components").is_some()
+            && row.get("measurement_confidence").is_some()
+    }));
+    let function = json_array(&hotspots)?
         .iter()
         .find(|row| row["kind"] == "function")
         .context("function hotspot should be emitted")?;
@@ -747,9 +689,7 @@ fn generated_artifacts_keep_expected_top_level_shapes(analysis: &Path) -> anyhow
         function["complexity_metric_model_id"],
         "rqlens.rust_standard_complexity"
     );
-    let module = hotspots
-        .as_array()
-        .context("fixture value")?
+    let module = json_array(&hotspots)?
         .iter()
         .find(|row| row["kind"] == "module")
         .context("module hotspot should be emitted")?;
@@ -790,9 +730,7 @@ fn generated_artifacts_match_envelope_conformance_snapshot(analysis: &Path) -> a
         actual.sort();
         assert_eq!(
             actual,
-            expected_keys
-                .as_array()
-                .context("fixture value")?
+            json_array(expected_keys)?
                 .iter()
                 .map(|key| Ok(key.as_str().context("schema key")?.to_string()))
                 .collect::<anyhow::Result<Vec<_>>>()?,
@@ -837,7 +775,7 @@ fn golden_fixture_preserves_type_ownership_and_test_attribution() -> anyhow::Res
     measure_fixture("correctness", config)?;
     correctness_attributes_inline_tests_to_production_modules(&analysis)?;
     let payload = read_json(analysis.join("type_health.json"))?;
-    let rows = payload.as_array().context("fixture value")?;
+    let rows = json_array(&payload)?;
     let alpha = rows
         .iter()
         .find(|item| item["qualified_name"] == "alpha::Config")
@@ -881,9 +819,7 @@ fn map_captures_direct_module_path_dependency(analysis: &Path) -> anyhow::Result
         payload["meta"]["layer_ruleset"]["id"],
         "rqlens.generic_layers"
     );
-    let edges = payload["graph"]["edges"]
-        .as_array()
-        .context("fixture value")?;
+    let edges = json_array(&payload["graph"]["edges"])?;
     assert!(edges.iter().any(|edge| {
         edge["data"]["source"] == "mini-rust-project::mini_rust_project::lib"
             && edge["data"]["target"] == "mini-rust-project::mini_rust_project::math"
@@ -919,9 +855,7 @@ fn map_reports_missing_artifacts_as_unknown_metrics(payload: &Value) -> anyhow::
     let service = node_data(payload, "service")?;
     assert!(service["total_score"].is_null());
     assert!(
-        service["unknown_metrics"]
-            .as_array()
-            .context("fixture value")?
+        json_array(&service["unknown_metrics"])?
             .iter()
             .any(|metric| metric == "maintainability_risk")
     );
@@ -951,12 +885,7 @@ fn map_scores_git_cycles_and_layer_violations(payload: &Value) -> anyhow::Result
     );
     let service = node_data(payload, "service")?;
     assert!(service["total_score"].as_f64().is_some());
-    assert!(
-        service["unknown_metrics"]
-            .as_array()
-            .context("fixture value")?
-            .is_empty()
-    );
+    assert!(json_array(&service["unknown_metrics"])?.is_empty());
 
     Ok(())
 }
@@ -984,9 +913,7 @@ fn entrypoints_are_visible_and_discounted_in_outputs() -> anyhow::Result<()> {
 
 fn validate_entrypoint_topology(analysis: &Path) -> anyhow::Result<()> {
     let locality = read_json(analysis.join("locality_metrics.json"))?;
-    let main_locality = locality
-        .as_array()
-        .context("fixture value")?
+    let main_locality = json_array(&locality)?
         .iter()
         .find(|row| row["module_key"] == "main")
         .context("main entrypoint should have locality row")?;
@@ -1011,9 +938,7 @@ fn validate_entrypoint_topology(analysis: &Path) -> anyhow::Result<()> {
 
 fn validate_entrypoint_clones(analysis: &Path) -> anyhow::Result<()> {
     let clones = read_json(analysis.join("clones.json"))?;
-    let entrypoint_clone = clones
-        .as_array()
-        .context("fixture value")?
+    let entrypoint_clone = json_array(&clones)?
         .iter()
         .find(|row| {
             row["engine"] == "module-responsibility"
@@ -1022,16 +947,12 @@ fn validate_entrypoint_clones(analysis: &Path) -> anyhow::Result<()> {
         })
         .context("entrypoint responsibility duplication should be surfaced")?;
     assert!(
-        entrypoint_clone["instances"]
-            .as_array()
-            .context("fixture value")?
+        json_array(&entrypoint_clone["instances"])?
             .iter()
             .any(|instance| instance["module_key"] == "main")
     );
     assert!(
-        entrypoint_clone["instances"]
-            .as_array()
-            .context("fixture value")?
+        json_array(&entrypoint_clone["instances"])?
             .iter()
             .any(|instance| instance["module_key"] == "custom")
     );
@@ -1055,9 +976,7 @@ fn validate_entrypoint_review(fixture: &Path, config: &str, analysis: &Path) -> 
     ])?;
     let review = read_json(analysis.join("review.json"))?;
     assert!(
-        review["scope"]["entrypoints"]
-            .as_array()
-            .context("fixture value")?
+        json_array(&review["scope"]["entrypoints"])?
             .iter()
             .any(|entrypoint| {
                 entrypoint["module_key"] == "custom"
@@ -1073,7 +992,7 @@ fn correctness_writes_review_and_test_catalog(root: &Path) -> anyhow::Result<()>
     let review = read_json(root.join("correctness_review.json"))?;
     let catalog = read_json(root.join("test_catalog.json"))?;
     assert_eq!(review["summary"]["test_count"], 0);
-    assert!(catalog.as_array().context("fixture value")?.is_empty());
+    assert!(json_array(&catalog)?.is_empty());
 
     Ok(())
 }
@@ -1082,29 +1001,21 @@ fn correctness_attributes_inline_tests_to_production_modules(
     analysis: &Path,
 ) -> anyhow::Result<()> {
     let review = read_json(analysis.join("correctness_review.json"))?;
-    let domain_test = review["tests"]
-        .as_array()
-        .context("fixture value")?
+    let domain_test = json_array(&review["tests"])?
         .iter()
         .find(|test| test["name"] == "macro_case_test")
         .context("domain test should be discovered")?;
     assert!(
-        domain_test["tested_modules"]
-            .as_array()
-            .context("fixture value")?
+        json_array(&domain_test["tested_modules"])?
             .iter()
             .any(|module| module == "domain")
     );
-    let integration_test = review["tests"]
-        .as_array()
-        .context("fixture value")?
+    let integration_test = json_array(&review["tests"])?
         .iter()
         .find(|test| test["path"] == "tests/duplicate_a.rs")
         .context("integration test should be discovered")?;
     assert!(
-        integration_test["tested_modules"]
-            .as_array()
-            .context("fixture value")?
+        json_array(&integration_test["tested_modules"])?
             .iter()
             .any(|module| module == "alpha")
     );
@@ -1248,7 +1159,7 @@ fn evidence_commands_preserve_provenance_and_missing_evidence() -> anyhow::Resul
 
 fn hotspots_report_syntax_fact_confidence(analysis: &Path) -> anyhow::Result<()> {
     let payload = read_json(analysis.join("hotspots.json"))?;
-    let rows = payload.as_array().context("fixture value")?;
+    let rows = json_array(&payload)?;
     assert!(!rows.is_empty());
     let confidence = &rows[0]["measurement_confidence"];
     assert_eq!(confidence["complete"], true);
@@ -1258,12 +1169,7 @@ fn hotspots_report_syntax_fact_confidence(analysis: &Path) -> anyhow::Result<()>
         confidence["required_inputs"],
         serde_json::json!(["rust_source_files", "rust_syntax_facts"])
     );
-    assert!(
-        confidence["missing_input"]
-            .as_array()
-            .context("fixture value")?
-            .is_empty()
-    );
+    assert!(json_array(&confidence["missing_input"])?.is_empty());
 
     Ok(())
 }
@@ -1304,7 +1210,7 @@ fn halstead_counts_survive_the_helper_and_artifact_pipeline() -> anyhow::Result<
 
 fn validate_halstead_report(root: &Path, expected: &Value) -> anyhow::Result<()> {
     let payload = read_json(root.join("target/analysis/hotspots.json"))?;
-    let rows = payload.as_array().context("fixture value")?;
+    let rows = json_array(&payload)?;
     let with_paths = rows
         .iter()
         .map(|row| Ok((row, row["path"].as_str().context("hotspot path")?)))
@@ -1404,7 +1310,7 @@ fn clones_report_source_scan_confidence_without_syntax_fact_requirements() -> an
     let config = fixture.join("rqlens.toml").to_string_lossy().to_string();
     run(&["measure", "clones", "--config", &config])?;
     let payload = read_json(fixture.join("target/analysis/clones.json"))?;
-    let rows = payload.as_array().context("fixture value")?;
+    let rows = json_array(&payload)?;
     assert!(!rows.is_empty());
     let token_row = rows
         .iter()
@@ -1418,12 +1324,7 @@ fn clones_report_source_scan_confidence_without_syntax_fact_requirements() -> an
         token_confidence["required_inputs"],
         serde_json::json!(["rust_source_files"])
     );
-    assert!(
-        token_confidence["missing_input"]
-            .as_array()
-            .context("fixture value")?
-            .is_empty()
-    );
+    assert!(json_array(&token_confidence["missing_input"])?.is_empty());
     let ast_row = rows
         .iter()
         .find(|row| row["engine"] == "ast")
