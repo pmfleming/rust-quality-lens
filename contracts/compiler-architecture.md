@@ -45,6 +45,24 @@ complete input fingerprints. Cyclic/dangling module ownership, duplicate IDs,
 unknown schemas and invalid local endpoints are rejected. Unknown references or
 missing traversal categories retain partial confidence even with zero violations.
 
+## Graph projection and policy selectors
+
+Compiler graph nodes use context-qualified compiler module IDs. Edges retain
+all reference observations, even when multiple references collapse to one module
+edge. Module-internal references do not create inter-module self edges. Normal,
+test and feature contexts retain separate graphs.
+
+Policy matching uses an explicit compatibility view:
+`<package>::shared::<logical-module-path>`. The root is named `crate` in this
+view, not inferred from a source filename. These selectors are labels, not IDs;
+inline modules in the same file are separate nodes. Cross-crate links use exact
+compiler crate and module IDs, with Cargo package identity supplied by the
+validated target profile. Dependency renames are not joined by name. A reference
+to a crate outside the selected profiles is represented as
+`external::<compiler-crate-name>::<logical-module-path>` (root `crate`), with its
+opaque compiler identity preserved. Ambiguous or missing endpoints in a selected
+compiler-linked context stay partial, never external-by-default.
+
 Compiler graph projection replaces the graph for a selected context; it does not
 append generated fragments to a pre-expansion syntax graph. Test and normal builds
 remain separate, never summed into a fictitious program total. Architecture policy

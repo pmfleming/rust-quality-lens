@@ -36,6 +36,7 @@ pub(crate) enum Target {
         crate_name: String,
         definition_id: String,
         module_path: String,
+        module_id: String,
     },
     Unknown {
         reason: String,
@@ -93,6 +94,10 @@ impl Capture {
         let mut ids = BTreeSet::new();
         for module in &self.modules {
             definition(&mut ids, &module.id, &module.origin)?;
+            ensure!(
+                module.path.is_empty() == module.parent_id.is_none(),
+                "contradictory crate-root module path"
+            );
         }
         ensure!(!ids.is_empty(), "architecture capture has no modules");
         let parents = self
@@ -139,11 +144,13 @@ impl Capture {
                     crate_id,
                     crate_name,
                     definition_id,
+                    module_id,
                     ..
                 } => ensure!(
                     !crate_id.is_empty()
                         && !crate_name.is_empty()
                         && !definition_id.is_empty()
+                        && !module_id.is_empty()
                         && crate_id != &self.crate_id,
                     "invalid external reference identity"
                 ),

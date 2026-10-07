@@ -127,7 +127,8 @@ impl<'tcx> References<'tcx> {
             json!({"status": "local", "declaration_id": identity(self.tcx, id)})
         } else {
             json!({"status": "external", "crate_id": crate_id(self.tcx, id), "crate_name": self.tcx.crate_name(id.krate).to_string(),
-                "definition_id": identity(self.tcx, id), "module_path": module_path(self.tcx, module_of(self.tcx, id))})
+                "definition_id": identity(self.tcx, id), "module_path": module_path(self.tcx, module_of(self.tcx, id)),
+                "module_id": identity(self.tcx, module_of(self.tcx, id))})
         }
     }
 

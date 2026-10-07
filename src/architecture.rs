@@ -58,17 +58,36 @@ fn evaluate_rule(
         {
             continue;
         }
-        violations.extend(targets.iter().filter_map(|target| {
-            let reason = violation_reason(rule, target)?;
-            Some(ArchitectureViolation {
-                rule_id: rule.id.clone(),
-                level: rule.level,
-                source_module_id: source.clone(),
-                target_module_id: target.clone(),
-                message: format!("{source} depends on {target}, which {reason}"),
-            })
-        }));
+        violations.extend(
+            targets
+                .iter()
+                .filter_map(|target| dependency_violation(rule, source, target, source, target)),
+        );
     }
+}
+
+pub(crate) fn dependency_violation(
+    rule: &ArchitectureRule,
+    source_id: &str,
+    target_id: &str,
+    source_selector: &str,
+    target_selector: &str,
+) -> Option<ArchitectureViolation> {
+    if !rule
+        .from
+        .iter()
+        .any(|pattern| module_matches(pattern, source_selector))
+    {
+        return None;
+    }
+    let reason = violation_reason(rule, target_selector)?;
+    Some(ArchitectureViolation {
+        rule_id: rule.id.clone(),
+        level: rule.level,
+        source_module_id: source_id.into(),
+        target_module_id: target_id.into(),
+        message: format!("{source_selector} depends on {target_selector}, which {reason}"),
+    })
 }
 
 fn violation_reason(rule: &ArchitectureRule, target: &str) -> Option<&'static str> {

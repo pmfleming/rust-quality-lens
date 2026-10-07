@@ -22,8 +22,8 @@ pub(super) fn schema() -> Value {
                     "target": {"oneOf": [
                         {"type": "object", "additionalProperties": false, "required": ["status", "declaration_id"],
                             "properties": {"status": {"const": "local"}, "declaration_id": text}},
-                        {"type": "object", "additionalProperties": false, "required": ["status", "crate_id", "crate_name", "definition_id", "module_path"],
-                            "properties": {"status": {"const": "external"}, "crate_id": text, "crate_name": text, "definition_id": text, "module_path": {"type": "string"}}},
+                        {"type": "object", "additionalProperties": false, "required": ["status", "crate_id", "crate_name", "definition_id", "module_path", "module_id"],
+                            "properties": {"status": {"const": "external"}, "crate_id": text, "crate_name": text, "definition_id": text, "module_path": {"type": "string"}, "module_id": text}},
                         {"type": "object", "additionalProperties": false, "required": ["status", "reason"],
                             "properties": {"status": {"const": "unknown"}, "reason": text}}
                     ]}

@@ -48,6 +48,9 @@ fn compiler_ids_join_generated_impls_without_name_or_span_guessing() -> Result<(
     assert!(partial[0]["method_count"].is_null());
     assert_eq!(partial[0]["observed_method_count"], 1);
     validate_report(&inventory.report(true))?;
+    let mut forged_graph = inventory.report(true);
+    forged_graph["architecture_graphs"][0]["missing_evidence"] = json!([]);
+    assert!(validate_report(&forged_graph).is_err());
     super::validate_type_projection(&rows[0])?;
     let mut forged = rows[0].clone();
     forged["observed_method_count"] = json!(2);

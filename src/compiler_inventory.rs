@@ -6,12 +6,15 @@ use std::{collections::BTreeSet, path::PathBuf};
 
 use crate::config::LensConfig;
 pub(crate) mod architecture;
+pub(crate) mod architecture_graph;
 mod architecture_schema;
 mod capture;
 mod projection;
 mod schema;
 pub(crate) use projection::validate_type_projection;
 pub(crate) use schema::{context_schema, origin_schema, profiles_schema};
+#[cfg(test)]
+mod architecture_graph_tests;
 #[cfg(test)]
 mod tests;
 
@@ -281,6 +284,10 @@ impl Inventory {
         })
     }
 
+    pub(crate) fn architecture_graphs(&self) -> Vec<architecture_graph::Graph> {
+        architecture_graph::project(&self.profiles)
+    }
+
     pub(crate) fn report(&self, fingerprint_complete: bool) -> Value {
         let confidence = self.confidence(fingerprint_complete);
         json!({
@@ -290,6 +297,7 @@ impl Inventory {
                 "type_count_across_contexts": self.profiles.iter().map(|p| p.types.len()).sum::<usize>(),
                 "architecture_contexts_with_complete_capture": self.profiles.iter().filter(|p| p.architecture.as_ref().is_some_and(|a| a.missing_evidence().is_empty())).count()},
             "profiles": self.profiles, "expected_contexts": self.expected_contexts,
+            "architecture_graphs": self.architecture_graphs(),
             "measurement_confidence": confidence,
             "scope": "Compiler-analyzed declarations after cfg selection and all macro expansion. Per-context identities and invocation anchors; no merged cross-profile totals or source-calibrated pressure scores.",
         })
@@ -322,6 +330,12 @@ pub(crate) fn validate_report(value: &Value) -> Result<()> {
         ensure!(
             contexts.insert(profile.context_id()),
             "duplicate compiler context"
+        );
+    }
+    if let Some(graphs) = value.get("architecture_graphs") {
+        ensure!(
+            *graphs == serde_json::to_value(architecture_graph::project(&profiles))?,
+            "compiler architecture projection differs from capture"
         );
     }
     let confidence: crate::contracts::MeasurementConfidence =
