@@ -1,6 +1,7 @@
 //! Shared path and identity utilities for the bundled syntax extractors.
 
 pub mod halstead;
+pub mod lexical;
 
 use std::env;
 use std::fs;

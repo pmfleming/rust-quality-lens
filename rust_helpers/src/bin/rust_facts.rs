@@ -133,6 +133,8 @@ struct FactVisitor {
     module_files: Vec<ModuleFileFact>,
     unsupported_patterns: Vec<String>,
     type_identity_limitations: Vec<String>,
+    #[serde(flatten)]
+    lexical: rust_quality_lens_helpers::lexical::Scopes,
     macro_invocations: Vec<MacroInvocation>,
     #[serde(skip)]
     module_stack: Vec<String>,
@@ -696,12 +698,29 @@ impl<'ast> Visit<'ast> for FactVisitor {
 
     fn visit_file(&mut self, file: &'ast syn::File) {
         self.halstead = Some(halstead::measure(file));
+        self.lexical.enter(
+            "module",
+            file.span(),
+            &self.current_module_key(),
+            file.items.iter(),
+        );
         visit::visit_file(self, file);
+        self.lexical.leave();
     }
 
     fn visit_block(&mut self, block: &'ast syn::Block) {
         self.block_depth += 1;
+        self.lexical.enter(
+            "block",
+            block.span(),
+            &self.current_module_key(),
+            block.stmts.iter().filter_map(|stmt| match stmt {
+                syn::Stmt::Item(item) => Some(item),
+                _ => None,
+            }),
+        );
         visit::visit_block(self, block);
+        self.lexical.leave();
         self.block_depth = self.block_depth.saturating_sub(1);
     }
 
@@ -711,13 +730,6 @@ impl<'ast> Visit<'ast> for FactVisitor {
     }
 
     fn visit_item(&mut self, i: &'ast Item) {
-        if self.block_depth > 0 && matches!(i, Item::Struct(_) | Item::Enum(_) | Item::Impl(_)) {
-            self.unsupported_patterns.push(format!(
-                "{}:{}: block-local type or implementation requires lexical scope resolution",
-                self.path,
-                span_start_line(i.span())
-            ));
-        }
         match i {
             Item::Const(item) => {
                 self.record_public_api(&item.vis, &item.attrs);
@@ -725,7 +737,19 @@ impl<'ast> Visit<'ast> for FactVisitor {
             Item::Enum(item) => self.record_enum(item),
             Item::Fn(item) => return self.visit_function_item(i, item),
             Item::ForeignMod(item) => self.record_foreign_mod(item),
-            Item::Impl(item) => self.record_impl(item),
+            Item::Impl(item) => {
+                self.lexical.enter(
+                    "impl",
+                    item.span(),
+                    &self.current_module_key(),
+                    std::iter::empty(),
+                );
+                self.lexical.generics(&item.generics);
+                self.record_impl(item);
+                visit::visit_item(self, i);
+                self.lexical.leave();
+                return;
+            }
             Item::Macro(item) => self.record_item_macro(item),
             Item::Mod(item) => return self.visit_module_item(i, item),
             Item::Static(item) => self.record_static(item),
@@ -742,6 +766,18 @@ impl<'ast> Visit<'ast> for FactVisitor {
             _ => {}
         }
         visit::visit_item(self, i);
+    }
+
+    fn visit_impl_item_fn(&mut self, method: &'ast ImplItemFn) {
+        self.lexical.enter(
+            "method",
+            method.span(),
+            &self.current_module_key(),
+            std::iter::empty(),
+        );
+        self.lexical.generics(&method.sig.generics);
+        visit::visit_impl_item_fn(self, method);
+        self.lexical.leave();
     }
 
     fn visit_expr_call(&mut self, i: &'ast ExprCall) {
@@ -856,6 +892,13 @@ impl<'ast> Visit<'ast> for FactVisitor {
 
 impl FactVisitor {
     fn visit_function_item(&mut self, item: &Item, function: &ItemFn) {
+        self.lexical.enter(
+            "function",
+            function.span(),
+            &self.current_module_key(),
+            std::iter::empty(),
+        );
+        self.lexical.generics(&function.sig.generics);
         self.record_fn(function);
         let test_scope = has_test_attrs(&function.attrs);
         self.test_scope_depth += usize::from(test_scope);
@@ -863,6 +906,7 @@ impl FactVisitor {
         self.test_scope_depth = self
             .test_scope_depth
             .saturating_sub(usize::from(test_scope));
+        self.lexical.leave();
     }
 
     fn visit_module_item(&mut self, item: &Item, module: &syn::ItemMod) {
@@ -874,7 +918,14 @@ impl FactVisitor {
         let test_scope = module.ident == "tests" || has_test_attrs(&module.attrs);
         self.test_scope_depth += usize::from(test_scope);
         self.module_stack.push(module.ident.to_string());
+        self.lexical.enter(
+            "module",
+            module.span(),
+            &self.current_module_key(),
+            module.content.iter().flat_map(|(_, items)| items),
+        );
         visit::visit_item(self, item);
+        self.lexical.leave();
         self.module_stack.pop();
         self.test_scope_depth = self
             .test_scope_depth
@@ -912,7 +963,9 @@ impl FactVisitor {
             .sum();
         self.types.push(TypeFact {
             type_name: item.ident.to_string(),
-            qualified_name: format!("{module_key}::{}", item.ident),
+            qualified_name: self
+                .lexical
+                .declaration_name(&module_key, &item.ident.to_string()),
             module_key,
             path: self.path.clone(),
             line,
@@ -1006,18 +1059,36 @@ impl FactVisitor {
 
     fn record_impl_fact(&mut self, item: &ItemImpl, method_count: usize) {
         let owner = match item.self_ty.as_ref() {
-            Type::Path(path)
-                if path.qself.is_none()
-                    && path.path.leading_colon.is_none()
-                    && self.block_depth == 0 =>
-            {
-                Some(path_to_string(&path.path))
+            Type::Path(path) if path.qself.is_none() && path.path.leading_colon.is_none() => {
+                let raw = path_to_string(&path.path);
+                if path.path.segments.len() == 1 {
+                    if let Some(owner) = self.lexical.owner(&raw) {
+                        Some(format!("crate::{owner}"))
+                    } else if self.block_depth == 0 && !self.lexical.blocked(&raw) {
+                        Some(raw)
+                    } else {
+                        self.unsupported_patterns.push(format!(
+                            "{}:{}: unresolved lexical impl owner {raw}",
+                            self.path,
+                            span_start_line(item.impl_token.span)
+                        ));
+                        Some(format!("@unresolved_lexical::{raw}"))
+                    }
+                } else if self.block_depth == 0
+                    || ["crate::", "self::", "super::"]
+                        .iter()
+                        .any(|prefix| raw.starts_with(prefix))
+                {
+                    Some(raw)
+                } else {
+                    None
+                }
             }
             _ => None,
         };
         let Some(qualified_type_name) = owner else {
             self.unsupported_patterns.push(format!(
-                "{}:{}: impl target requires semantic type resolution",
+                "{}:{}: impl target requires semantic type resolution (unresolved lexical scope or unsupported target)",
                 self.path,
                 span_start_line(item.impl_token.span)
             ));
@@ -1167,7 +1238,9 @@ impl FactVisitor {
         let module_key = self.current_module_key();
         self.types.push(TypeFact {
             type_name: item.ident.to_string(),
-            qualified_name: format!("{module_key}::{}", item.ident),
+            qualified_name: self
+                .lexical
+                .declaration_name(&module_key, &item.ident.to_string()),
             module_key,
             path: self.path.clone(),
             line,

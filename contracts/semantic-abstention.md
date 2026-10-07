@@ -4,9 +4,9 @@ T3 is a fail-closed evidence guarantee, not a claim of compiler-complete analysi
 
 ## Type-health scope
 
-Struct/enum declarations and explicit impl blocks are syntax observations; type-health is not an inventory of every Rust type kind. Joins are qualified by Cargo package, target and lexical module. `crate::`, `self::` and `super::` owners are supported, including the extractor's `lib::`/`main::` root representation. An arbitrary matching suffix is **not** ownership evidence. Imports and aliases are not resolved by this joiner.
+Struct/enum declarations and explicit impl blocks are syntax observations; type-health is not an inventory of every Rust type kind. Joins are qualified by Cargo package, target and lexical module. `crate::`, `self::` and `super::` owners are supported, including the extractor's `lib::`/`main::` root representation. An arbitrary matching suffix is **not** ownership evidence. The syntax helper inventories block items before resolving local impl owners, gives block-local types distinct snapshot-scoped qualified identities, and stops bare-name lookup at module boundaries. Function/impl/method generic parameters and imported/aliased bindings block speculative joins. Explicit crate/self/super paths retain module semantics, not block-parent semantics. Local lexical scopes are not architecture modules. Imports and aliases are not resolved by this joiner.
 
-Unresolved owners, duplicate identities, conditional compilation, block-local scope, unsupported impl targets, unexpanded item/impl/expression macros and active attributes (including derives), incomplete extraction, or incomplete input provenance make the inventory partial. Item macros can generate types even when their names or tokens do not mention modules/tests. Empty type records therefore do not establish that no types exist.
+Unresolved owners, duplicate identities, conditional compilation, unresolved block-local scope, unsupported impl targets, unexpanded item/impl/expression macros and active attributes (including derives), incomplete extraction, or incomplete input provenance make the inventory partial. Item macros can generate types even when their names or tokens do not mention modules/tests. Empty type records therefore do not establish that no types exist.
 
 Abstention reaches:
 
