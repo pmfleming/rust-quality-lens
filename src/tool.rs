@@ -1,7 +1,7 @@
 use clap::ValueEnum;
 
 /// Standard measurement producers exposed by the CLI and artifact contracts.
-#[derive(Clone, Debug, ValueEnum)]
+#[derive(Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub(crate) enum MeasureTool {
     All,
     Hotspots,

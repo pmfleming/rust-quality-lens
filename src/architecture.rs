@@ -36,12 +36,7 @@ pub(crate) fn evaluate(config: &ArchitectureConfig, graph: &ModuleGraph) -> Arch
     });
     ArchitectureEvaluation {
         violations,
-        unresolved_references: graph
-            .facts
-            .iter()
-            .flat_map(|fact| &fact.graph.resolved_dependencies)
-            .filter(|dependency| !dependency.status.starts_with("resolved_"))
-            .count(),
+        unresolved_references: graph.unresolved_references,
     }
 }
 
@@ -51,13 +46,6 @@ fn evaluate_rule(
     violations: &mut Vec<ArchitectureViolation>,
 ) {
     for (source, targets) in &graph.dependencies {
-        if !rule
-            .from
-            .iter()
-            .any(|pattern| module_matches(pattern, source))
-        {
-            continue;
-        }
         violations.extend(
             targets
                 .iter()

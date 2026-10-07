@@ -69,27 +69,25 @@ fn type_policy_status(root: &Path) -> anyhow::Result<Value> {
     Ok(report["artifact_status"]["type_health.json"]["status"].clone())
 }
 
-#[test]
-fn aliased_impls_abstain_in_rows_envelopes_and_policy() -> anyhow::Result<()> {
-    let root = fixture(
-        "pub mod a { pub struct Widget; }\npub mod b { pub struct Widget; }\npub mod implementation { use crate::a::Widget as LocalWidget; impl LocalWidget { pub fn answer(&self) -> u8 { 42 } } }\n#[test] fn behavior() { assert_eq!(a::Widget.answer(), 42); }\n",
-    )?;
+fn compile_fixture(root: &Path) -> anyhow::Result<()> {
     let compiled = Command::new("cargo")
-        .args([
-            "test",
-            "--offline",
-            "--manifest-path",
-            root.path()
-                .join("Cargo.toml")
-                .to_str()
-                .context("fixture value")?,
-        ])
+        .args(["test", "--offline", "--manifest-path"])
+        .arg(root.join("Cargo.toml"))
         .output()?;
     assert!(
         compiled.status.success(),
         "{}",
         String::from_utf8_lossy(&compiled.stderr)
     );
+    Ok(())
+}
+
+#[test]
+fn aliased_impls_abstain_in_rows_envelopes_and_policy() -> anyhow::Result<()> {
+    let root = fixture(
+        "pub mod a { pub struct Widget; }\npub mod b { pub struct Widget; }\npub mod implementation { use crate::a::Widget as LocalWidget; impl LocalWidget { pub fn answer(&self) -> u8 { 42 } } }\n#[test] fn behavior() { assert_eq!(a::Widget.answer(), 42); }\n",
+    )?;
+    compile_fixture(root.path())?;
     let document = measure(root.path(), "type-health", "type_health.json")?;
     assert_eq!(document["measurement_confidence"]["complete"], false);
     assert_eq!(
@@ -148,19 +146,7 @@ fn compiling_attribute_generated_types_are_explicitly_unexpanded() -> anyhow::Re
     let mut content = fs::read_to_string(&manifest)?;
     content.push_str("\n[dependencies]\ngenerator = { path = 'generator' }\n");
     fs::write(&manifest, content)?;
-    let compiled = Command::new("cargo")
-        .args([
-            "test",
-            "--offline",
-            "--manifest-path",
-            manifest.to_str().context("fixture value")?,
-        ])
-        .output()?;
-    assert!(
-        compiled.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compiled.stderr)
-    );
+    compile_fixture(root.path())?;
     let document = measure(root.path(), "type-health", "type_health.json")?;
     assert_eq!(document["measurement_confidence"]["complete"], false);
     assert!(
@@ -192,22 +178,7 @@ fn statement_macros_cannot_hide_non_local_impls() -> anyhow::Result<()> {
     let root = fixture(
         "pub struct Widget; macro_rules! make_impl { () => { impl Widget { pub fn answer(&self) -> u8 { 42 } } } } fn install() { make_impl!(); } #[test] fn generated_works() { assert_eq!(Widget.answer(), 42); }\n",
     )?;
-    let compiled = Command::new("cargo")
-        .args([
-            "test",
-            "--offline",
-            "--manifest-path",
-            root.path()
-                .join("Cargo.toml")
-                .to_str()
-                .context("fixture value")?,
-        ])
-        .output()?;
-    assert!(
-        compiled.status.success(),
-        "{}",
-        String::from_utf8_lossy(&compiled.stderr)
-    );
+    compile_fixture(root.path())?;
     let document = measure(root.path(), "type-health", "type_health.json")?;
     assert_eq!(document["measurement_confidence"]["complete"], false);
     assert!(

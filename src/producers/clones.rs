@@ -48,9 +48,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         &all_ast_facts,
         context.correctness_confidence(),
     ));
-    rows.sort_by(|a, b| {
-        crate::artifacts::json_f64(b, "score").total_cmp(&crate::artifacts::json_f64(a, "score"))
-    });
+    rows.sort_by(|a, b| super::json_f64(b, "score").total_cmp(&super::json_f64(a, "score")));
     Ok(Value::Array(rows))
 }
 

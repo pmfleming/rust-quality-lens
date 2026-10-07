@@ -33,7 +33,7 @@ impl ModuleInfo {
 }
 
 pub(crate) struct ModuleGraph {
-    pub(crate) facts: Vec<FileFacts>,
+    pub(crate) unresolved_references: usize,
     pub(crate) modules: BTreeMap<String, ModuleInfo>,
     pub(crate) dependencies: HashMap<String, HashSet<String>>,
     pub(crate) containment_dependencies: HashMap<String, HashSet<String>>,
@@ -72,7 +72,11 @@ pub(crate) fn module_graph(facts: &[FileFacts]) -> ModuleGraph {
     }
     let reverse_dependencies = reverse_index(&dependencies);
     ModuleGraph {
-        facts: facts.to_vec(),
+        unresolved_references: facts
+            .iter()
+            .flat_map(|fact| &fact.graph.resolved_dependencies)
+            .filter(|dependency| !dependency.status.starts_with("resolved_"))
+            .count(),
         modules,
         dependencies,
         containment_dependencies,
@@ -83,10 +87,12 @@ pub(crate) fn module_graph(facts: &[FileFacts]) -> ModuleGraph {
 }
 
 fn module_index(facts: &[FileFacts]) -> BTreeMap<String, ModuleInfo> {
-    let mut modules = BTreeMap::new();
-    for fact in facts {
-        if fact.source_metrics_available {
-            modules.insert(
+    // Do not create unqualified placeholders for unmeasured module declarations.
+    facts
+        .iter()
+        .filter(|fact| fact.source_metrics_available)
+        .map(|fact| {
+            (
                 fact.module_id.clone(),
                 ModuleInfo {
                     key: fact.module_id.clone(),
@@ -102,12 +108,9 @@ fn module_index(facts: &[FileFacts]) -> BTreeMap<String, ModuleInfo> {
                     public_api_count: fact.graph.public_api_count,
                     source_nonblank_line_count: fact.source.source_nonblank_line_count,
                 },
-            );
-        }
-        // Source facts already cover declared module files. Keeping declaration-only
-        // placeholders would reintroduce unqualified keys in multi-package workspaces.
-    }
-    modules
+            )
+        })
+        .collect()
 }
 
 fn record_containment(
@@ -116,9 +119,11 @@ fn record_containment(
     containment_dependencies: &mut HashMap<String, HashSet<String>>,
 ) {
     for child in &fact.graph.child_modules {
-        let child_id = modules
-            .values()
-            .find(|module| module.package_name == fact.package_name && module.module_key == *child);
+        let child_id = modules.values().find(|module| {
+            module.package_name == fact.package_name
+                && module.target_name == fact.target_name
+                && module.module_key == *child
+        });
         if let Some(child) = child_id.filter(|child| child.key != fact.module_id) {
             containment_dependencies
                 .entry(fact.module_id.clone())
@@ -351,6 +356,21 @@ mod tests {
         };
         assert_eq!(module.source_nonblank_line_count, 12);
         assert!(graph.dependencies["test::shared::broken"].is_empty());
+    }
+
+    #[test]
+    fn containment_stays_in_its_cargo_target() {
+        let mut parent = FileFacts::test_fact("/src/lib.rs", "lib");
+        parent.graph.child_modules.push("child".into());
+        let child = FileFacts::test_fact("/src/child.rs", "child");
+        let mut other = child.clone();
+        other.target_name = "another-target".into();
+        other.module_id = "test::another-target::child".into();
+        let graph = module_graph(&[parent.clone(), other, child.clone()]);
+        assert_eq!(
+            graph.containment_dependencies[&parent.module_id],
+            std::collections::HashSet::from([child.module_id])
+        );
     }
 
     #[test]

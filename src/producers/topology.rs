@@ -106,18 +106,18 @@ fn module_record(graph: &ModuleGraph, module: &ModuleInfo, metrics: Value) -> Va
         "risk_model_id": MODEL_ID,
         "risk_model_version": MODEL_VERSION,
     });
-    if let (Some(record), Some(metrics)) = (record.as_object_mut(), metrics.as_object()) {
-        record.extend(metrics.clone());
+    if let (Some(record), Value::Object(metrics)) = (record.as_object_mut(), metrics) {
+        record.extend(metrics);
     }
     record
 }
 
-fn dependency_identity_backends(graph: &ModuleGraph, source: &str) -> Vec<String> {
+fn dependency_identity_backends<'a>(graph: &'a ModuleGraph, source: &str) -> Vec<&'a str> {
     graph
         .dependency_provenance
         .iter()
         .filter(|((edge_source, _), _)| edge_source == source)
-        .flat_map(|(_, backends)| backends.iter().cloned())
+        .flat_map(|(_, backends)| backends.iter().map(String::as_str))
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect()

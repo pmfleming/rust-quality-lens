@@ -1,7 +1,12 @@
 project_name = "rust-quality-lens"
 project_root = "."
 # Measure implementation and integration tests, but not synthetic fixture programs.
-source_roots = ["src", "rust_helpers/src", "compiler_helpers/src", "compiler_helpers/build.rs", "tests/cli.rs", "tests/compiler_inventory.rs", "tests/source_expansion.rs", "tests/trust.rs", "tests/profiles.rs"]
+source_roots = [
+    "src", "rust_helpers/src", "compiler_helpers/src", "compiler_helpers/build.rs",
+    "tests/cli.rs", "tests/compiler_inventory.rs", "tests/source_expansion.rs",
+    "tests/trust.rs", "tests/profiles.rs", "tests/lexical_ownership.rs",
+    "tests/compiler_architecture.rs", "tests/compiler_architecture",
+]
 output_dir = "target/analysis"
 
 [rust]

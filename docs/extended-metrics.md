@@ -2,6 +2,17 @@
 
 These observations are advisory and do not change calibrated architecture scores.
 
+## Clone coverage (summary model 2)
+
+`clones.json` identifies its summary calculation with
+`summary.duplication_model_version = 2`. `duplicated_line_count` is the union of
+**nonblank** lines in token-clone snippets, keyed by file and source line. Overlaps
+count once; AST and responsibility groups do not enter this numerator.
+`duplication_percent` divides by measured nonblank source lines (zero for an empty
+inventory). Comments remain nonblank lines; this is not executable-line coverage.
+Model 1 incorrectly included blank span lines in the numerator. Remeasure both
+revisions with model 2 rather than crediting that correction as a refactor gain.
+
 ## Mutation effectiveness and per-test flakiness
 
 Enable the existing verification options and run `rqlens verify`:

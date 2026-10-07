@@ -46,7 +46,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         },
     });
     let measurement_confidence = context.semantic_confidence(
-        evidence.measurement_confidence(&context.source_files, &graph.facts),
+        evidence.measurement_confidence(&context.source_files, &context.source_facts),
     )?;
     Ok(json!({
         "meta": map_metadata(config, context, summary),

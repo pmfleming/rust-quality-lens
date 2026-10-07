@@ -407,7 +407,3 @@ pub(super) fn module_from_record(row: &Value) -> Option<String> {
 pub(super) fn first_f64(row: &Value, keys: &[&str]) -> Option<f64> {
     keys.iter().find_map(|key| row[*key].as_f64())
 }
-
-pub(crate) fn json_f64(row: &Value, key: &str) -> f64 {
-    row[key].as_f64().unwrap_or(f64::NEG_INFINITY)
-}

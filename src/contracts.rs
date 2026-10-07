@@ -111,8 +111,17 @@ fn clone_summary(records: &[Value], context: &RunContext) -> Value {
         ) else {
             continue;
         };
-        for line in start..=end {
-            duplicate_lines.insert((path.to_string(), line));
+        // Clone spans include whitespace; the denominator counts nonblank lines.
+        for (offset, text) in instance["snippet"]
+            .as_str()
+            .unwrap_or_default()
+            .lines()
+            .enumerate()
+        {
+            let line = start + offset as u64;
+            if line <= end && !text.trim().is_empty() {
+                duplicate_lines.insert((path, line));
+            }
         }
     }
     let source_lines = context
@@ -132,6 +141,7 @@ fn clone_summary(records: &[Value], context: &RunContext) -> Value {
         "duplicated_line_count": duplicate_lines.len(),
         "source_nonblank_line_count": source_lines,
         "duplication_percent": duplication_percent,
+        "duplication_model_version": 2,
     })
 }
 
@@ -352,79 +362,31 @@ fn other_payload_schema(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
-        MeasureTool::SourceExpansion => object_schema(
-            "source_expansion.json",
-            "summary backend scope expansions measurement_confidence",
-            json!({
-                "summary": {"type": "object"},
-                "backend": {"const": "rust-analyzer/expandMacro"},
-                "scope": {"type": "string"},
-                "expansions": {"type": "array", "items": {
-                    "type": "object", "required": ["generated_syntax"],
-                    "properties": {"generated_syntax": {
-                        "type": ["object", "null"], "additionalProperties": false,
-                        "required": ["parsed", "reason", "declarations"],
-                        "properties": {
-                            "parsed": {"type": "boolean"}, "reason": {"type": ["string", "null"]},
-                            "declarations": {"type": "array", "items": {
-                                "type": "object", "additionalProperties": false,
-                                "required": ["kind", "name", "start_byte", "end_byte", "observed_field_count"],
-                                "properties": {
-                                    "kind": {"enum": ["struct", "enum", "function", "impl-method", "trait-method"]},
-                                    "name": {"type": "string", "minLength": 1},
-                                    "start_byte": {"type": "integer", "minimum": 0},
-                                    "end_byte": {"type": "integer", "minimum": 0},
-                                    "observed_field_count": {"type": ["integer", "null"], "minimum": 0}
-                                }
-                            }}
-                        }
-                    }}
-                }},
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
-        ),
-        MeasureTool::SemanticApi => object_schema(
-            "semantic_api.json",
-            "summary items measurement_confidence",
-            json!({
-                "summary": {"type": "object"},
-                "items": {"type": "array", "items": {"type": "object"}},
-                "command": {"type": "object"},
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
-        ),
+        MeasureTool::SourceExpansion => source_expansion_schema(),
+        MeasureTool::SemanticApi => {
+            let mut schema = summary_arrays_schema(tool, &["items"]);
+            schema["properties"]["command"] = json!({"type": "object"});
+            schema
+        }
         MeasureTool::TypeHealth => type_health_schema(),
         MeasureTool::Correctness | MeasureTool::CorrectnessRun => object_schema(
             "correctness_review.json",
             "version generated_from summary tests",
-            json!({
-                "version": {"type": "integer"},
-                "generated_from": {"type": "string"},
-                "summary": {"type": "object"},
-                "measurement_confidence": measurement_confidence_schema(),
-                "layers": {"type": "array", "items": {"type": "object"}},
-                "tests": {"type": "array", "items": {"type": "object"}},
-            }),
+            property_groups(
+                json!({
+                    "version": {"type": "integer"},
+                    "generated_from": {"type": "string"},
+                    "summary": {"type": "object"},
+                    "measurement_confidence": measurement_confidence_schema(),
+                }),
+                &[(
+                    "layers tests",
+                    json!({"type": "array", "items": {"type": "object"}}),
+                )],
+            ),
         ),
         MeasureTool::Locality | MeasureTool::Leverage => topology_schema(tool),
-        MeasureTool::ModuleCohesion => {
-            let mut schema = summary_arrays_schema(tool, &["records"]);
-            schema["properties"]["entropy_model_version"] = json!({"const": 2});
-            schema["properties"]["entropy_scope"] = json!({"type": "string"});
-            schema["properties"]["history_error"] = json!({"type": ["string", "null"]});
-            schema["properties"]["structural"] = json!({"type": "object", "required": ["model_version", "scope", "records", "measurement_confidence"],
-                "properties": {"model_version": {"const": 1}, "scope": {"type": "string"},
-                    "records": {"type": "array", "items": {"type": "object", "required": ["qualified_type_name", "receiver_method_count", "methods", "measurement_confidence"],
-                        "properties": {"field_sharing_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-                            "connected_pair_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
-                            "component_count": {"type": ["integer", "null"], "minimum": 1},
-                            "measurement_confidence": measurement_confidence_schema()}}},
-                    "measurement_confidence": measurement_confidence_schema()}});
-            schema["properties"]["maintenance"] = json!({"type": "object", "required": ["model_version", "recent", "previous", "measurement_confidence"],
-                "properties": {"model_version": {"const": 1}, "recent": {"type": ["object", "null"]}, "previous": {"type": ["object", "null"]},
-                    "measurement_confidence": measurement_confidence_schema()}});
-            schema
-        }
+        MeasureTool::ModuleCohesion => cohesion_schema(tool),
         MeasureTool::Map => object_schema(
             "map.json",
             "meta graph modules measurement_confidence",
@@ -433,12 +395,10 @@ fn other_payload_schema(tool: &MeasureTool) -> Value {
                 "graph": {
                     "type": "object",
                     "required": ["nodes", "edges"],
-                    "properties": {
-                        "nodes": {"type": "array", "items": {"type": "object"}},
-                        "edges": {"type": "array", "items": {"type": "object"}}
-                    }
+                    "properties": property_groups(json!({}), &[("nodes edges", json!({"type": "array", "items": {"type": "object"}}))])
                 },
-                "modules": {"type": "array", "items": {"type": "string"}},
+                "modules": {"type": "array", "items": {"type": "object", "required": ["module_id", "module_key"],
+                    "properties": property_groups(json!({}), &[("module_id module_key", json!({"type": "string"}))])}},
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
@@ -453,34 +413,91 @@ fn other_payload_schema(tool: &MeasureTool) -> Value {
                 "measurement_confidence": measurement_confidence_schema(),
             }),
         ),
-        MeasureTool::Practices => object_schema(
-            "rust_practices.json",
-            "version profile summary checks measurement_confidence",
-            json!({
-                "version": {"type": "integer"},
-                "profile": {"type": "string"},
-                "summary": {"type": "object"},
-                "checks": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["rule_id", "category", "severity", "status", "source"],
-                        "properties": {
-                            "rule_id": {"type": "string"},
-                            "category": {"type": "string", "enum": ["verified-gate", "static-finding", "heuristic-signal"]},
-                            "severity": {"type": "string", "enum": ["error", "warning", "advisory"]},
-                            "status": {"type": "string", "enum": ["passed", "failed", "unavailable", "timed-out", "skipped"]},
-                            "source": {"type": "string"},
-                            "evidence": {"type": "object"}
-                        },
-                        "additionalProperties": true
-                    }
-                },
-                "measurement_confidence": measurement_confidence_schema(),
-            }),
-        ),
+        MeasureTool::Practices => practices_schema(),
         MeasureTool::Hotspots | MeasureTool::All => unreachable!(),
     }
+}
+
+fn source_expansion_schema() -> Value {
+    object_schema(
+        "source_expansion.json",
+        "summary backend scope expansions measurement_confidence",
+        json!({
+            "summary": {"type": "object"},
+            "backend": {"const": "rust-analyzer/expandMacro"},
+            "scope": {"type": "string"},
+            "expansions": {"type": "array", "items": {
+                "type": "object", "required": ["generated_syntax"],
+                "properties": {"generated_syntax": {
+                    "type": ["object", "null"], "additionalProperties": false,
+                    "required": ["parsed", "reason", "declarations"],
+                    "properties": {
+                        "parsed": {"type": "boolean"}, "reason": {"type": ["string", "null"]},
+                        "declarations": {"type": "array", "items": {
+                            "type": "object", "additionalProperties": false,
+                            "required": ["kind", "name", "start_byte", "end_byte", "observed_field_count"],
+                            "properties": {
+                                "kind": {"enum": ["struct", "enum", "function", "impl-method", "trait-method"]},
+                                "name": {"type": "string", "minLength": 1},
+                                "start_byte": {"type": "integer", "minimum": 0},
+                                "end_byte": {"type": "integer", "minimum": 0},
+                                "observed_field_count": {"type": ["integer", "null"], "minimum": 0}
+                            }
+                        }}
+                    }
+                }}
+            }},
+            "measurement_confidence": measurement_confidence_schema(),
+        }),
+    )
+}
+
+fn cohesion_schema(tool: &MeasureTool) -> Value {
+    let mut schema = summary_arrays_schema(tool, &["records"]);
+    schema["properties"]["entropy_model_version"] = json!({"const": 2});
+    schema["properties"]["entropy_scope"] = json!({"type": "string"});
+    schema["properties"]["history_error"] = json!({"type": ["string", "null"]});
+    schema["properties"]["structural"] = json!({"type": "object", "required": ["model_version", "scope", "records", "measurement_confidence"],
+                "properties": {"model_version": {"const": 1}, "scope": {"type": "string"},
+                    "records": {"type": "array", "items": {"type": "object", "required": ["qualified_type_name", "receiver_method_count", "methods", "measurement_confidence"],
+                        "properties": {"field_sharing_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                            "connected_pair_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+                            "component_count": {"type": ["integer", "null"], "minimum": 1},
+                            "measurement_confidence": measurement_confidence_schema()}}},
+                    "measurement_confidence": measurement_confidence_schema()}});
+    schema["properties"]["maintenance"] = json!({"type": "object", "required": ["model_version", "recent", "previous", "measurement_confidence"],
+                "properties": {"model_version": {"const": 1}, "recent": {"type": ["object", "null"]}, "previous": {"type": ["object", "null"]},
+                    "measurement_confidence": measurement_confidence_schema()}});
+    schema
+}
+
+fn practices_schema() -> Value {
+    object_schema(
+        "rust_practices.json",
+        "version profile summary checks measurement_confidence",
+        json!({
+            "version": {"type": "integer"},
+            "profile": {"type": "string"},
+            "summary": {"type": "object"},
+            "checks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["rule_id", "category", "severity", "status", "source"],
+                    "properties": {
+                        "rule_id": {"type": "string"},
+                        "category": {"type": "string", "enum": ["verified-gate", "static-finding", "heuristic-signal"]},
+                        "severity": {"type": "string", "enum": ["error", "warning", "advisory"]},
+                        "status": {"type": "string", "enum": ["passed", "failed", "unavailable", "timed-out", "skipped"]},
+                        "source": {"type": "string"},
+                        "evidence": {"type": "object"}
+                    },
+                    "additionalProperties": true
+                }
+            },
+            "measurement_confidence": measurement_confidence_schema(),
+        }),
+    )
 }
 
 fn type_health_schema() -> Value {
@@ -553,6 +570,7 @@ fn envelope_schema(tool: &MeasureTool, payload: Value) -> Value {
             "tool": tool_schema,
             "risk_model_version": {"type": "integer"},
             "measurement_confidence": measurement_confidence_schema(),
+            "capabilities": {"type": "array", "items": {"type": "object"}},
             "summary": {"type": "object"},
         }),
         &[(

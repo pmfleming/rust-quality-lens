@@ -22,6 +22,15 @@ fn check(root: &Path) -> Result<bool> {
         .success())
 }
 
+fn assert_rejected(root: &Path, report: &serde_json::Value) -> Result<()> {
+    fs::write(
+        root.join("target/analysis/architecture_rules.json"),
+        serde_json::to_vec(report)?,
+    )?;
+    assert!(!check(root)?, "tampered report accepted: {report}");
+    Ok(())
+}
+
 #[test]
 fn missing_architecture_backend_is_partial_even_with_zero_observed_violations() -> Result<()> {
     let root = fixture()?;
@@ -106,23 +115,9 @@ fn compiler_policy_detects_macro_mutations_and_rejects_partial_or_forged_evidenc
     violated["data"]["violations"] = serde_json::json!([]);
     violated["data"]["summary"]["violation_count"] = serde_json::json!(0);
     violated["summary"]["violation_count"] = serde_json::json!(0);
-    fs::write(
-        root.path().join("target/analysis/architecture_rules.json"),
-        serde_json::to_vec(&violated)?,
-    )?;
-    assert!(
-        !check(root.path())?,
-        "forged zero must not bypass native graph validation"
-    );
+    assert_rejected(root.path(), &violated)?;
     violated["data"]["rules"]["rules"][0]["deny"] = serde_json::json!(["absent::module"]);
-    fs::write(
-        root.path().join("target/analysis/architecture_rules.json"),
-        serde_json::to_vec(&violated)?,
-    )?;
-    assert!(
-        !check(root.path())?,
-        "embedded rules must match active configuration"
-    );
+    assert_rejected(root.path(), &violated)?;
 
     let config = root.path().join("rqlens.toml");
     fs::write(

@@ -1,0 +1,49 @@
+{
+  "baseline_revision": "687c732",
+  "scope": "Current rqlens.toml source_roots on both revisions, including lexical ownership and compiler architecture integration tests",
+  "evaluator": "Corrected evaluator on both revisions; unchanged helper sources",
+  "frozen_binary_sha256": "1d402ef730ea2f1cf0bdd314b2458469e84102d1f20e500073caf9da7834109e",
+  "baseline_hotspot_numeric_parity": true,
+  "before": {
+    "modules": 126,
+    "functions": 1266,
+    "nonblank_rust_lines": 30220,
+    "cognitive_complexity": {"max": 16, "sum": 1959},
+    "cyclomatic_complexity": {"max": 21, "sum": 4692},
+    "halstead_effort": {"max": 326964.7072473634, "sum": 17996403.127699405},
+    "token_clone_groups": 105,
+    "ast_clone_groups": 4,
+    "duplicated_nonblank_lines": 1302,
+    "duplication_percent": 4.31,
+    "mean_locality_score": 96.82738095238095,
+    "mean_leverage_score": 24.285714285714285,
+    "escape_occurrences": 0
+  },
+  "after": {
+    "modules": 126,
+    "functions": 1274,
+    "nonblank_rust_lines": 30209,
+    "cognitive_complexity": {"max": 14, "sum": 1954},
+    "cyclomatic_complexity": {"max": 19, "sum": 4701},
+    "halstead_effort": {"max": 254915.06125458688, "sum": 17825404.758307014},
+    "token_clone_groups": 103,
+    "ast_clone_groups": 4,
+    "duplicated_nonblank_lines": 1218,
+    "duplication_percent": 4.03,
+    "mean_locality_score": 96.875,
+    "mean_leverage_score": 24.126984126984127,
+    "escape_occurrences": 0
+  },
+  "baseline_frozen_clone_summary": {"duplicated_line_count": 1306, "duplication_percent": 4.32},
+  "validation": {
+    "workspace_tests_passed": 185,
+    "workspace_tests_ignored": 8,
+    "additional_live_compiler_policy_test_passed": true,
+    "clippy_warnings_denied": true,
+    "formatting": true,
+    "bundled_helper_parity": true,
+    "verify": {"passed": 17, "skipped": 11, "failed": 0},
+    "self_metric_gate": "failed: function hotspot exceeds 70.0",
+    "schema_differential": "Only the capabilities property and map module item type corrections differ"
+  }
+}

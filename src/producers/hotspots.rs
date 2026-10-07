@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::artifacts::json_f64;
+use super::json_f64;
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, FunctionFact, HalsteadMetrics, RunContext};
 use crate::measurement::{MODEL_ID, MODEL_VERSION, percentile};
@@ -69,18 +69,10 @@ fn hotspot_rows(fact: &FileFacts, confidence: &Value) -> Vec<Value> {
         }
         return rows;
     }
-    let function_scores = fact
-        .items
-        .functions
-        .iter()
-        .map(|function| (function, function_score(function)))
-        .collect::<Vec<_>>();
-    let mut rows = vec![module_hotspot_row(fact, &function_scores, confidence)];
-    rows.extend(
-        function_scores
-            .into_iter()
-            .map(|(function, score)| function_hotspot_row(fact, function, score, confidence)),
-    );
+    let mut rows = vec![module_hotspot_row(fact, confidence)];
+    rows.extend(fact.items.functions.iter().map(|function| {
+        function_hotspot_row(fact, function, function_score(function), confidence)
+    }));
     rows
 }
 
@@ -154,15 +146,13 @@ fn function_signals(function: &FunctionFact) -> Vec<&'static str> {
     signals
 }
 
-fn module_hotspot_row(
-    fact: &FileFacts,
-    function_scores: &[(&FunctionFact, f64)],
-    confidence: &Value,
-) -> Value {
+fn module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
     let sloc = fact.source.source_nonblank_line_count as f64;
-    let mut scores = function_scores
+    let mut scores = fact
+        .items
+        .functions
         .iter()
-        .map(|(_, score)| *score)
+        .map(function_score)
         .collect::<Vec<_>>();
     scores.sort_by(f64::total_cmp);
     let maximum = scores.last().copied().unwrap_or_default();
@@ -179,25 +169,11 @@ fn module_hotspot_row(
     let size_contribution = size_pressure * 0.50;
     let quality_score =
         round2(max_contribution + p95_contribution + mean_contribution + size_contribution);
-    let cyclomatic_sum = function_scores
-        .iter()
-        .map(|(function, _)| function.cyclomatic_complexity)
-        .sum::<usize>();
-    let cognitive_sum = function_scores
-        .iter()
-        .map(|(function, _)| function.cognitive_complexity)
-        .sum::<usize>();
-    let cyclomatic_max = function_scores
-        .iter()
-        .map(|(function, _)| function.cyclomatic_complexity)
-        .max()
-        .unwrap_or_default();
-    let cognitive_max = function_scores
-        .iter()
-        .map(|(function, _)| function.cognitive_complexity)
-        .max()
-        .unwrap_or_default();
-    let function_count = function_scores.len();
+    let (cyclomatic_sum, cyclomatic_max) =
+        complexity_totals(&fact.items.functions, |f| f.cyclomatic_complexity);
+    let (cognitive_sum, cognitive_max) =
+        complexity_totals(&fact.items.functions, |f| f.cognitive_complexity);
+    let function_count = fact.items.functions.len();
     with_halstead(
         fact,
         fact.source.halstead.as_ref(),
@@ -238,20 +214,26 @@ fn module_hotspot_row(
     )
 }
 
+fn complexity_totals(
+    functions: &[FunctionFact],
+    metric: fn(&FunctionFact) -> usize,
+) -> (usize, usize) {
+    functions
+        .iter()
+        .map(metric)
+        .fold((0, 0), |(sum, max), value| (sum + value, max.max(value)))
+}
+
 fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
     let recovered_functions = if fact.syntax_backend == "tree-sitter-rust" {
         fact.items.functions.as_slice()
     } else {
         &[]
     };
-    let cyclomatic_sum = recovered_functions
-        .iter()
-        .map(|function| function.cyclomatic_complexity)
-        .sum::<usize>();
-    let cognitive_sum = recovered_functions
-        .iter()
-        .map(|function| function.cognitive_complexity)
-        .sum::<usize>();
+    let (cyclomatic_sum, cyclomatic_max) =
+        complexity_totals(recovered_functions, |f| f.cyclomatic_complexity);
+    let (cognitive_sum, cognitive_max) =
+        complexity_totals(recovered_functions, |f| f.cognitive_complexity);
     let function_count = recovered_functions.len();
     with_halstead(
         fact,
@@ -269,10 +251,10 @@ fn partial_module_hotspot_row(fact: &FileFacts, confidence: &Value) -> Value {
             "function_count": if fact.syntax_backend == "tree-sitter-rust" { Value::from(function_count) } else { Value::Null },
             "cyclomatic_complexity_sum": if fact.syntax_backend == "tree-sitter-rust" { Value::from(cyclomatic_sum) } else { Value::Null },
             "cyclomatic_complexity_average": if function_count > 0 { Value::from(round2(cyclomatic_sum as f64 / function_count as f64)) } else { Value::Null },
-            "cyclomatic_complexity_max": recovered_functions.iter().map(|function| function.cyclomatic_complexity).max().map(Value::from).unwrap_or(Value::Null),
+            "cyclomatic_complexity_max": if function_count > 0 { Value::from(cyclomatic_max) } else { Value::Null },
             "cognitive_complexity_sum": if fact.syntax_backend == "tree-sitter-rust" { Value::from(cognitive_sum) } else { Value::Null },
             "cognitive_complexity_average": if function_count > 0 { Value::from(round2(cognitive_sum as f64 / function_count as f64)) } else { Value::Null },
-            "cognitive_complexity_max": recovered_functions.iter().map(|function| function.cognitive_complexity).max().map(Value::from).unwrap_or(Value::Null),
+            "cognitive_complexity_max": if function_count > 0 { Value::from(cognitive_max) } else { Value::Null },
             "max_function_score": Value::Null,
             "p95_function_score": Value::Null,
             "mean_function_score": Value::Null,

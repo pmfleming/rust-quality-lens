@@ -271,7 +271,7 @@ operational policy consumes the evidence.
 
 See [extended metrics](docs/extended-metrics.md) for structured mutation/flakiness,
 maintenance history, structural cohesion, and opt-in compatibility/resource profiles.
-The [latest self-review](docs/self-refactoring-4.md) records comparable before/after
+The [latest self-review](docs/self-refactoring-5.md) records comparable before/after
 measurements, measurement fixes, and remaining quality-gate failures.
 The subsequent [strict-gate checkpoints](docs/strict-gates.md) document which
 ceilings now pass and which evidence/size requirements remain open.

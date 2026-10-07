@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
-use crate::artifacts::json_f64;
+use super::json_f64;
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext};
 use crate::measurement::{escape_labels, escape_weights, provenance, tool_score_metadata};

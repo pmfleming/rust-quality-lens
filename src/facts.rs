@@ -369,36 +369,22 @@ impl RunContext {
         } else {
             helpers::rust_facts_for_files(config, &correctness_files, &targets)?.into()
         };
-        let compiler_requested = tools
-            .iter()
-            .any(|tool| matches!(tool, MeasureTool::CompilerInventory))
+        let explicit_inventory = tools.contains(&MeasureTool::CompilerInventory);
+        let compiler_requested = explicit_inventory
             || (config.compiler_inventory_driver.is_some()
-                && tools
-                    .iter()
-                    .any(|tool| matches!(tool, MeasureTool::TypeHealth)));
+                && tools.contains(&MeasureTool::TypeHealth));
         let architecture_requested = tools
             .iter()
             .any(|tool| config.compiler_architecture_for(tool));
-        let capture_architecture = architecture_requested
-            || tools
-                .iter()
-                .any(|tool| matches!(tool, MeasureTool::CompilerInventory));
+        let capture_architecture = architecture_requested || explicit_inventory;
         let inventory = (compiler_requested || architecture_requested).then(|| {
             Arc::new(crate::compiler_inventory::Inventory::collect(
                 config,
                 capture_architecture,
             ))
         });
-        let compiler_inventory = if compiler_requested {
-            inventory.clone()
-        } else {
-            None
-        };
-        let compiler_architecture = if architecture_requested {
-            inventory
-        } else {
-            None
-        };
+        let compiler_inventory = inventory.as_ref().filter(|_| compiler_requested).cloned();
+        let compiler_architecture = inventory.filter(|_| architecture_requested);
         Ok(Self {
             snapshot,
             source_files,

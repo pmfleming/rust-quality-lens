@@ -39,6 +39,10 @@ fn produce_semantic(
     }
 }
 
+fn json_f64(row: &Value, key: &str) -> f64 {
+    row[key].as_f64().unwrap_or(f64::NEG_INFINITY)
+}
+
 fn with_fact_identity(fact: &crate::facts::FileFacts, mut record: Value) -> Value {
     if let Some(object) = record.as_object_mut() {
         object.insert("module_id".to_string(), json!(fact.module_id));
