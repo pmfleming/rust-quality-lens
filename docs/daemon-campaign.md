@@ -3,6 +3,38 @@
 These are intermediate checkpoints, **not completion of the complexity/LOC/architecture campaign**.
 All changes are local Git commits; nothing was pushed remotely.
 
+## Latest local review correction (2026-10-07)
+
+This is a review of saved artifacts, not a new execution or a replacement for the
+historical checkpoints below. Paths are relative to the sibling daemon checkout.
+
+| Daemon | Earlier limitation | Latest saved evidence and comparison scope |
+|---|---|---|
+| app | `usage_fields!` and a block-local request type made source analysis partial. | `target/five-improvements/before/` and `pre-inventory/` retain that limitation; `after/` reports complete locality/leverage source evidence. Five explicit model structs and module-scoped `OperationStatusParams` improve visibility, not runtime type counts. Type-health remains partial. See `quality/five-improvements.md`, section 5. |
+| nm | Architecture evidence is partial because of generated code. | `target/quality-next-after/{locality,leverage}_metrics.json` records 39 unresolved references out of 2,012 (98.06% resolved), generated configuration via `src/lib.rs:36`, and unexpanded `string_identity!`, `serialize_via_ref!`, and `print_api_data_fns!`. Resolution of collected references is not exhaustive extraction. |
+| bar | Two environment-dependent fixtures were skipped. | `target/refactor-review/tests-before.log` records the private PipeWire and native idle fixtures as ignored. `tests-after.log` records both passing: 191 unit tests and two integration tests, none ignored. This changes executed coverage, not the number of authored tests. |
+
+The app's five newly visible type declarations are **not** an architectural
+regression or five newly introduced runtime types. Source-scope completeness does
+not imply complete compiled type/impl totals, body coverage, or a passing global
+partial-evidence gate. Compiler inventory is an opt-in type-count backend, not an
+architecture or body-analysis replacement.
+
+The bar tests are explicitly `#[ignore]`: a default Cargo run omits them even if
+the dependencies are installed. Full-fixture runs require `--include-ignored`,
+PipeWire, and the patched Hypridle executable (`HYPRIDLE_TEST_BIN`), supplied by
+the existing Nix environment. Both fixtures use private mock services. A fair
+before/after test comparison must select the same fixtures; no retrospective
+baseline pass is inferred from the successful after-run.
+
+For future comparisons, capture each side into a fresh directory with the same
+frozen analyzer/helper, features, test selection, and declared generator inputs.
+Do not assemble a campaign from `target/analysis` or `target/quality-current` by
+filename alone: app's latter directory contained a September `architecture_rules`
+artifact alongside October measurements. Check fingerprints and per-producer
+scope/status, and retain unresolved references, ignored tests, and unsupported
+patterns rather than interpreting any of them as zero findings.
+
 ## Original daemon checkpoint (v4)
 
 The original daemon captures are retained under `target/daemon-campaign/<daemon>/`:
