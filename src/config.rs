@@ -44,6 +44,7 @@ pub(crate) struct VerificationConfig {
     pub(crate) timeout_seconds: u64,
     pub(crate) workspace: bool,
     pub(crate) all_targets: bool,
+    pub(crate) include_ignored: bool,
     pub(crate) all_features: bool,
     pub(crate) locked: bool,
     pub(crate) no_default_features: bool,
@@ -72,6 +73,7 @@ impl Default for VerificationConfig {
             timeout_seconds: 600,
             workspace: true,
             all_targets: true,
+            include_ignored: false,
             all_features: false,
             locked: false,
             no_default_features: false,
@@ -119,6 +121,30 @@ impl VerificationConfig {
             arguments.push("--no-deps".to_string());
         }
         arguments
+    }
+
+    /// Executed Cargo tests, unlike discovery builds and doctests, use the
+    /// configured libtest selection. Ignored fixtures require explicit opt-in.
+    pub(crate) fn cargo_test_arguments(&self) -> Vec<String> {
+        let mut arguments = self.cargo_arguments("test", true, false);
+        self.append_test_harness_arguments(&mut arguments);
+        arguments
+    }
+
+    pub(crate) fn test_harness_arguments(&self) -> Vec<String> {
+        if self.include_ignored {
+            vec!["--include-ignored".into()]
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub(crate) fn append_test_harness_arguments(&self, arguments: &mut Vec<String>) {
+        let harness = self.test_harness_arguments();
+        if !harness.is_empty() {
+            arguments.push("--".into());
+            arguments.extend(harness);
+        }
     }
 
     /// Cargo selection flags shared by verification and cargo-llvm-cov.
@@ -970,6 +996,7 @@ pub(crate) fn config_schema() -> Value {
                     "timeout_seconds": {"type": "integer", "minimum": 1, "default": 600},
                     "workspace": {"type": "boolean", "default": true},
                     "all_targets": {"type": "boolean", "default": true},
+                    "include_ignored": {"type": "boolean", "default": false, "description": "Opt in to ignored libtest fixtures for executed tests, correctness, coverage and repeated runs (not doctests or test discovery). Required fixture dependencies must be available."},
                     "all_features": {"type": "boolean", "default": false},
                     "locked": {"type": "boolean", "default": false, "description": "Pass --locked to Cargo verification and coverage commands."},
                     "no_default_features": {"type": "boolean", "default": false},
@@ -1182,6 +1209,33 @@ verification = {
         let config = LensConfig::load(Some(config_dir.join("rqlens.toml")))?;
         assert_eq!(config.project_root, std::fs::canonicalize(project)?);
         cargo_metadata_discovers_local_package_source_roots(&config.project_root)
+    }
+
+    #[test]
+    fn ignored_test_selection_is_explicit_and_does_not_change_discovery_or_doctests() {
+        let default = VerificationConfig::default();
+        assert_eq!(
+            default.cargo_test_arguments(),
+            default.cargo_arguments("test", true, false)
+        );
+        let opted_in = VerificationConfig {
+            include_ignored: true,
+            ..default.clone()
+        };
+        assert_eq!(opted_in.test_harness_arguments(), ["--include-ignored"]);
+        let mut expected = default.cargo_test_arguments();
+        expected.extend(["--".into(), "--include-ignored".into()]);
+        assert_eq!(opted_in.cargo_test_arguments(), expected);
+        for (command, targets, docs) in [
+            ("test", true, false),
+            ("test", false, true),
+            ("check", true, false),
+        ] {
+            assert_eq!(
+                opted_in.cargo_arguments(command, targets, docs),
+                default.cargo_arguments(command, targets, docs)
+            );
+        }
     }
 
     fn cargo_arguments_preserve_reproducible_workspace_scope() {

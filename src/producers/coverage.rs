@@ -66,6 +66,9 @@ fn execute_coverage(
         output_path.to_string_lossy().to_string(),
     ];
     arguments.extend(config.verification.cargo_scope_arguments(true));
+    config
+        .verification
+        .append_test_harness_arguments(&mut arguments);
     let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
     request.timeout = Duration::from_secs(config.verification.timeout_seconds);
     let outcome = run_command(request);

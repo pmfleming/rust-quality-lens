@@ -83,8 +83,10 @@ fn repeat_target(
         .collect();
     let mut execution_complete = true;
     let runs = config.verification.flaky_test_runs;
+    let mut arguments = vec!["--format=pretty".into()];
+    arguments.extend(config.verification.test_harness_arguments());
     for iteration in 1..=runs {
-        let outcome = execute_target(config, target, &["--format=pretty".into()]);
+        let outcome = execute_target(config, target, &arguments);
         let complete = record_run(&mut counts, &parse_results(&outcome.stdout))
             && outcome.completed()
             && matches!(outcome.exit_code, Some(0 | 101));
@@ -325,6 +327,18 @@ mod tests {
         assert_eq!(
             result["metrics"]["measurement_confidence"]["complete"],
             true
+        );
+        config.verification.include_ignored = true;
+        let included = check(&config);
+        assert_eq!(included["status"], "passed", "{included:#}");
+        let Some(tests) = included["metrics"]["tests"].as_array() else {
+            anyhow::bail!("missing repeated-test records");
+        };
+        assert_eq!(tests.len(), 2);
+        assert!(
+            tests
+                .iter()
+                .all(|test| test["passed_runs"] == 2 && test["ignored_runs"] == 0)
         );
         Ok(())
     }

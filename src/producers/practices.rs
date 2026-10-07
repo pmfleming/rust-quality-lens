@@ -139,7 +139,7 @@ fn official_checks(config: &LensConfig) -> Vec<Value> {
             config,
             "rust.official.tests",
             "Cargo tests pass for all configured targets",
-            scoped_args(config, "test", true, false),
+            config.verification.cargo_test_arguments(),
             "https://doc.rust-lang.org/cargo/commands/cargo-test.html",
             BTreeMap::new(),
         ),
@@ -350,7 +350,7 @@ fn sanitizer_checks(config: &LensConfig) -> Vec<Value> {
                 config,
                 &format!("rust.safety.sanitizer.{sanitizer}"),
                 &format!("Tests pass under the {sanitizer} sanitizer"),
-                config.verification.cargo_arguments("test", true, false),
+                config.verification.cargo_test_arguments(),
                 "https://doc.rust-lang.org/beta/unstable-book/compiler-flags/sanitizer.html",
                 BTreeMap::from([("RUSTFLAGS".to_string(), format!("-Zsanitizer={sanitizer}"))]),
             )
@@ -368,7 +368,7 @@ fn miri_check(config: &LensConfig) -> Value {
         );
     }
     let mut arguments = vec!["miri".to_string()];
-    arguments.extend(config.verification.cargo_arguments("test", true, false));
+    arguments.extend(config.verification.cargo_test_arguments());
     cargo_check(
         config,
         "rust.safety.miri",

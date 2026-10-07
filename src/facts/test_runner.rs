@@ -124,7 +124,7 @@ fn target_paths(value: &toml::Value, target: &str, project_root: &Path) -> Vec<S
 }
 
 pub(crate) fn run_tests(config: &LensConfig) -> Result<HashMap<String, TestStatus>> {
-    let arguments = config.verification.cargo_arguments("test", true, false);
+    let arguments = config.verification.cargo_test_arguments();
     let mut request = CommandRequest::new("cargo", &arguments, &config.project_root);
     request.timeout = Duration::from_secs(config.verification.timeout_seconds);
     let outcome = run(request);
@@ -232,7 +232,7 @@ fn test_status(status: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{correctness_paths, parse_cargo_test_statuses, run_status};
+    use super::{correctness_paths, parse_cargo_test_statuses, run_status, run_tests};
     use crate::config::LensConfig;
     use crate::facts::{FileFacts, ModuleFileFact};
     use crate::util::normalize_slashes;
@@ -303,6 +303,29 @@ path = "tests/integration.rs"
                 .iter()
                 .any(|path| normalize_slashes(path).contains("not-a-rust-target.rs"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn configured_ignored_tests_are_executed_and_failures_remain_failures() -> anyhow::Result<()> {
+        let root = tempfile::tempdir()?;
+        std::fs::create_dir(root.path().join("src"))?;
+        std::fs::write(
+            root.path().join("Cargo.toml"),
+            "[package]\nname='ignored-fixture'\nversion='0.1.0'\n",
+        )?;
+        std::fs::write(
+            root.path().join("src/lib.rs"),
+            "#[test] #[ignore] fn gated() { assert!(false); }\n",
+        )?;
+        let mut config = LensConfig::test_config("ignored", root.path());
+        let default = run_tests(&config)?;
+        assert_eq!(default["gated"].status, "skipped");
+        assert_eq!(default["__run__"].status, "passed");
+        config.verification.include_ignored = true;
+        let included = run_tests(&config)?;
+        assert_eq!(included["gated"].status, "failed");
+        assert_eq!(included["__run__"].status, "failed");
         Ok(())
     }
 

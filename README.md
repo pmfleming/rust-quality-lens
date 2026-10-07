@@ -140,6 +140,18 @@ rqlens measure reliability
 rqlens measure map
 ```
 
+For trusted projects with environment-dependent ignored fixtures, opt in explicitly:
+
+```toml
+[verification]
+include_ignored = true
+```
+
+This passes `--include-ignored` to executed libtest tests, correctness runs, coverage,
+and repeated test runs (also sanitizer/Miri tests when enabled). It does not change
+compile-only test discovery or doctests. The default remains `false`; supply fixture
+prerequisites before enabling it. Failures remain failures, not skipped evidence.
+
 Use `rqlens measure --help` for the full producer list. Coverage uses
 `cargo-llvm-cov`; when unavailable, RQLens writes partial evidence with an
 explicit missing-input reason.
