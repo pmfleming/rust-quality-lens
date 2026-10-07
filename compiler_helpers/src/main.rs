@@ -162,7 +162,7 @@ impl Inventory {
             env::var_os("CARGO_MANIFEST_DIR").ok_or("Cargo manifest directory missing")?,
         )?;
         let package_name = env::var("CARGO_PKG_NAME")?;
-        let record = json!({
+        let mut record = json!({
             "schema_version": 1, "backend": "rustc-hir",
             "compiler_version": env!("RQLENS_DRIVER_VERSION"),
             "package_name": package_name,
@@ -171,8 +171,10 @@ impl Inventory {
             "target_triple": tcx.sess.opts.target_triple.to_string(),
             "test": test, "cfg": cfg,
             "types": types, "impls": impls, "functions": functions,
-            "architecture": architecture::capture(tcx),
         });
+        if env::var("RQLENS_COMPILER_ARCHITECTURE").as_deref() == Ok("1") {
+            record["architecture"] = architecture::capture(tcx);
+        }
         // One atomic file per invocation, never interleaved Cargo-process output.
         let path = self
             .destination

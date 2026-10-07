@@ -6,9 +6,11 @@ expansion, attribute/derive processing, and effective `cfg` selection. When enab
 appending expansion text to its syntax inventory.
 
 This is not a complete compiler-backed replacement for every RQLens measurement.
-It can establish complete **per-context type counts**, not complete architecture,
-panic/safety, complexity, or other body-level rule coverage. It does not certify a
-T4 pass or remove those producers' macro-related partial flags.
+It can establish complete **per-context type counts**. The separately selected
+[compiler architecture backend](compiler-architecture.md) can establish scoped
+static architecture-rule evidence, not panic/safety, complexity, or other body-level
+rule coverage. Type inventory alone does not certify architecture or a T4 pass,
+and does not remove other producers' macro-related partial flags.
 
 ## Install and enable
 
@@ -63,9 +65,15 @@ rqlens artifact-schema compiler-inventory
 
 The focused command writes `compiler_inventory.json`. It is excluded from
 `measure all`; however, a configured driver is used for the ordinary `type-health`
-task, including that task within `measure all`. Other focused measurements do not
-launch the adapter. Without a configured driver, ordinary type-health retains its
-existing syntax-only behavior and abstention rules.
+task, including that task within `measure all`. Architecture-rules launches the
+adapter only when `rust.architecture_backend = "compiler"` is separately selected.
+Other focused measurements do not launch it. Without a configured driver, ordinary
+type-health retains its existing syntax-only behavior and abstention rules.
+
+Focused type-health requests declarations only. The explicit compiler-inventory
+command additionally exposes optional architecture captures and per-context graph
+projections. Its outer confidence remains scoped to type counts; graph completeness
+and architecture-policy certification are separate.
 
 ## Build context and completeness
 

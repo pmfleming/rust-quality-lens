@@ -293,7 +293,8 @@ pub(crate) struct RunContext {
     pub(crate) correctness_facts: Arc<[FileFacts]>,
     pub(crate) correctness_paths: Vec<String>,
     pub(crate) identity_resolution: IdentityResolutionSummary,
-    pub(crate) compiler_inventory: Option<crate::compiler_inventory::Inventory>,
+    pub(crate) compiler_inventory: Option<Arc<crate::compiler_inventory::Inventory>>,
+    pub(crate) compiler_architecture: Option<Arc<crate::compiler_inventory::Inventory>>,
 }
 
 impl RunContext {
@@ -344,7 +345,9 @@ impl RunContext {
         let targets = helpers::cargo_targets(config);
         let snapshot = crate::measurement::InputSnapshot::capture(config);
         let source_files = crate::util::iter_rust_files(&config.source_roots);
-        let needs_source_facts = tools.iter().any(MeasureTool::requires_source_facts);
+        let needs_source_facts = tools
+            .iter()
+            .any(|tool| tool.requires_source_facts() && !config.compiler_architecture_for(tool));
         let needs_correctness_facts = tools.iter().any(MeasureTool::requires_correctness_facts);
         let mut source_facts = if needs_source_facts {
             helpers::rust_facts_for_files(config, &source_files, &targets)?
@@ -373,8 +376,29 @@ impl RunContext {
                 && tools
                     .iter()
                     .any(|tool| matches!(tool, MeasureTool::TypeHealth)));
-        let compiler_inventory =
-            compiler_requested.then(|| crate::compiler_inventory::Inventory::collect(config));
+        let architecture_requested = tools
+            .iter()
+            .any(|tool| config.compiler_architecture_for(tool));
+        let capture_architecture = architecture_requested
+            || tools
+                .iter()
+                .any(|tool| matches!(tool, MeasureTool::CompilerInventory));
+        let inventory = (compiler_requested || architecture_requested).then(|| {
+            Arc::new(crate::compiler_inventory::Inventory::collect(
+                config,
+                capture_architecture,
+            ))
+        });
+        let compiler_inventory = if compiler_requested {
+            inventory.clone()
+        } else {
+            None
+        };
+        let compiler_architecture = if architecture_requested {
+            inventory
+        } else {
+            None
+        };
         Ok(Self {
             snapshot,
             source_files,
@@ -386,6 +410,7 @@ impl RunContext {
             correctness_paths,
             identity_resolution,
             compiler_inventory,
+            compiler_architecture,
         })
     }
 }
@@ -395,7 +420,10 @@ fn resolve_identities(
     tools: &[MeasureTool],
     source_facts: &mut [FileFacts],
 ) -> Result<IdentityResolutionSummary> {
-    if tools.iter().any(MeasureTool::requires_semantic_identity) {
+    if tools
+        .iter()
+        .any(|tool| tool.requires_semantic_identity() && !config.compiler_architecture_for(tool))
+    {
         return semantic::resolve(config, source_facts);
     }
     let reference_count = source_facts

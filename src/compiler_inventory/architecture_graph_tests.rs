@@ -104,8 +104,30 @@ fn absent_architecture_and_unknown_targets_stay_partial() -> Result<()> {
         super::architecture::Target::Unknown {
             reason: "unsupported associated target".into(),
         };
-    let graphs = project(&[missing, unknown]);
+    let profiles = vec![missing, unknown];
+    let graphs = project(&profiles);
     assert!(graphs.iter().all(|g| !g.missing_evidence.is_empty()));
     assert_eq!(graphs[1].unresolved_references.len(), 1);
+    let inventory = super::Inventory {
+        expected_contexts: profiles
+            .iter()
+            .map(|p| (p.manifest_dir.clone(), p.source_root.clone(), p.test))
+            .collect(),
+        profiles,
+        ..Default::default()
+    };
+    assert_eq!(
+        inventory.report(true)["measurement_confidence"]["complete"],
+        true,
+        "type inventory and architecture coverage are independent"
+    );
+    let report = inventory.architecture_policy(&Default::default(), true);
+    assert_eq!(report["summary"]["violation_count"], 0);
+    assert_eq!(report["measurement_confidence"]["partial"], true);
+    super::validate_architecture_policy(&report, true)?;
+    let mut forged = report;
+    forged["measurement_confidence"]["complete"] = json!(true);
+    forged["measurement_confidence"]["partial"] = json!(false);
+    assert!(super::validate_architecture_policy(&forged, true).is_err());
     Ok(())
 }

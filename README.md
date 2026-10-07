@@ -25,7 +25,8 @@ For opt-in compiler-expanded type inventory, build the separately pinned
 `rustc-dev` adapter and configure `rust.compiler_inventory_driver`;
 see [compiler inventory](docs/compiler-inventory.md). This handles macro/derive,
 attribute, cfg, and resolved-ownership evidence for type-health, without claiming
-complete body-level or architecture analysis.
+complete body-level analysis. For separately opted-in post-expansion static
+architecture rules, see [compiler architecture](docs/compiler-architecture.md).
 
 ## What RQLens measures
 

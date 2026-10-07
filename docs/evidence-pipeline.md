@@ -94,8 +94,15 @@ declares `resolution_scope =
 navigation without an inventoried owner does not count as resolved identity.
 Unknown ownership propagates to the outer confidence and strict policy gates;
 `identity_resolution = "required"` rejects it. Cold/warm cache results retain the
-same scope and reason counts. None of this expands macro bodies, resolves
-block-local type owners, or certifies compiler-complete architecture.
+same scope and reason counts. Navigation alone does not expand macro bodies or
+certify compiler-complete architecture. Separate lexical scope frames resolve
+unambiguous block-local type owners without promoting imports, aliases or generic
+shadowing into guessed joins.
+
+The separately opted-in [compiler architecture backend](compiler-architecture.md)
+can certify static module rules for completely captured selected contexts. Its
+confidence does not promote source metrics or type counts, and compiler failure
+never silently substitutes a syntax graph.
 
 ## Typed boundaries
 

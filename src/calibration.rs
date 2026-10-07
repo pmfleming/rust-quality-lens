@@ -192,6 +192,7 @@ fn calibration_config(
         identity_build_macros: false,
         compiler_inventory_driver: None,
         compiler_inventory_target: None,
+        architecture_backend: Default::default(),
         verification: Default::default(),
         architecture: Default::default(),
         history: Default::default(),

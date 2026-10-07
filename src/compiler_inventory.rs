@@ -7,7 +7,9 @@ use std::{collections::BTreeSet, path::PathBuf};
 use crate::config::LensConfig;
 pub(crate) mod architecture;
 pub(crate) mod architecture_graph;
+mod architecture_policy;
 mod architecture_schema;
+pub(crate) use architecture_policy::validate_architecture_policy;
 mod capture;
 mod projection;
 mod schema;
@@ -234,14 +236,14 @@ pub(crate) struct Inventory {
 }
 
 impl Inventory {
-    pub(crate) fn collect(config: &LensConfig) -> Self {
+    pub(crate) fn collect(config: &LensConfig, architecture: bool) -> Self {
         let requested_scope = json!({
             "workspace": config.verification.workspace, "all_targets": config.verification.all_targets,
             "all_features": config.verification.all_features, "features": config.verification.features,
             "no_default_features": config.verification.no_default_features, "exclude": config.verification.exclude,
             "target": config.compiler_inventory_target,
         });
-        match capture::collect(config) {
+        match capture::collect(config, architecture) {
             Ok((profiles, expected_contexts)) => Self {
                 profiles,
                 expected_contexts,
@@ -293,6 +295,7 @@ impl Inventory {
         json!({
             "backend": "rustc-hir", "inventory_model_version": 1,
             "requested_scope": self.requested_scope,
+            "capture_failures": self.reasons,
             "summary": {"complete": confidence["complete"], "context_count": self.profiles.len(),
                 "type_count_across_contexts": self.profiles.iter().map(|p| p.types.len()).sum::<usize>(),
                 "architecture_contexts_with_complete_capture": self.profiles.iter().filter(|p| p.architecture.as_ref().is_some_and(|a| a.missing_evidence().is_empty())).count()},

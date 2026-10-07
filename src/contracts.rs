@@ -39,7 +39,7 @@ pub(crate) fn artifact_document(
                 }
             }),
     )?;
-    if tool.requires_semantic_identity() {
+    if tool.requires_semantic_identity() && !config.compiler_architecture_for(tool) {
         context
             .identity_resolution
             .apply_confidence(&mut confidence);
@@ -304,7 +304,17 @@ fn other_payload_schema(tool: &MeasureTool) -> Value {
                 )],
             ),
         ),
-        MeasureTool::ArchitectureRules => summary_arrays_schema(tool, &["violations"]),
+        MeasureTool::ArchitectureRules => {
+            let mut schema = summary_arrays_schema(tool, &["violations"]);
+            schema["properties"]["backend"] = json!({"enum": ["syntax", "rustc-hir"]});
+            schema["properties"]["architecture_model_version"] = json!({"const": 1});
+            schema["properties"]["compiler_inventory"] = json!({"type": "object", "required": ["profiles", "expected_contexts", "architecture_graphs", "capture_failures", "measurement_confidence"],
+                "properties": {"profiles": crate::compiler_inventory::profiles_schema()}});
+            schema["properties"]["rules"] = json!({"type": "object"});
+            schema["allOf"] = json!([{"if": {"required": ["backend"], "properties": {"backend": {"const": "rustc-hir"}}},
+                "then": {"required": ["compiler_inventory", "rules", "architecture_model_version"]}}]);
+            schema
+        }
         MeasureTool::TestQuality => summary_arrays_schema(tool, &["tests", "findings"]),
         MeasureTool::ApiHealth => array_schema(
             "api_health.json",

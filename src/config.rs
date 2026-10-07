@@ -36,6 +36,7 @@ struct RawRustConfig {
     identity_build_macros: Option<bool>,
     compiler_inventory_driver: Option<PathBuf>,
     compiler_inventory_target: Option<String>,
+    architecture_backend: Option<ArchitectureBackend>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -455,6 +456,14 @@ pub(crate) enum SemanticIdentityMode {
     Disabled,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ArchitectureBackend {
+    #[default]
+    Syntax,
+    Compiler,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct LensConfig {
     pub(crate) project_name: String,
@@ -475,6 +484,7 @@ pub(crate) struct LensConfig {
     pub(crate) identity_build_macros: bool,
     pub(crate) compiler_inventory_driver: Option<PathBuf>,
     pub(crate) compiler_inventory_target: Option<String>,
+    pub(crate) architecture_backend: ArchitectureBackend,
     pub(crate) verification: VerificationConfig,
     pub(crate) architecture: ArchitectureConfig,
     pub(crate) history: HistoryConfig,
@@ -483,6 +493,11 @@ pub(crate) struct LensConfig {
 }
 
 impl LensConfig {
+    pub(crate) fn compiler_architecture_for(&self, tool: &crate::tool::MeasureTool) -> bool {
+        self.architecture_backend == ArchitectureBackend::Compiler
+            && matches!(tool, crate::tool::MeasureTool::ArchitectureRules)
+    }
+
     /// Parser-only fixtures: no Cargo metadata, helper discovery, or filesystem IO.
     #[cfg(test)]
     pub(crate) fn test_config(name: &str, root: &Path) -> Self {
@@ -502,6 +517,7 @@ impl LensConfig {
             identity_build_macros: false,
             compiler_inventory_driver: None,
             compiler_inventory_target: None,
+            architecture_backend: ArchitectureBackend::Syntax,
             verification: Default::default(),
             architecture: Default::default(),
             history: Default::default(),
@@ -663,6 +679,7 @@ impl LensConfig {
                 .compiler_inventory_driver
                 .map(|path| resolve_config_path(path, &config_dir)),
             compiler_inventory_target: rust.compiler_inventory_target,
+            architecture_backend: rust.architecture_backend.unwrap_or_default(),
             verification,
             architecture,
             history,
@@ -894,6 +911,8 @@ identity_build_macros = false
 # Opt-in compiler-backed type inventory; runs Cargo/build scripts/procedural macros.
 # compiler_inventory_driver = "/path/to/rqlens-compiler-inventory"
 # compiler_inventory_target = "x86_64-unknown-linux-gnu"
+# Opt-in compiler graph for architecture-rules only (requires the adapter above).
+architecture_backend = "syntax" # syntax or compiler
 
 [verification]
 timeout_seconds = 600
@@ -985,6 +1004,7 @@ pub(crate) fn config_schema() -> Value {
                     "identity_offline": {"type": "boolean", "default": true},
                     "compiler_inventory_driver": {"type": "string", "description": "Opt-in pinned rustc HIR adapter; executes trusted project builds, macros and build scripts. Relative to the configuration file."},
                     "compiler_inventory_target": {"type": "string", "description": "Compiler inventory target triple; defaults to the adapter compiler host."},
+                    "architecture_backend": {"type": "string", "enum": ["syntax", "compiler"], "default": "syntax", "description": "Compiler opts architecture-rules into the trusted pinned compiler adapter. Other source/body measurements and scoring remain syntax-based."},
                     "identity_build_macros": {"type": "boolean", "default": false,
                         "description": "Trusted projects only: allow rust-analyzer to execute build scripts and procedural macros"}
                 }

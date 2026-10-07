@@ -89,7 +89,28 @@ fn validate_policy_payload(
         "correctness_review.json" => test_summary(payload),
         "rust_practices.json" => each(&payload["checks"], practice),
         "reliability_findings.json" => each(payload, reliability),
-        "architecture_rules.json" => each(&payload["violations"], finding),
+        "architecture_rules.json" => {
+            if payload["backend"] == "rustc-hir" {
+                ensure!(
+                    payload["measurement_confidence"]["complete"]
+                        == header.measurement_confidence.is_complete(),
+                    "compiler architecture and envelope confidence disagree"
+                );
+                crate::compiler_inventory::validate_architecture_policy(
+                    payload,
+                    header.input_fingerprint.complete,
+                )?;
+            } else {
+                ensure!(
+                    payload.get("compiler_inventory").is_none()
+                        && payload["measurement_confidence"]["confidence_scope"]
+                            != "compiled_static_module_dependencies"
+                        && matches!(payload["backend"].as_str(), None | Some("syntax")),
+                    "unknown architecture backend"
+                );
+            }
+            each(&payload["violations"], finding)
+        }
         "test_quality.json" => each(&payload["findings"], finding),
         "map.json" => each(&payload["graph"]["nodes"], map_node),
         "compiler_inventory.json" => {

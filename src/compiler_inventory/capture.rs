@@ -201,7 +201,10 @@ impl Selection {
     }
 }
 
-pub(super) fn collect(config: &LensConfig) -> Result<(Vec<Profile>, BTreeSet<Unit>)> {
+pub(super) fn collect(
+    config: &LensConfig,
+    architecture: bool,
+) -> Result<(Vec<Profile>, BTreeSet<Unit>)> {
     let driver = config.compiler_inventory_driver.as_ref()
         .context("compiler inventory is not enabled; configure rust.compiler_inventory_driver for a trusted build")?;
     let info = driver_info(driver, config)?;
@@ -241,6 +244,10 @@ pub(super) fn collect(config: &LensConfig) -> Result<(Vec<Profile>, BTreeSet<Uni
         .arg(run.path().join("build"))
         .env("RUSTC_WORKSPACE_WRAPPER", driver)
         .env("RQLENS_COMPILER_CAPTURE", &captures)
+        .env(
+            "RQLENS_COMPILER_ARCHITECTURE",
+            if architecture { "1" } else { "0" },
+        )
         .env(
             "RQLENS_COMPILER_BUILD_SCRIPTS",
             serde_json::to_string(&build_scripts)?,
@@ -292,6 +299,7 @@ fn driver_info(driver: &Path, config: &LensConfig) -> Result<DriverInfo> {
         "CARGO_BUILD_RUSTC_WRAPPER",
         "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
         "RQLENS_COMPILER_CAPTURE",
+        "RQLENS_COMPILER_ARCHITECTURE",
     ] {
         ensure!(
             env::var_os(variable).is_none_or(|value| value.is_empty()),

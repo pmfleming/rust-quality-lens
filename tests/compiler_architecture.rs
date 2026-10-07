@@ -2,6 +2,11 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::{collections::BTreeMap, fs, path::Path, process::Command};
 
+#[path = "compiler_architecture/cross_crate.rs"]
+mod cross_crate;
+#[path = "compiler_architecture/policy.rs"]
+mod policy;
+
 fn fixture() -> Result<tempfile::TempDir> {
     let root = tempfile::tempdir()?;
     fs::create_dir(root.path().join("src"))?;

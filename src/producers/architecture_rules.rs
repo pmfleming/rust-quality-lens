@@ -1,10 +1,20 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use crate::config::LensConfig;
 use crate::facts::RunContext;
 
 pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
+    if config.compiler_architecture_for(&crate::tool::MeasureTool::ArchitectureRules) {
+        return Ok(context
+            .compiler_architecture
+            .as_ref()
+            .context("compiler architecture was not requested")?
+            .architecture_policy(
+                &config.architecture,
+                context.snapshot.fingerprint["complete"] == true,
+            ));
+    }
     let graph = context.module_graph();
     let evaluation = config.architecture.evaluate(graph);
     let mut confidence = context.semantic_confidence(context.source_confidence())?;
@@ -46,6 +56,7 @@ pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value
         })
         .collect::<Vec<_>>();
     Ok(json!({
+        "backend": "syntax", "architecture_model_version": 1,
         "summary": {
             "configured_rule_count": config.architecture.rules.len(),
             "violation_count": violations.len(),

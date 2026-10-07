@@ -69,5 +69,29 @@ remain separate, never summed into a fictitious program total. Architecture poli
 can be complete independently of type health, safety and complexity. Syntax scoring
 is not silently recalibrated against compiler-expanded graphs.
 
+## Producer selection and policy
+
+`rust.architecture_backend = "compiler"` explicitly opts architecture-rules into
+this graph; the default remains `syntax`. Configuring type-health's adapter alone
+does not opt architecture policy in. Focused type-health does not request reference
+traversal. The explicit compiler-inventory diagnostic tool may expose graphs, but
+its outer confidence still describes type counts.
+
+Architecture evidence is complete only with complete selected context coverage,
+complete graph ownership/reference/provenance, successful compilation and a
+complete input fingerprint. Missing capture or unsupported contexts remain partial
+without syntax fallback. Confidence is independent of type and body producers.
+
+Compiler architecture payloads include model version, captured profiles, graphs,
+rules and violations. Native validation recomputes projection and policy results;
+policy consumers also bind recorded backend/rules to active configuration. The
+compiler and adapter are trusted producers, not authenticated or sandboxed inputs.
+Selected examples/benches are currently unsupported and fail closed; automatic
+exclusion is not an acceptable path to complete evidence.
+
+Backend/adapter/configuration changes invalidate fingerprint compatibility. Capture
+is fresh per run; compiler graphs are not reused from the semantic navigation cache.
+See [configuration and limitations](../docs/compiler-architecture.md).
+
 The backend remains opt-in trusted execution. Selected unsupported targets or
 failed builds fail closed; no automatic feature/target exclusions are permitted.

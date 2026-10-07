@@ -221,6 +221,17 @@ fn read_document(config: &LensConfig, file: &str) -> Result<(Value, ArtifactHead
         .map_err(|error| InputState::new(InputStatus::Unreadable, Some(error.to_string())))?;
     let header = validate_artifact(file, &document)
         .map_err(|error| InputState::new(InputStatus::Incompatible, Some(error.to_string())))?;
+    if file == "architecture_rules.json" {
+        let compiler = config.compiler_architecture_for(&MeasureTool::ArchitectureRules);
+        if compiler != (document["data"]["backend"] == "rustc-hir")
+            || (compiler && document["data"]["rules"] != json!(config.architecture))
+        {
+            return Err(InputState::new(
+                InputStatus::Incompatible,
+                Some("architecture backend/rules differ from active configuration".into()),
+            ));
+        }
+    }
     Ok((document, header))
 }
 

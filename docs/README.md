@@ -9,6 +9,7 @@ This directory contains the design and interpretation notes for rust-quality-len
 - [Extended metrics](extended-metrics.md): behavioral, maintenance, cohesion and profile evidence
 - [Measurement design and upgrades](measurement-upgrades.md): artifact, extraction, confidence, and scoring design
 - [Compiler inventory](compiler-inventory.md): opt-in macro-expanded, cfg-selected type-health with compiler ownership, source attribution, and per-context deduplication
+- [Compiler architecture](compiler-architecture.md): separate opt-in static module rules, generated reference provenance, per-context graphs, and strict completeness gates
 - [Halstead measurement](halstead.md): researched formulas, versioned Rust counting rules, scopes, and limitations
 - [Validation corpus](validation-corpus.md): calibration limits and the outcome-validation protocol
 - [Evidence pipeline](evidence-pipeline.md): typed contracts, shared snapshots, staged publication, trusted generated-symbol resolution, and regression tests
