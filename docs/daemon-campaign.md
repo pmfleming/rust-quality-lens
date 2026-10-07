@@ -35,6 +35,40 @@ artifact alongside October measurements. Check fingerprints and per-producer
 scope/status, and retain unresolved references, ignored tests, and unsupported
 patterns rather than interpreting any of them as zero findings.
 
+### Implemented follow-up
+
+- nm `2cc26e5` enables trusted rust-analyzer build/macro execution and fingerprints
+  the Wi-Fi CSV plus the three configuration files read by `build.rs`. The opt-in
+  does not authorize arbitrary untrusted projects or certify generated inventory.
+- bar `1debec3` supplies `tools/quality-fixtures.sh` for local/CI test and coverage
+  runs. It checks prerequisites, selects both ignored fixtures, rejects missing
+  fixture passes/nonzero ignored counts, and refuses output-directory reuse.
+  Six mocked runner regressions and live test/coverage invocations passed. Other
+  agents' daemon edits were preserved; the executions are not a frozen
+  before/after performance or coverage comparison.
+- RQLens distinguishes authored inventory from collected-reference resolution,
+  reports unresolved counts by status, and no longer calls unindexed project or
+  Cargo build-output definitions external. A local nm probe in
+  `target/generated-owner-probe/artifacts/locality_metrics.json` retained all 39
+  generated definitions as unknown owners, zero external definitions, nine
+  unsupported patterns, and a complete input fingerprint. This is a correction
+  to analyzer classification, not a regression in daemon architecture.
+
+Validation: 172 normal Rust tests, two explicit live semantic tests (including
+relocated `OUT_DIR` navigation and cold/warm cache equivalence), strict Clippy,
+formatting, and bundled-helper consistency passed. Two other opt-in integration
+checks (compiler inventory and source expansion) were not run in this follow-up.
+Raw RQLens logs are `target/daemon-scope-{tests,live-tests,clippy}.log`; bar runner
+logs are in its fresh `target/quality-fixtures.*` directories.
+
+Subsequent nm repeat attempts in `target/generated-owner-probe/final-*.log` were
+rejected because source inputs changed during measurement while that daemon was
+being edited concurrently. The publication guard was **not** bypassed. Those
+attempts are not repeatability evidence; the isolated live regression supplies
+cache-repeat evidence, and the saved successful daemon probe remains scoped to
+its recorded fingerprint. Macro-body extraction and block-local type ownership
+remain partial; no strict gate or scoring threshold was relaxed.
+
 ## Original daemon checkpoint (v4)
 
 The original daemon captures are retained under `target/daemon-campaign/<daemon>/`:

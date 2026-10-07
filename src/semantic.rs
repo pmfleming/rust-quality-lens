@@ -13,9 +13,11 @@ use crate::config::{LensConfig, SemanticIdentityMode};
 use crate::facts::{DependencyReferenceFact, FileFacts, ResolvedDependencyFact};
 use crate::util::{lock_file, normalize_slashes, write_json};
 
+mod definitions;
 pub(crate) mod expansion;
+use definitions::{DefinitionIndex, resolved_definitions};
 
-const CACHE_VERSION: u64 = 14;
+const CACHE_VERSION: u64 = 15;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct IdentityResolutionSummary {
@@ -29,6 +31,7 @@ pub(crate) struct IdentityResolutionSummary {
     pub(crate) local_definition_count: usize,
     pub(crate) external_definition_count: usize,
     pub(crate) unresolved_count: usize,
+    pub(crate) unresolved_by_status: BTreeMap<String, usize>,
     pub(crate) duration_ms: u128,
     pub(crate) analyzer_version: Option<String>,
     pub(crate) reason: Option<String>,
@@ -47,6 +50,11 @@ impl IdentityResolutionSummary {
             local_definition_count: 0,
             external_definition_count: 0,
             unresolved_count: reference_count,
+            unresolved_by_status: if reference_count == 0 {
+                BTreeMap::new()
+            } else {
+                BTreeMap::from([("resolution_not_run".into(), reference_count)])
+            },
             duration_ms: 0,
             analyzer_version: None,
             reason: (reference_count > 0).then(|| {
@@ -88,6 +96,10 @@ impl IdentityResolutionSummary {
                 )
             };
             object.insert("resolution_percent".to_string(), Value::from(percent));
+            object.insert(
+                "resolution_scope".to_string(),
+                json!("collected_dependency_references_only_not_inventory_completeness"),
+            );
         }
         value
     }
@@ -144,7 +156,7 @@ fn resolve_inner(
             return unavailable_summary(config, reference_count, analyzer_version, error);
         }
     };
-    let path_index = fact_path_index(config, facts);
+    let path_index = DefinitionIndex::new(config, facts);
     let counts = resolve_candidates(
         config,
         facts,
@@ -173,6 +185,7 @@ struct ResolutionCounts {
     local: usize,
     external: usize,
     unresolved: usize,
+    unresolved_by_status: BTreeMap<String, usize>,
 }
 
 impl ResolutionCounts {
@@ -186,7 +199,13 @@ impl ResolutionCounts {
                 self.resolved += 1;
                 self.external += 1;
             }
-            _ => self.unresolved += 1,
+            status => {
+                self.unresolved += 1;
+                *self
+                    .unresolved_by_status
+                    .entry(status.to_string())
+                    .or_default() += 1;
+            }
         }
     }
 
@@ -208,6 +227,7 @@ impl ResolutionCounts {
             local_definition_count: self.local,
             external_definition_count: self.external,
             unresolved_count: self.unresolved,
+            unresolved_by_status: self.unresolved_by_status,
             duration_ms: duration.as_millis(),
             analyzer_version,
             reason: (self.unresolved > 0).then(|| {
@@ -269,7 +289,7 @@ fn resolve_candidates(
     config: &LensConfig,
     facts: &mut [FileFacts],
     candidates: Vec<Vec<DependencyReferenceFact>>,
-    path_index: &BTreeMap<String, (String, String)>,
+    path_index: &DefinitionIndex,
     client: &mut LspClient,
     deadline: Instant,
 ) -> ResolutionCounts {
@@ -291,7 +311,7 @@ fn resolve_reference(
     client: &mut LspClient,
     source_uri: &str,
     reference: &DependencyReferenceFact,
-    path_index: &BTreeMap<String, (String, String)>,
+    path_index: &DefinitionIndex,
     deadline: Instant,
 ) -> ResolvedDependencyFact {
     if Instant::now() >= deadline {
@@ -305,65 +325,6 @@ fn resolve_reference(
     ) {
         Ok(locations) => resolved_definitions(reference, locations, path_index),
         Err(error) => unresolved(reference, &format!("error: {error}")),
-    }
-}
-
-fn resolved_definitions(
-    reference: &DependencyReferenceFact,
-    locations: Vec<DefinitionLocation>,
-    path_index: &BTreeMap<String, (String, String)>,
-) -> ResolvedDependencyFact {
-    // Proc-macro navigation can return the external generator first and the
-    // local expansion origin second. The generated item belongs to the latter.
-    let multiple = locations.len() > 1;
-    let location = locations
-        .into_iter()
-        .min_by_key(|location| match uri_path(&location.uri) {
-            Some(path) if path_index.contains_key(&canonical_key(&path)) => 0,
-            None => 1, // Without a local origin, do not mistake a generator for the item.
-            Some(_) => 2,
-        });
-    let Some(location) = location else {
-        return unresolved(reference, "unresolved");
-    };
-    let Some(target_path) = uri_path(&location.uri) else {
-        // A virtual expansion URI is not evidence of an external dependency.
-        // Keep it unresolved unless the analyzer supplies a source location.
-        return unresolved(reference, "unmapped_generated_definition");
-    };
-    let target_path = Some(target_path);
-    let target = target_path
-        .as_ref()
-        .map(canonical_key)
-        .and_then(|key| path_index.get(&key));
-    let symbol = if multiple && target.is_some() {
-        // The origin's token names the generator, not the generated item.
-        reference_symbol(&reference.raw_path)
-    } else {
-        target_path
-            .as_ref()
-            .and_then(|path| identifier_at(path, location.line, location.character))
-            .unwrap_or_else(|| reference_symbol(&reference.raw_path))
-    };
-    let (status, target_module_id, target_module_key, symbol_identity) = match target {
-        Some((module_id, module_key)) => (
-            "resolved_local",
-            Some(module_id.clone()),
-            Some(module_key.clone()),
-            Some(format!("{module_id}::{symbol}")),
-        ),
-        None => ("resolved_external", None, None, None),
-    };
-    ResolvedDependencyFact {
-        raw_path: reference.raw_path.clone(),
-        line: reference.line,
-        column: reference.column,
-        status: status.to_string(),
-        backend: "rust_analyzer".to_string(),
-        target_path: target_path.map(normalize_slashes),
-        target_module_id,
-        target_module_key,
-        symbol_identity,
     }
 }
 
@@ -469,18 +430,6 @@ fn write_cache(
             resolved_by_path,
         })?,
     )
-}
-
-fn fact_path_index(config: &LensConfig, facts: &[FileFacts]) -> BTreeMap<String, (String, String)> {
-    facts
-        .iter()
-        .map(|fact| {
-            (
-                canonical_key(absolute_path(config, &fact.path)),
-                (fact.module_id.clone(), fact.module_key.clone()),
-            )
-        })
-        .collect()
 }
 
 fn absolute_path(config: &LensConfig, path: impl AsRef<Path>) -> PathBuf {
@@ -1197,11 +1146,11 @@ mod tests {
         let root = tempfile::tempdir()?;
         let path = root.path().join("lib.rs");
         fs::write(&path, "scanner::generate_code!();\n")?;
-        let index = [(
+        let mut index = super::DefinitionIndex::default();
+        index.modules.insert(
             super::canonical_key(&path),
             ("fixture::lib::protocol".into(), "protocol".into()),
-        )]
-        .into();
+        );
         let reference = DependencyReferenceFact {
             raw_path: "crate::protocol::generated::Message".into(),
             line: 2,
@@ -1302,12 +1251,65 @@ mod tests {
         assert_eq!(before, summary.to_json());
         assert!(before.get("duration_ms").is_none());
         assert!(before.get("cache_hit").is_none());
+        assert_eq!(before["unresolved_by_status"]["resolution_not_run"], 3);
+        assert_eq!(
+            before["resolution_scope"],
+            "collected_dependency_references_only_not_inventory_completeness"
+        );
         summary.unresolved_count = 2;
         assert_ne!(
             before,
             summary.to_json(),
             "semantic changes must stay visible"
         );
+    }
+
+    #[test]
+    fn reference_resolution_never_promotes_partial_inventory() -> anyhow::Result<()> {
+        let mut fact = FileFacts::test_fact("src/lib.rs", "lib");
+        fact.identity_backend = "cargo_metadata".into();
+        fact.graph
+            .unsupported_patterns
+            .push("unexpanded item macro model!".into());
+        let source = crate::measurement::source_confidence_from_inventory(
+            &[std::path::PathBuf::from("src/lib.rs")],
+            &[fact],
+        );
+        assert_eq!(
+            source["inventory_scope"],
+            "authored_syntax_before_cfg_and_macro_expansion"
+        );
+        let mut confidence = serde_json::from_value(source)?;
+        let mut summary = IdentityResolutionSummary::disabled(SemanticIdentityMode::Auto, 0);
+        summary.apply_confidence(&mut confidence);
+        let wire = serde_json::to_value(&confidence)?;
+        assert_eq!(wire["complete"], false);
+        assert_eq!(wire["semantic_identity"]["complete"], true);
+        assert_eq!(
+            wire["unsupported_pattern"][0],
+            "unexpanded item macro model!"
+        );
+
+        summary.complete = false;
+        summary.reference_count = 1;
+        summary.unresolved_count = 1;
+        summary
+            .unresolved_by_status
+            .insert("unmapped_generated_definition".into(), 1);
+        summary.reason = Some("1 dependency references were not resolved".into());
+        summary.apply_confidence(&mut confidence);
+        let wire = serde_json::to_value(&confidence)?;
+        assert_eq!(wire["partial"], true);
+        assert_eq!(
+            wire["semantic_identity"]["unresolved_by_status"]["unmapped_generated_definition"],
+            1
+        );
+        assert!(
+            wire["missing_input"]
+                .as_array()
+                .is_some_and(|reasons| !reasons.is_empty())
+        );
+        Ok(())
     }
 
     #[test]

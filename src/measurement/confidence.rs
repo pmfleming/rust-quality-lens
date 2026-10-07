@@ -86,6 +86,7 @@ pub(crate) fn source_confidence_from_inventory(
         "complete": complete,
         "partial": !complete,
         "confidence_scope": "syntax_facts",
+        "inventory_scope": "authored_syntax_before_cfg_and_macro_expansion",
         "required_inputs": ["rust_source_files", "rust_syntax_facts"],
         "observed_inputs": {
             "rust_source_files": files.len(),

@@ -107,3 +107,67 @@ fn trusted_build_scripts_and_macros_resolve_generated_imports_and_cache() -> any
     assert!(resolve(&config, &mut facts)?.cache_hit);
     Ok(())
 }
+
+#[test]
+#[ignore = "requires rust-analyzer and a Rust sysroot; executes a trusted fixture build script"]
+fn generated_include_without_owner_stays_partial_and_cache_preserves_reason() -> anyhow::Result<()>
+{
+    let root = tempfile::tempdir()?;
+    let target = tempfile::tempdir()?;
+    fs::create_dir_all(root.path().join("src"))?;
+    fs::create_dir_all(root.path().join(".cargo"))?;
+    fs::write(
+        root.path().join("Cargo.toml"),
+        "[package]\nname='include-fixture'\nversion='0.1.0'\nedition='2024'\n",
+    )?;
+    fs::write(
+        root.path().join(".cargo/config.toml"),
+        format!("[build]\ntarget-dir={:?}\n", target.path()),
+    )?;
+    fs::write(
+        root.path().join("build.rs"),
+        r#"fn main() {
+        let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+        std::fs::write(out.join("config.rs"), "pub const LIMIT: u32 = 1;").unwrap();
+    }"#,
+    )?;
+    let source = "mod generated { include!(concat!(env!(\"OUT_DIR\"), \"/config.rs\")); }\nuse crate::generated::LIMIT;\npub fn limit() -> u32 { LIMIT }\n";
+    let path = root.path().join("src/lib.rs");
+    fs::write(&path, source)?;
+    let config_path = root.path().join("rqlens.toml");
+    fs::write(
+        &config_path,
+        "source_roots=['src']\n[rust]\nidentity_build_macros=true\nidentity_timeout_seconds=90\n",
+    )?;
+    let mut config = LensConfig::load(Some(config_path))?;
+    let mut fact = FileFacts::test_fact(&path.to_string_lossy(), "lib");
+    fact.graph
+        .dependency_references
+        .push(DependencyReferenceFact {
+            raw_path: "crate::generated::LIMIT".into(),
+            line: 2,
+            column: 22,
+        });
+    let mut facts = [fact];
+    let summary = resolve(&config, &mut facts)?;
+    assert!(summary.available);
+    assert!(!summary.complete);
+    assert_eq!(summary.external_definition_count, 0);
+    assert_eq!(
+        summary.unresolved_by_status["unmapped_generated_definition"],
+        1
+    );
+    let resolved = &facts[0].graph.resolved_dependencies[0];
+    assert!(
+        resolved
+            .target_path
+            .as_deref()
+            .is_some_and(|path| path.ends_with("config.rs"))
+    );
+    let cached = resolve(&config, &mut facts)?;
+    assert!(cached.cache_hit);
+    assert_eq!(cached.to_json(), summary.to_json());
+    config.identity_resolution = crate::config::SemanticIdentityMode::Required;
+    assert!(resolve(&config, &mut facts).is_err());
+    Ok(())
+}

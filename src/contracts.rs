@@ -633,6 +633,18 @@ fn measurement_confidence_schema() -> Value {
             "complete": {"type": "boolean"},
             "partial": {"type": "boolean"},
             "confidence_scope": {"type": "string"},
+            "inventory_scope": {"type": "string"},
+            "semantic_identity": {
+                "type": "object",
+                "properties": {
+                    "resolution_scope": {"type": "string"},
+                    "unresolved_by_status": {
+                        "type": "object",
+                        "additionalProperties": {"type": "integer", "minimum": 0}
+                    }
+                },
+                "additionalProperties": true
+            },
             "required_inputs": {"type": "array", "items": {"type": "string"}},
             "observed_inputs": {"type": "object"},
             "missing_input": {"type": "array", "items": {"type": "string"}},

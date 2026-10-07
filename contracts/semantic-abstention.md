@@ -27,6 +27,20 @@ The native validator and published type-health schema encode nullable metrics an
 
 For identity-consuming tools, unresolved references, unavailable rust-analyzer, or explicitly disabled resolution with references to analyze produce partial confidence. The nested semantic status, outer artifact, custom payload confidence and capability cannot disagree by claiming full evaluation. Diagnostics are preserved in `missing_input` and `semantic_identity`.
 
+A rust-analyzer file location without a measured owner is not sufficient to call
+an edge external. Unindexed definitions inside project/local Cargo package roots
+remain `unindexed_project_definition`; unmapped Cargo build output and virtual
+expansions remain `unmapped_generated_definition`. A known authored origin takes
+precedence, but target-directory/package-name heuristics never invent owners.
+Resolved navigation paths are retained where available. `unresolved_by_status`
+counts these reasons and preserves them through cache replay. Required resolution
+and partial-evidence policies remain strict.
+
+`inventory_scope` names authored syntax before cfg/macro expansion;
+`semantic_identity.resolution_scope` explicitly limits the resolution denominator
+to collected references. Neither a 100% resolution rate nor these additive scope
+labels promote a partial inventory to complete.
+
 An empty reference scope is different: there is nothing to resolve. No semantic backend is needed to establish an empty syntax reference set. Execution telemetry remains outside semantic measurement JSON, as specified in `determinism.md`.
 
 ## Validation and limitations

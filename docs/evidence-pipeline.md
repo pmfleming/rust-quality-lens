@@ -65,17 +65,37 @@ final output. Calibration uses the same batch mechanism.
 
 `rust.identity_build_macros` defaults to `false`. A trusted-project opt-in enables
 both rust-analyzer build scripts and proc macros; it is not safe for arbitrary
-untrusted source. Semantic cache version 13 includes this option, and normal
+untrusted source. Semantic cache version 15 includes this option and the
+unindexed-definition classification described below, and normal
 content fingerprints cover declared `fingerprint_inputs` such as protocol XML.
 Feature selection is supplied once (`cargo.features = "all"`), not duplicated in
 Cargo extra arguments where it would prevent build-script loading.
 
 Definition responses retain all locations. A measured local origin takes priority
 over an external generator; the referenced symbol is associated with its local
-module rather than the generator's token. Real external file definitions remain
+module rather than the generator's token. A file absent from the measured path
+index is **not automatically external**. Definitions under the project or local
+Cargo package roots remain `unindexed_project_definition`; unmapped definitions
+under Cargo's target directory (including a relocated target directory) remain
+`unmapped_generated_definition`. Build output can belong to a project or a
+dependency: its directory name is not ownership evidence. Resolved navigation
+paths are retained for diagnosis, but no local module edge is invented. An
+indexed origin still takes precedence. Other external file definitions remain
 external, while unsupported virtual URIs are explicit unresolved evidence. Glob
 imports navigate at their module identifier, independently of the star location
 retained for escape-hatch evidence.
+
+Source confidence declares `inventory_scope =
+"authored_syntax_before_cfg_and_macro_expansion"`. The nested `semantic_identity`
+declares `resolution_scope =
+"collected_dependency_references_only_not_inventory_completeness"` and reports
+`unresolved_by_status` counts. These separate questions must not be conflated:
+100% resolution can coexist with a partial source inventory, and successful
+navigation without an inventoried owner does not count as resolved identity.
+Unknown ownership propagates to the outer confidence and strict policy gates;
+`identity_resolution = "required"` rejects it. Cold/warm cache results retain the
+same scope and reason counts. None of this expands macro bodies, resolves
+block-local type owners, or certifies compiler-complete architecture.
 
 ## Typed boundaries
 
