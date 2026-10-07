@@ -71,6 +71,8 @@ pub(crate) struct Capture {
     pub(crate) references: Vec<Reference>,
     pub(crate) covered_categories: BTreeSet<String>,
     pub(crate) limitations: Vec<String>,
+    #[serde(default)]
+    pub(crate) excluded_compiler_infrastructure: BTreeSet<String>,
 }
 
 impl Capture {
@@ -78,6 +80,15 @@ impl Capture {
         ensure!(
             self.model_version == MODEL_VERSION && !self.crate_id.is_empty(),
             "unsupported architecture capture identity"
+        );
+        ensure!(
+            self.excluded_compiler_infrastructure
+                .iter()
+                .all(|kind| matches!(
+                    kind.as_str(),
+                    "standard_library_injection" | "test_harness" | "proc_macro_harness"
+                )),
+            "unknown compiler infrastructure exclusion"
         );
         let mut ids = BTreeSet::new();
         for module in &self.modules {

@@ -9,6 +9,7 @@ pub(super) fn schema() -> Value {
             "model_version": {"const": 1}, "crate_id": text,
             "covered_categories": {"type": "array", "uniqueItems": true, "items": {"enum": super::architecture::CATEGORIES}},
             "limitations": {"type": "array", "items": {"type": "string"}},
+            "excluded_compiler_infrastructure": {"type": "array", "uniqueItems": true, "items": {"enum": ["standard_library_injection", "test_harness", "proc_macro_harness"]}},
             "modules": {"type": "array", "minItems": 1, "items": {
                 "type": "object", "additionalProperties": false, "required": ["id", "path", "parent_id", "origin"],
                 "properties": {"id": text, "path": {"type": "string"}, "parent_id": {"type": ["string", "null"]}, "origin": origin}}},

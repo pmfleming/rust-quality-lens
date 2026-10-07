@@ -27,7 +27,15 @@ names; cross-context joins require exact compiler identity, not crate-name guess
 Authored spans and generated invocation anchors remain distinct. A macro generator
 is not the owner of emitted declarations. OUT_DIR paths are not ownership evidence.
 Missing origins remain explicit limitations; source comments never become safety
-rationales for generated bodies.
+rationales for generated bodies. References include inferred ADT field accesses
+and compiler-resolved method/operator targets. Implicit drop/coercion machinery,
+monomorphized runtime targets and macro-generator implementation dependencies are
+not the static HIR reference graph. Assembly produces an explicit limitation.
+
+Only compiler expansion tags for standard-library injection, test-harness and
+proc-macro-harness infrastructure are excluded, with named exclusions recorded in
+the capture. User test bodies and proc-macro-emitted project code are included;
+file names, identifier names and missing spans never authorize an exclusion.
 
 ## Completeness
 

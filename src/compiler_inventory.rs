@@ -347,6 +347,19 @@ pub(crate) fn validate_report(value: &Value) -> Result<()> {
                 .sum::<usize>(),
         "compiler type count mismatch"
     );
+    if let Some(count) = value["summary"].get("architecture_contexts_with_complete_capture") {
+        ensure!(
+            count
+                == profiles
+                    .iter()
+                    .filter(|p| p
+                        .architecture
+                        .as_ref()
+                        .is_some_and(|a| a.missing_evidence().is_empty()))
+                    .count(),
+            "compiler architecture capture count mismatch"
+        );
+    }
     ensure!(
         value["summary"]["context_count"] == profiles.len(),
         "compiler context count mismatch"

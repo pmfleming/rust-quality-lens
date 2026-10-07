@@ -21,6 +21,8 @@ use std::{
     process::{Command, ExitCode},
 };
 
+mod architecture;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn main() -> ExitCode {
@@ -169,6 +171,7 @@ impl Inventory {
             "target_triple": tcx.sess.opts.target_triple.to_string(),
             "test": test, "cfg": cfg,
             "types": types, "impls": impls, "functions": functions,
+            "architecture": architecture::capture(tcx),
         });
         // One atomic file per invocation, never interleaved Cargo-process output.
         let path = self
@@ -187,7 +190,10 @@ fn identity(tcx: TyCtxt<'_>, id: DefId) -> String {
 }
 
 fn origin(tcx: TyCtxt<'_>, id: DefId) -> Value {
-    let span = tcx.def_span(id);
+    origin_at(tcx, id, tcx.def_span(id))
+}
+
+fn origin_at(tcx: TyCtxt<'_>, id: DefId, span: rustc_span::Span) -> Value {
     // include! and attribute passthrough can retain root-context token spans.
     // The resolver's definition expansion, not span hygiene alone, is authoritative.
     let mut expansion = tcx.expn_that_defined(id);
@@ -207,6 +213,9 @@ fn origin(tcx: TyCtxt<'_>, id: DefId) -> Value {
         match start.file.name.clone().into_local_path() {
             Some(path) if start.file.name == end.file.name => {
                 let path = fs::canonicalize(&path).unwrap_or(path);
+                if env::var_os("OUT_DIR").is_some_and(|out| path.starts_with(out)) {
+                    return json!({"generated": true, "location_kind": "unavailable", "location": null});
+                }
                 json!({ "path": path, "line": start.line, "column": start.col.0 + 1,
                     "end_line": end.line, "end_column": end.col.0 + 1 })
             }
