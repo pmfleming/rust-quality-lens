@@ -39,6 +39,7 @@ pub(crate) fn profiles_schema() -> Value {
         ("backend", json!({"const": "rustc-hir"})),
         ("package_name", json!({"type": "string", "minLength": 1})),
         ("crate_name", json!({"type": "string", "minLength": 1})),
+        ("architecture", super::architecture_schema::schema()),
         (
             "types",
             definitions(

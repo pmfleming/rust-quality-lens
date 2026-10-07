@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 use std::{collections::BTreeSet, path::PathBuf};
 
 use crate::config::LensConfig;
+pub(crate) mod architecture;
+mod architecture_schema;
 mod capture;
 mod projection;
 mod schema;
@@ -81,6 +83,8 @@ pub(crate) struct Profile {
     types: Vec<TypeRecord>,
     impls: Vec<ImplRecord>,
     functions: Vec<FunctionRecord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    architecture: Option<architecture::Capture>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -141,6 +145,9 @@ impl Profile {
             "unsupported compiler inventory producer"
         );
         self.context().validate()?;
+        if let Some(architecture) = &self.architecture {
+            architecture.validate()?;
+        }
         ensure!(
             !self.package_name.is_empty() && !self.crate_name.is_empty(),
             "missing compiler package/crate identity"
@@ -280,7 +287,8 @@ impl Inventory {
             "backend": "rustc-hir", "inventory_model_version": 1,
             "requested_scope": self.requested_scope,
             "summary": {"complete": confidence["complete"], "context_count": self.profiles.len(),
-                "type_count_across_contexts": self.profiles.iter().map(|p| p.types.len()).sum::<usize>()},
+                "type_count_across_contexts": self.profiles.iter().map(|p| p.types.len()).sum::<usize>(),
+                "architecture_contexts_with_complete_capture": self.profiles.iter().filter(|p| p.architecture.as_ref().is_some_and(|a| a.missing_evidence().is_empty())).count()},
             "profiles": self.profiles, "expected_contexts": self.expected_contexts,
             "measurement_confidence": confidence,
             "scope": "Compiler-analyzed declarations after cfg selection and all macro expansion. Per-context identities and invocation anchors; no merged cross-profile totals or source-calibrated pressure scores.",
