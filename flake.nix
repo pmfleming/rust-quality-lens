@@ -24,6 +24,8 @@
           pkgs.mkShell {
             packages = with pkgs; [
               cargo
+              git
+              python3
               rustc
               rustfmt
               clippy
