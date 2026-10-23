@@ -1,0 +1,38 @@
+# Bounded assistant-reviewed pilot, NOT daemon-framework maintainer approval.
+# Names are exact catalog values as documented, not full native libtest paths.
+# Native full-path commands and their validation are recorded in the pilot report.
+version = 1
+
+[[behaviors]]
+id = "decimal-presentation"
+description = "Bounded decimal presentation preserves binary rounding and rejects unsupported inputs"
+risks = ["incorrect displayed rounding", "nonfinite or unbounded precision input"]
+requirement = "fixed_decimal documentation and its existing presentation-label compatibility examples"
+scope = "shelllist-daemon-core default-feature host library tests"
+expectations = ["exact binary ties round away from zero", "non-ties retain expected labels", "nonfinite values and excessive precision are rejected"]
+real_boundaries = ["actual exported fixed_decimal implementation and Rust formatter"]
+substituted_boundaries = ["no frontend/rendering integration exercised"]
+reviewer = "RQLens assistant pilot; not upstream maintainer approval"
+review_revision = "daemon-framework@7e4ec1d8b70f0adb6d2458eb89795c5c2903fdd2"
+required = true
+[behaviors.owner]
+role = "local"
+rationale = "The narrow binary-rounding contract has a distinct local numerical risk; this does not own frontend presentation end to end."
+tests = [{package = "shelllist-daemon-core", target = "shelllist_daemon_core", path = "crates/shelllist-daemon-core/src/decimal.rs", name = "tests::binary_rounding_matches_existing_decimal_labels"}]
+
+[[behaviors]]
+id = "output-actor-routing"
+description = "Buffered output events follow their addressed response and retain consumer/generation ownership"
+risks = ["cross-consumer event delivery", "event/reply reordering", "ownership lost on repeated activation"]
+requirement = "Output actor subscription ownership and ordering contract exercised by the existing routing journey"
+scope = "shelllist-daemon-tokio default-feature host library tests; output actor boundary only"
+expectations = ["early event follows subscription response", "events retain their consumer route", "generation-mismatched ownership lookup is empty"]
+real_boundaries = ["actual emit_command, OutputState, BasicCorrelation and JSON serialization"]
+substituted_boundaries = ["OS and D-Bus transport replaced by an in-memory byte writer"]
+reviewer = "RQLens assistant pilot; not upstream maintainer approval"
+review_revision = "daemon-framework@7e4ec1d8b70f0adb6d2458eb89795c5c2903fdd2"
+required = true
+[behaviors.owner]
+role = "integration"
+rationale = "Composes real routing/state/serialization implementations at the output boundary; it does not certify the replaced transport."
+tests = [{package = "shelllist-daemon-tokio", target = "shelllist_daemon_tokio", path = "crates/shelllist-daemon-tokio/src/routing_tests.rs", name = "early_events_follow_the_addressed_reply_and_stay_owner_scoped"}]

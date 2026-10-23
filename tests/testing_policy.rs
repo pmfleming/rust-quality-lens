@@ -138,6 +138,45 @@ fn ownership_execution(root: &Path) -> Result<()> {
         "unknown"
     );
 
+    partial_inventory_guides_review(root)
+}
+
+fn partial_inventory_guides_review(root: &Path) -> Result<()> {
+    let source = root.join("src/lib.rs");
+    let original = fs::read_to_string(&source)?;
+    fs::write(
+        &source,
+        format!(
+            "{original}\nmacro_rules! extra {{ () => {{ pub fn marker() {{}} }} }} extra!();\n"
+        ),
+    )?;
+    run(root, &["measure", "correctness-run"])?;
+    run(root, &["measure", "test-quality"])?;
+    let correctness = document(root, "correctness_review.json")?;
+    assert_eq!(
+        correctness["data"]["summary"]["last_run"]["status"],
+        "passed"
+    );
+    let review = document(root, "test_quality.json")?;
+    assert_eq!(
+        review["data"]["testing_policy"]["execution_evidence"],
+        "partial"
+    );
+    assert_eq!(
+        review["data"]["testing_policy"]["behaviors"][0]["status"],
+        "unknown"
+    );
+    assert!(
+        review["data"]["findings"]
+            .as_array()
+            .context("findings")?
+            .iter()
+            .any(|finding| finding["rule_id"] == "rust.testing.owner-review"
+                && finding["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("correctness_review.json")))
+    );
+    fs::write(source, original)?;
     Ok(())
 }
 

@@ -94,6 +94,7 @@ pub(super) fn review_behavior(
         findings.push(finding(path, &behavior, "rust.testing.owner-review", match status {
             "unresolved" => "Resolve a primary owner at the highest practical level; missing discovery is not proof that no protection exists.",
             "observed_failure" => "Repair the retained owner; do not add duplicate tests by default.",
+            _ if execution.status == "partial" => "Inspect correctness_review.json measurement limitations before rerunning tests; a passing suite can still have incomplete inventory or attribution. This is not an observed owner failure.",
             _ => "Run the retained owner in its required scope; execution is unknown, skipped, stale or incomplete.",
         }));
     }

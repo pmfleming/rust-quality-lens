@@ -1,0 +1,24 @@
+# Copy to .rqlens-pilot.toml in the disposable daemon-framework checkout.
+# See docs/self-review-7.md; this is not an upstream-approved project policy.
+project_name = "daemon-framework-independent-pilot"
+project_root = "."
+output_dir = "target/analysis"
+
+[rust]
+identity_resolution = "auto"
+identity_offline = true
+identity_timeout_seconds = 120
+
+[verification]
+workspace = true
+all_targets = true
+locked = true
+timeout_seconds = 600
+
+[testing_policy]
+manifest = ".rqlens-testing-pilot.toml"
+evidence_inputs = ["README.md"]
+
+[policy.rules."rust.testing.required-owner"]
+level = "error"
+max = 0

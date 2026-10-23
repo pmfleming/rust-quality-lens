@@ -10,6 +10,7 @@ This directory contains the design and interpretation notes for rust-quality-len
 - [Testing policy plan](testing-policy-plan.md): staged implementation and acceptance criteria
 - [Testing policy implementation](testing-policy-implementation.md): self-pilot, actual fault detection, justified removals and remaining limits
 - [Self-review 6](self-review-6.md): measurement corrections, refactoring, coverage with fewer tests, and unmet budgets
+- [Self-review 7](self-review-7.md): independent Cargo contexts, rule prerequisites, capture validation, and a production-workspace pilot
 - [Extended metrics](extended-metrics.md): behavioral, maintenance, cohesion and profile evidence
 - [Measurement design and upgrades](measurement-upgrades.md): artifact, extraction, confidence, and scoring design
 - [Compiler inventory](compiler-inventory.md): opt-in macro-expanded, cfg-selected type-health with compiler ownership, source attribution, and per-context deduplication

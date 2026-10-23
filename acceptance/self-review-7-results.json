@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "baseline_revision": "163465a",
+  "scope": "Four independently committed steps; stage-four measurements include its working-tree code changes based on 73b4d66. Refresh Git-bound artifacts after delivery commit.",
+  "raw_evidence": "target/self-review-7/",
+  "steps": [
+    {
+      "id": 1,
+      "commit": "eb9159f",
+      "change": "Resolve measured independent Cargo projects and respect manifest ownership boundaries",
+      "necessity": "Four unresolved self references and a failing real rust-analyzer CLI regression",
+      "native_regression_exit_before": 101,
+      "native_regression_exit_after": 0,
+      "self_unresolved_references_before": 4,
+      "self_unresolved_references_after": 0,
+      "self_resolution_percent_before": 99.71,
+      "self_resolution_percent_after": 100.0,
+      "cache_version": 19,
+      "protections": ["distinct package identity", "cold/warm consistency", "unloadable-project rejection", "preservation of published evidence"],
+      "limitation": "Collected authored-source references only; no pinned rustc-private driver build certification"
+    },
+    {
+      "id": 2,
+      "commit": "13d3408",
+      "change": "Use explicit contracted prerequisites rather than requiring all finding producers for any enabled error rule",
+      "native_regression_exit_before": 101,
+      "native_regression_exit_after": 0,
+      "adversarial_ingestion_cases_passed": 28,
+      "protections": ["global partial gate retained", "unknown rule abstention", "missing/stale/contradictory required evidence rejection", "unknown execution and observed failure blocking"],
+      "limitation": "Prerequisite correction, not a waiver of actual rule evidence or global completeness"
+    },
+    {
+      "id": 3,
+      "commit": "73b4d66",
+      "change": "Separate compiler capture validation phases and share origin validation",
+      "invalid_cases_with_identical_decisions_and_diagnostics": 22,
+      "valid_tree_shapes": ["single module", "multiple levels", "reverse ordered"],
+      "capture_validate_before": {"hotspot": 80.86, "cyclomatic": 12, "cognitive": 8},
+      "capture_validate_after": {"hotspot": 20.78, "cyclomatic": 5, "cognitive": 1},
+      "largest_extracted_validator_hotspot": 30.80,
+      "limitation": "Behavior-preserving refactor, not an invalid-capture bug fix or exhaustive proof"
+    },
+    {
+      "id": 4,
+      "change": "Run independent production pilot and correct partial-evidence owner-review advice",
+      "native_advice_regression_exit_before": 101,
+      "native_advice_regression_exit_after": 0,
+      "advice_change": "Inspect correctness_review.json limitations before rerunning; incomplete inventory is not an observed owner failure",
+      "statuses_and_gates_changed": false,
+      "pilot": {
+        "project": "daemon-framework",
+        "revision": "7e4ec1d8b70f0adb6d2458eb89795c5c2903fdd2",
+        "authority": "Bounded assistant review, not upstream maintainer approval",
+        "disposable_clone": true,
+        "original_checkout_clean": true,
+        "rust_files_restored_byte_for_byte": 50,
+        "upstream_tests_permanently_added_or_deleted": 0,
+        "initial_offline_metadata_blocker": "Uncached hermit-abi v0.5.3",
+        "cache_preparation": "cargo fetch --locked succeeded; subsequent measurement offline",
+        "final_fingerprint_complete": true,
+        "verify_exit": 0,
+        "measure_all_exit": 0,
+        "native_list_count": 57,
+        "catalog_count": 57,
+        "observed_passes": 56,
+        "ignored": 1,
+        "resolved_collected_references": 399,
+        "collected_references": 400,
+        "resolution_percent": 99.75,
+        "unresolved_reference": "cli::Cli::parse with macro execution disabled",
+        "line_coverage": {"covered": 3893, "count": 4891, "percent": 79.60},
+        "native_llvm_export_agrees_with_projection": true,
+        "selected_files": [
+          {"path": "crates/shelllist-daemon-core/src/decimal.rs", "covered": 43, "count": 43, "module_id": "shelllist-daemon-core::shelllist_daemon_core::decimal"},
+          {"path": "crates/shelllist-daemon-tokio/src/output_actor.rs", "covered": 324, "count": 344, "module_id": "shelllist-daemon-tokio::shelllist_daemon_tokio::output_actor"}
+        ],
+        "per_test_coverage_attribution": "not established",
+        "declared_owner_resolution": ["resolved", "resolved"],
+        "declared_owner_execution": ["unknown", "unknown"],
+        "required_owner_check_exit": 1,
+        "required_owner_evaluation": "incomplete",
+        "source_inventory_limitation": "Unexpanded declare_methods! item macro in contract.rs",
+        "faults": [
+          {
+            "change": "if tie -> if !tie",
+            "existing_owner_result": "detected",
+            "baseline_exit": 0,
+            "injected_exit": 101,
+            "restored_exit": 0,
+            "tests_run_each_time": 1,
+            "runtime_failure": "Some(\"1.2\") != Some(\"1.3\")",
+            "compile_failure": false
+          },
+          {
+            "change": "decimals > 9 -> decimals > 10",
+            "existing_owner_result": "survived",
+            "injected_exit": 0,
+            "temporary_same_owner_assertion": "assert_eq!(fixed_decimal(1.0, 10), None)",
+            "augmented_owner_injected_exit": 101,
+            "augmented_owner_restored_guard_exit": 0,
+            "fully_restored_exit": 0,
+            "tests_run_each_time": 1,
+            "compile_failure": false,
+            "recommendation": "Review one boundary assertion in the existing owner rather than add a test layer"
+          }
+        ],
+        "fault_authority": "Raw experiments, not imported or tool-certified fault reports; no routing fault campaign",
+        "confirmed_followups": [
+          "Catalog-generated source-local --exact command exits 0 with zero tests; native full path runs one",
+          "Three workspace CLI integration tests are classified inline",
+          "Macro inventory and attributable execution still prevent required-owner certification"
+        ],
+        "selector_correction": "Initial native full names were replaced by documented exact catalog values, without changing matching rules"
+      }
+    }
+  ],
+  "self_measurements": {
+    "before": {"max_cognitive": 11, "max_cyclomatic": 19, "max_hotspot": 95.65, "source_nonblank_lines": 31847, "covered_lines": 19455, "executable_lines": 21569, "coverage_percent": 90.20, "passed_registrations": 185, "skipped_registrations": 8},
+    "after": {"max_cognitive": 11, "max_cyclomatic": 19, "max_hotspot": 95.65, "source_nonblank_lines": 32143, "covered_lines": 19612, "executable_lines": 21715, "coverage_percent": 90.32, "passed_registrations": 185, "skipped_registrations": 9},
+    "new_ignored_native_regression_explicitly_run": true,
+    "required_owner_status": "passed",
+    "strict_policy_failed_policies": ["partial"],
+    "remaining_partial_artifacts": ["module_cohesion.json", "type_health.json"],
+    "unmet_budgets_waived": false,
+    "loc_reduction_claimed": false,
+    "dependency_recovery_claimed_as_architectural_gain": false
+  },
+  "validation": {
+    "workspace_tests": "passed",
+    "strict_clippy_all_targets": "passed",
+    "formatting": "passed",
+    "bundled_helper_parity": "passed",
+    "packaged_external_consumer_smoke": "passed",
+    "self_verify": "passed",
+    "self_measure_all": "passed",
+    "independent_schema_validation": "not performed",
+    "live_pinned_compiler_campaign": "not performed"
+  }
+}

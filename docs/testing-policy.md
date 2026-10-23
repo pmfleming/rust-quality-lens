@@ -85,6 +85,12 @@ tests = [{package = "shop", target = "checkout", path = "tests/checkout.rs", nam
 
 Use exact `package_name`, `target_name`, `relative_path`, and `qualified_name` values
 from `test_quality.json` as selector `package`, `target`, `path`, and `name`.
+Catalog names can be source-local rather than full native libtest module paths.
+The [independent pilot](self-review-7.md) found that a suggested `--exact` command
+can consequently select zero tests. Until command generation is corrected, use
+the native full path for manual execution and verify that the intended test ran;
+exit 0 alone is not execution evidence. Do not substitute that native name into
+a selector unless it matches the catalog value.
 The existing raw `path` field is preserved for prior consumers. An owner
 suite is an explicit list, not a glob. Empty suites request an ownership review.
 Roles are `end_to_end`, `integration`, `contract`, or `local`; all require rationale.
