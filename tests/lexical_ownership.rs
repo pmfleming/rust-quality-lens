@@ -33,9 +33,24 @@ fn measure(source: &str) -> Result<Value> {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    Ok(serde_json::from_slice(&fs::read(
+    let document = serde_json::from_slice(&fs::read(
         root.path().join("target/analysis/type_health.json"),
-    )?)?)
+    )?)?;
+    let output = Command::new(env!("CARGO_BIN_EXE_rqlens"))
+        .args(["measure", "hotspots", "--config"])
+        .arg(&config)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let syntax: Value = serde_json::from_slice(&fs::read(
+        root.path().join("target/analysis/hotspots.json"),
+    )?)?;
+    // Owner uncertainty belongs to type evidence, not successfully parsed bodies.
+    assert_eq!(syntax["measurement_confidence"]["complete"], true);
+    Ok(document)
 }
 
 #[test]

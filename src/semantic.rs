@@ -17,7 +17,7 @@ mod definitions;
 pub(crate) mod expansion;
 use definitions::{DefinitionIndex, resolved_definitions};
 
-const CACHE_VERSION: u64 = 15;
+const CACHE_VERSION: u64 = 16;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct IdentityResolutionSummary {
@@ -474,10 +474,14 @@ fn is_semantic_candidate(raw: &str, source: &FileFacts, facts: &[FileFacts]) -> 
         .any(|fact| {
             fact.module_key == relative || fact.module_key.split("::").next() == Some(first)
         });
-    let workspace_package = facts.iter().any(|fact| {
-        fact.package_name.replace('-', "_") == first && fact.package_name != source.package_name
+    let workspace_library = facts.iter().any(|fact| {
+        fact.target_kind == "lib"
+            && fact.target_name.replace('-', "_") == first
+            && (fact.package_name != source.package_name || fact.target_name != source.target_name)
     });
-    local_module || workspace_package
+    // A declared child may be physically shared across targets and therefore
+    // have a different inventory module key. Ask the resolver, never guess its edge.
+    local_module || workspace_library || source.graph.child_modules.contains(&relative)
 }
 
 fn identifier_at(path: &Path, line: usize, character: usize) -> Option<String> {
@@ -1012,6 +1016,7 @@ mod tests {
     };
     use crate::config::{LensConfig, SemanticIdentityMode};
     use crate::facts::{DependencyReferenceFact, FileFacts};
+    use anyhow::Context;
     use serde_json::json;
     use std::fs;
     use std::process::Command;
@@ -1020,7 +1025,6 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn waiter_handles_interleaved_requests_errors_and_deadlines() -> anyhow::Result<()> {
-        use anyhow::Context;
         use std::{
             process::Stdio,
             sync::mpsc,
@@ -1400,7 +1404,7 @@ mod tests {
         fs::create_dir_all(root.path().join("src"))?;
         fs::write(
             root.path().join("src/lib.rs"),
-            "mod domain;\nfn run() { domain::go(); }\n",
+            "mod domain;\npub fn run() { domain::go(); }\n",
         )?;
         fs::write(root.path().join("src/domain.rs"), "pub fn go() {}\n")?;
         let mut config = required_config(root.path(), "semantic-fixture")?;
@@ -1417,7 +1421,7 @@ mod tests {
             .push(DependencyReferenceFact {
                 raw_path: "domain::go".to_string(),
                 line: 2,
-                column: 19,
+                column: 23,
             });
         let domain_path = root
             .path()
@@ -1428,16 +1432,38 @@ mod tests {
         domain.package_name = "semantic-fixture".to_string();
         domain.target_name = "semantic_fixture".to_string();
         domain.module_id = "semantic-fixture::semantic_fixture::domain".to_string();
-        let mut facts = vec![library, domain];
+        let body = "fn main() { semantic_fixture::run(); }\n";
+        let main_path = root.path().join("src/main.rs");
+        fs::write(&main_path, body)?;
+        let mut binary = FileFacts::test_fact(&main_path.to_string_lossy(), "main");
+        binary.package_name = library.package_name.clone();
+        binary.target_name = "tool".into();
+        binary.target_kind = "bin".into();
+        binary.module_id = "semantic-fixture::tool::main".into();
+        binary
+            .graph
+            .dependency_references
+            .push(DependencyReferenceFact {
+                raw_path: "semantic_fixture::run".into(),
+                line: 1,
+                column: body.find("run").context("call position")?,
+            });
+        let mut facts = vec![library, domain, binary];
 
         let first = resolve(&config, &mut facts)?;
-        assert_eq!(first.local_definition_count, 1);
+        assert_eq!(first.local_definition_count, 2);
         assert!(first.complete);
         assert_eq!(
             facts[0].graph.resolved_dependencies[0]
                 .symbol_identity
                 .as_deref(),
             Some("semantic-fixture::semantic_fixture::domain::go")
+        );
+        assert_eq!(
+            facts[2].graph.resolved_dependencies[0]
+                .target_module_id
+                .as_deref(),
+            Some("semantic-fixture::semantic_fixture::lib")
         );
         let second = resolve(&config, &mut facts)?;
         assert!(second.cache_hit);

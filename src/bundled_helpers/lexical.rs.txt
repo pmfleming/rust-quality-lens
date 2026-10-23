@@ -44,28 +44,7 @@ impl Scopes {
             glob: false,
         };
         for item in items {
-            let nominal = match item {
-                Item::Struct(item) => Some(&item.ident),
-                Item::Enum(item) => Some(&item.ident),
-                _ => None,
-            };
-            if let Some(name) = nominal {
-                let owner = if frame.module {
-                    format!("{module}::{name}")
-                } else {
-                    format!("{id}::{name}")
-                };
-                bind(&mut frame.bindings, name.to_string(), Some(owner));
-            } else {
-                match item {
-                    Item::Type(item) => bind(&mut frame.bindings, item.ident.to_string(), None),
-                    Item::Trait(item) => bind(&mut frame.bindings, item.ident.to_string(), None),
-                    Item::Union(item) => bind(&mut frame.bindings, item.ident.to_string(), None),
-                    Item::Mod(item) => bind(&mut frame.bindings, item.ident.to_string(), None),
-                    Item::Use(item) => imports(&item.tree, &mut frame),
-                    _ => {}
-                }
-            }
+            frame.bind_item(item, module);
         }
         self.lexical_scopes.push(ScopeRecord {
             id,
@@ -122,6 +101,27 @@ impl Scopes {
             Some(frame) if !frame.module => format!("{}::{name}", frame.id),
             _ => format!("{module}::{name}"),
         }
+    }
+}
+
+impl Frame {
+    fn bind_item(&mut self, item: &Item, module: &str) {
+        let (name, nominal) = match item {
+            Item::Struct(item) => (&item.ident, true),
+            Item::Enum(item) => (&item.ident, true),
+            Item::Type(item) => (&item.ident, false),
+            Item::Trait(item) => (&item.ident, false),
+            Item::Union(item) => (&item.ident, false),
+            Item::Mod(item) => (&item.ident, false),
+            Item::Use(item) => {
+                imports(&item.tree, self);
+                return;
+            }
+            _ => return,
+        };
+        let owner =
+            nominal.then(|| format!("{}::{name}", if self.module { module } else { &self.id }));
+        bind(&mut self.bindings, name.to_string(), owner);
     }
 }
 

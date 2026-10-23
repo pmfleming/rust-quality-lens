@@ -1058,36 +1058,10 @@ impl FactVisitor {
     }
 
     fn record_impl_fact(&mut self, item: &ItemImpl, method_count: usize) {
-        let owner = match item.self_ty.as_ref() {
-            Type::Path(path) if path.qself.is_none() && path.path.leading_colon.is_none() => {
-                let raw = path_to_string(&path.path);
-                if path.path.segments.len() == 1 {
-                    if let Some(owner) = self.lexical.owner(&raw) {
-                        Some(format!("crate::{owner}"))
-                    } else if self.block_depth == 0 && !self.lexical.blocked(&raw) {
-                        Some(raw)
-                    } else {
-                        self.unsupported_patterns.push(format!(
-                            "{}:{}: unresolved lexical impl owner {raw}",
-                            self.path,
-                            span_start_line(item.impl_token.span)
-                        ));
-                        Some(format!("@unresolved_lexical::{raw}"))
-                    }
-                } else if self.block_depth == 0
-                    || ["crate::", "self::", "super::"]
-                        .iter()
-                        .any(|prefix| raw.starts_with(prefix))
-                {
-                    Some(raw)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        };
-        let Some(qualified_type_name) = owner else {
-            self.unsupported_patterns.push(format!(
+        let Some(qualified_type_name) = self.impl_owner(&item.self_ty) else {
+            // Unsupported ownership does not invalidate parsed bodies, tests or
+            // source metrics. Type consumers retain their separate limitation.
+            self.type_identity_limitations.push(format!(
                 "{}:{}: impl target requires semantic type resolution (unresolved lexical scope or unsupported target)",
                 self.path,
                 span_start_line(item.impl_token.span)
@@ -1107,6 +1081,29 @@ impl FactVisitor {
             line: span_start_line(item.impl_token.span),
             method_count,
         });
+    }
+
+    fn impl_owner(&self, ty: &Type) -> Option<String> {
+        let Type::Path(path) = ty else { return None };
+        if path.qself.is_some() || path.path.leading_colon.is_some() {
+            return None;
+        }
+        let raw = path_to_string(&path.path);
+        if path.path.segments.len() != 1 {
+            return (self.block_depth == 0
+                || ["crate::", "self::", "super::"]
+                    .iter()
+                    .any(|prefix| raw.starts_with(prefix)))
+            .then_some(raw);
+        }
+        if let Some(owner) = self.lexical.owner(&raw) {
+            return Some(format!("crate::{owner}"));
+        }
+        if self.block_depth == 0 && !self.lexical.blocked(&raw) {
+            return Some(raw);
+        }
+        // Keep an unresolved observation so type joins count and abstain on it.
+        Some(format!("@unresolved_lexical::{raw}"))
     }
 
     fn record_method_metrics(&mut self, owner: &str, method: &ImplItemFn) {
