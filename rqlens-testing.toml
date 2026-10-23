@@ -1,0 +1,71 @@
+version = 1
+
+# Bounded self-pilot, not an exhaustive inventory of all product requirements.
+[[behaviors]]
+id = "testing-policy-workflow"
+description = "Ownership, consolidation, gate and imported-fault claims remain scoped and fail closed"
+risks = ["public_contract", "data_integrity", "meaningful_regression"]
+requirement = "docs/testing-policy.md"
+scope = "Host/default-feature real CLI workflow in disposable Cargo fixtures; no live external system"
+expectations = ["Unknown evidence cannot pass an owner obligation", "Value advice cannot authorize deletion", "Fault sensitivity distinguishes assertion failure from compile failure", "Policy and SARIF retain the same finding meaning"]
+real_boundaries = ["CLI", "TOML/JSON artifacts", "Cargo execution", "policy", "SARIF", "fingerprints"]
+reviewer = "implementation-review"
+review_revision = "testing-policy-v1"
+required = true
+[behaviors.owner]
+role = "end_to_end"
+rationale = "One real public workflow owns policy integration; synthetic declarations are inputs, not substitutes for the evaluated implementation"
+tests = [
+    {package = "rust-quality-lens", target = "testing_policy", path = "tests/testing_policy.rs", name = "ownership_review_uses_real_execution_and_rejects_stale_claims"},
+    {package = "rust-quality-lens", target = "testing_policy", path = "tests/testing_policy.rs", name = "required_ownership_gate_is_fail_closed"},
+    {package = "rust-quality-lens", target = "testing_policy", path = "tests/testing_policy.rs", name = "fault_reports_preserve_scoped_sensitivity"},
+]
+
+[[behaviors]]
+id = "measurement-artifact-contract"
+description = "Public measurement bundle preserves usable artifacts, numerical projections and attribution"
+risks = ["public_contract", "correctness_guarantee"]
+requirement = "docs/quality-model.md"
+scope = "Host/default-feature CLI measurement fixture; synthetic coverage checks projection, not the llvm-cov implementation"
+expectations = ["All standard artifact envelopes remain consumable", "Attribution and numerical projections retain their specified meaning"]
+real_boundaries = ["CLI", "Rust fact helper", "artifact serialization", "measurement pipeline"]
+substituted_boundaries = ["function-risk coverage input in projection scenario"]
+reviewer = "implementation-review"
+review_revision = "testing-policy-v1"
+required = true
+[behaviors.owner]
+role = "contract"
+rationale = "Existing bundle runs the public pipeline; private producer-selection booleans need not be asserted independently"
+tests = [{package = "rust-quality-lens", target = "cli", path = "tests/cli.rs", name = "measurement_bundle_preserves_contracts_scores_and_attribution"}]
+
+[[behaviors]]
+id = "partial-type-evidence"
+description = "Unexpanded and unresolved type ownership never becomes complete empty evidence"
+risks = ["data_integrity", "meaningful_regression"]
+requirement = "contracts/determinism.md"
+scope = "Source-syntax trust boundary; no claim of exhaustive compiler-backed type coverage"
+expectations = ["Missing macro/impl evidence remains partial in rows, envelope and policy"]
+real_boundaries = ["CLI", "source extractor", "artifact confidence", "policy"]
+reviewer = "implementation-review"
+review_revision = "testing-policy-v1"
+required = true
+[behaviors.owner]
+role = "integration"
+rationale = "Real source-to-policy trust journey owns the cross-component abstention claim"
+tests = [{package = "rust-quality-lens", target = "trust", path = "tests/trust.rs", name = "omitted_macro_types_and_impl_only_inputs_are_not_complete_empty_results"}]
+
+[[behaviors]]
+id = "publication-integrity"
+description = "Competing writers and changed inputs cannot replace prior artifacts"
+risks = ["data_integrity", "recovery"]
+requirement = "docs/evidence-pipeline.md"
+scope = "Native temporary filesystem and deterministic overlapping writer handles"
+expectations = ["Competing writers are excluded", "Escaping names are rejected", "Changed inputs leave prior published evidence untouched"]
+real_boundaries = ["filesystem", "publication lock", "input snapshot"]
+reviewer = "implementation-review"
+review_revision = "testing-policy-v1"
+required = true
+[behaviors.owner]
+role = "local"
+rationale = "Deterministic overlapping handles and input mutation exercise the failure boundary more reliably than process scheduling in an E2E test"
+tests = [{package = "rust-quality-lens", target = "rqlens", path = "src/measurement/batch.rs", name = "tests::competing_writers_and_escaping_names_are_rejected"}]

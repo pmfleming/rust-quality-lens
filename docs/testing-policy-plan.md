@@ -1,6 +1,9 @@
 # Plan: risk-owned, value-based testing
 
-Status: proposed; no runtime, scoring, gate, or test-deletion changes in this document.
+Status: core stages implemented; see the [implementation and self-pilot record](testing-policy-implementation.md).
+This design remains the rationale/acceptance reference, not an additional CLI
+contract. Independent production-project calibration and risk-model changes remain
+deferred; the optional ownership gate does not enforce inferred test value.
 
 ## Recommendation and policy review
 

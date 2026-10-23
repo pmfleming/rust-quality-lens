@@ -134,35 +134,3 @@ impl MeasureTool {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::MeasureTool;
-
-    #[test]
-    fn tool_scope_and_backend_requirements_are_explicit() {
-        assert!(
-            MeasureTool::all_tools()
-                .iter()
-                .any(|tool| matches!(tool, MeasureTool::EscapeHatches))
-        );
-        assert!(MeasureTool::Hotspots.requires_source_facts());
-        assert!(MeasureTool::Clones.requires_correctness_facts());
-        assert!(MeasureTool::Map.requires_semantic_identity());
-        assert!(!MeasureTool::Practices.requires_source_facts());
-        assert!(!MeasureTool::Hotspots.requires_correctness_facts());
-        assert!(!MeasureTool::Coverage.requires_semantic_identity());
-        assert!(!MeasureTool::CompilerInventory.requires_source_facts());
-        assert!(!MeasureTool::CompilerInventory.requires_semantic_identity());
-        assert!(
-            !MeasureTool::all_tools()
-                .iter()
-                .any(|tool| matches!(tool, MeasureTool::CompilerInventory))
-        );
-        assert!(
-            MeasureTool::schema_tools()
-                .iter()
-                .any(|tool| matches!(tool, MeasureTool::CompilerInventory))
-        );
-    }
-}

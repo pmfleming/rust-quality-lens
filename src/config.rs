@@ -667,15 +667,7 @@ impl LensConfig {
         let policy = raw.policy.unwrap_or_default();
         policy.validate()?;
         if let Some(testing) = &raw.testing_policy {
-            testing.validate()?;
-            if let Some(fault) = &testing.fault_evidence {
-                anyhow::ensure!(
-                    !fingerprint_inputs
-                        .iter()
-                        .any(|input| project_root.join(fault).starts_with(input)),
-                    "fault evidence cannot also be a fingerprint_input (circular fingerprint)"
-                );
-            }
+            testing.validate(&project_root, &fingerprint_inputs)?;
         }
         let project_name = raw.project_name.unwrap_or_else(|| {
             project_root

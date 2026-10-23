@@ -6,8 +6,13 @@ source_roots = [
     "tests/cli.rs", "tests/compiler_inventory.rs", "tests/source_expansion.rs",
     "tests/trust.rs", "tests/profiles.rs", "tests/lexical_ownership.rs",
     "tests/compiler_architecture.rs", "tests/compiler_architecture",
+    "tests/testing_policy.rs", "tests/testing_policy",
 ]
 output_dir = "target/analysis"
+
+[testing_policy]
+manifest = "rqlens-testing.toml"
+evidence_inputs = ["docs/testing-policy.md", "docs/quality-model.md", "contracts/determinism.md", "docs/evidence-pipeline.md"]
 
 [rust]
 identity_resolution = "auto"
@@ -29,6 +34,10 @@ fuzz_targets = []
 fuzz_seconds = 30
 sanitizers = []
 miri = false
+
+[policy.rules."rust.testing.required-owner"]
+level = "error"
+max = 0
 
 [policy.rules."rust.safety.undocumented-unsafe"]
 level = "error"

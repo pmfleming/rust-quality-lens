@@ -83,8 +83,9 @@ rationale = "Representative journey through the real application and database"
 tests = [{package = "shop", target = "checkout", path = "tests/checkout.rs", name = "complete_order"}]
 ```
 
-Use exact `package_name`, `target_name`, `path`, and `qualified_name` values from
-`test_quality.json` as selector `package`, `target`, `path`, and `name`. An owner
+Use exact `package_name`, `target_name`, `relative_path`, and `qualified_name` values
+from `test_quality.json` as selector `package`, `target`, `path`, and `name`.
+The existing raw `path` field is preserved for prior consumers. An owner
 suite is an explicit list, not a glob. Empty suites request an ownership review.
 Roles are `end_to_end`, `integration`, `contract`, or `local`; all require rationale.
 Optional `[[behaviors.supporting]]` records contain `test = { ... }` and

@@ -63,7 +63,8 @@ fn test_row(config: &LensConfig, fact: &FileFacts, test: &TestFact) -> Value {
         json!({
             "name": test.name,
             "qualified_name": test.qualified_name,
-            "path": crate::util::project_relative_path(&config.project_root, &test.path),
+            "path": test.path,
+            "relative_path": crate::util::project_relative_path(&config.project_root, &test.path),
             "line": test.line,
             "module_key": test.module_key,
             "assertion_count": test.assertion_count,
@@ -79,18 +80,18 @@ fn test_findings(test: &Value) -> Vec<Value> {
         findings.push(finding(
             test,
             "rust.test.no-assertion",
-            "test body has no recognized assertion or snapshot macro",
+            "no assertion recognized directly in this body; inspect helper, Result and compile-time checks before judging protection, rather than adding assertions to satisfy a count",
         ));
     }
     if test["sut_call_count"] == 0 {
         findings.push(finding(
             test,
             "rust.test.no-sut-call",
-            "test body has no recognized function, method, or non-assertion macro call",
+            "no subject call recognized directly in this body; inspect indirect execution and the owned behavior before judging test value",
         ));
     }
     if test["ignored"] == true {
-        findings.push(finding(test, "rust.test.ignored", "test is ignored"));
+        findings.push(finding(test, "rust.test.ignored", "test is ignored; review its required environment and important risk, not test-count targets"));
     }
     findings
 }

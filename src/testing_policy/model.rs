@@ -14,7 +14,11 @@ pub(crate) struct Config {
 }
 
 impl Config {
-    pub(crate) fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(
+        &self,
+        project_root: &std::path::Path,
+        fingerprint_inputs: &[String],
+    ) -> Result<()> {
         for path in std::iter::once(&self.manifest)
             .chain(&self.evidence_inputs)
             .chain(&self.fault_evidence)
@@ -22,6 +26,12 @@ impl Config {
             relative_path(path)?;
         }
         if let Some(fault) = &self.fault_evidence {
+            ensure!(
+                !fingerprint_inputs
+                    .iter()
+                    .any(|input| project_root.join(fault).starts_with(input)),
+                "fault evidence cannot also be a fingerprint_input (circular fingerprint)"
+            );
             ensure!(
                 fault.ends_with(".json"),
                 "fault evidence must be a JSON file"

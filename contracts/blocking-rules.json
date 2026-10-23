@@ -72,7 +72,7 @@
       "scope": "Exact package/target/path/qualified-name selectors in the recorded Cargo scope; not all environments declared in prose.",
       "rationale": "Enforce explicit retained-owner obligations without rewarding test counts or inferred value.",
       "limitations": ["Declarations do not prove behavioral adequacy or boundary realism", "Duplicate execution names and skipped/stale/unexecuted owners abstain", "External harnesses are unresolved; deletion and sensitivity advice remain non-blocking"],
-      "cases": {"positive": ["tests/testing_policy.rs#required_owner_policy"], "negative": ["tests/testing_policy.rs#required_owner_policy"], "unavailable": ["tests/testing_policy.rs#required_owner_policy"]},
+      "cases": {"positive": ["tests/testing_policy.rs#required_ownership_gate_is_fail_closed"], "negative": ["tests/testing_policy.rs#required_ownership_gate_is_fail_closed"], "unavailable": ["tests/testing_policy.rs#required_ownership_gate_is_fail_closed"]},
       "case_coverage": "Scoped real CLI ownership and reporter journey; not global detector certification"
     },
     "practices": {

@@ -1,0 +1,213 @@
+{
+  "version": 1,
+  "scope": "Same self source roots before/after the stage-5 pilot; not a pristine pre-feature comparison or unchanged-production coverage certification.",
+  "base_revision": "08830ace46a8bde4e5959b58ecbac36c45fdbf07",
+  "working_tree": "Stage-5 implementation, before its commit; source digest retained below. Documentation/results added afterward are not evidence of another run.",
+  "input_fingerprint": {
+    "algorithm": "fnv1a64-quality-inputs-v5",
+    "complete": true,
+    "config_digest": "57198d8b41993104",
+    "digest": "193e4b06e277b41e",
+    "file_count": 177,
+    "git": {
+      "head": "08830ace46a8bde4e5959b58ecbac36c45fdbf07",
+      "replacements": "",
+      "shallow": "false"
+    },
+    "helper_digest": "13b9671716224950",
+    "read_errors": [],
+    "source_digest": "a4fe805d41b809ab",
+    "toolchain": {
+      "cargo_version": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+      "declared_rust_version": "1.95",
+      "host": "x86_64-unknown-linux-gnu",
+      "llvm_version": "21.1.8",
+      "pinned_channel": "1.95.0",
+      "rustc_release": "1.95.0",
+      "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14) (built from a source tarball)"
+    }
+  },
+  "before": {
+    "source_nonblank_lines": 31767.0,
+    "maximum_function_hotspot": 116.48,
+    "maximum_testing_policy_hotspot": 116.48,
+    "maximum_cyclomatic": 26,
+    "maximum_cognitive": 14,
+    "test_statuses": {
+      "passed": 186,
+      "skipped": 8
+    },
+    "coverage": {
+      "branches": {
+        "available": false,
+        "count": 0,
+        "covered": 0,
+        "percent": null
+      },
+      "file_count": 107,
+      "functions": {
+        "available": true,
+        "count": 2238,
+        "covered": 1948,
+        "percent": 87.04
+      },
+      "lines": {
+        "available": true,
+        "count": 21562,
+        "covered": 19168,
+        "percent": 88.9
+      },
+      "regions": {
+        "available": true,
+        "count": 34641,
+        "covered": 30066,
+        "percent": 86.79
+      }
+    }
+  },
+  "after": {
+    "source_nonblank_lines": 31781.0,
+    "maximum_function_hotspot": 99.62,
+    "maximum_testing_policy_hotspot": 59.98,
+    "maximum_cyclomatic": 19,
+    "maximum_cognitive": 14,
+    "test_statuses": {
+      "passed": 187,
+      "skipped": 8
+    },
+    "coverage": {
+      "branches": {
+        "available": false,
+        "count": 0,
+        "covered": 0,
+        "percent": null
+      },
+      "file_count": 107,
+      "functions": {
+        "available": true,
+        "count": 2234,
+        "covered": 1944,
+        "percent": 87.02
+      },
+      "lines": {
+        "available": true,
+        "count": 21548,
+        "covered": 19155,
+        "percent": 88.89
+      },
+      "regions": {
+        "available": true,
+        "count": 34624,
+        "covered": 30053,
+        "percent": 86.8
+      }
+    }
+  },
+  "validation": {
+    "workspace_tests": "passed",
+    "clippy_workspace_all_targets": "passed",
+    "format": "passed",
+    "bundled_helpers": "passed",
+    "workspace_all_target_check": "passed",
+    "rustdoc_warnings_denied": "passed",
+    "verify": "passed",
+    "measure_all": "completed_with_partial_evidence",
+    "sarif": "passed",
+    "package_external_consumer_smoke": "passed",
+    "python_acceptance_tests": 14,
+    "python_script_tests": 6,
+    "self_metrics_exit": 1,
+    "strict_policy_exit": 1
+  },
+  "failed_policies": [
+    "configured-rules",
+    "partial",
+    "reliability-finding",
+    "test-failure"
+  ],
+  "stale_artifacts": [],
+  "required_owner_evaluation": [
+    {
+      "evaluation_complete": false,
+      "excess": null,
+      "excluded": 0,
+      "level": "error",
+      "maximum": 0,
+      "observed": null,
+      "observed_findings": 0,
+      "reason": "test_quality.json: Partial",
+      "rule_id": "rust.testing.required-owner",
+      "status": "incomplete"
+    }
+  ],
+  "self_owners": [
+    {
+      "behavior": "testing-policy-workflow",
+      "status": "unknown",
+      "resolutions": [
+        "resolved",
+        "resolved",
+        "resolved"
+      ]
+    },
+    {
+      "behavior": "measurement-artifact-contract",
+      "status": "unknown",
+      "resolutions": [
+        "resolved"
+      ]
+    },
+    {
+      "behavior": "partial-type-evidence",
+      "status": "unknown",
+      "resolutions": [
+        "resolved"
+      ]
+    },
+    {
+      "behavior": "publication-integrity",
+      "status": "unknown",
+      "resolutions": [
+        "resolved"
+      ]
+    }
+  ],
+  "fault_campaign": {
+    "isolation": "Disposable source copy under target/testing-policy-pilot/fault-source; tracked Rust sources restored byte-for-byte to the active checkout. No live product source mutation.",
+    "command": "CARGO_TARGET_DIR=<repo>/target/testing-policy-pilot/fault-build cargo test --locked --manifest-path target/testing-policy-pilot/fault-source/Cargo.toml --test testing_policy required_ownership_gate_is_fail_closed -- --exact",
+    "mutation": "In src/testing_policy/requirements.rs, replace row.status == \"unknown\" with row.status == \"never_unknown\".",
+    "baseline": {
+      "exit": 0,
+      "selected_tests_passed": 1
+    },
+    "injected": {
+      "exit": 101,
+      "selected_tests_failed": 1,
+      "observed_failure": "assertion: passed != incomplete; unknown owner execution incorrectly certified"
+    },
+    "restored": {
+      "exit": 0,
+      "selected_tests_passed": 1
+    },
+    "logs_sha256": {
+      "fault-baseline.log": "92e2051458952f6b877f85f19c364812c8a3a670fa3da95a2f895c30f0f03408",
+      "fault-injected.log": "13f2d2b7e208faca95520d5251d9fc9a911864b72a16dd700a17028debe44702",
+      "fault-restored.log": "1fea6585427d7b88bce82306785e362e5a78e1fe1e49007fccdf9c99d0b3c6f2"
+    }
+  },
+  "deletions": {
+    "registered_tests_removed": [
+      "tool::tests::tool_scope_and_backend_requirements_are_explicit"
+    ],
+    "private_routing_assertions_removed": 11,
+    "schema_presentation_literal_assertions_removed": 2,
+    "envelope_contract": "Preserve required fields and schema version, no unsupported ban on additive fields.",
+    "registration_change": "New feature workflow split from one registration into three independently diagnosable journeys; net registrations increase by one in this pilot. Not counted as reduction."
+  },
+  "limits": [
+    "No independent production-project calibration or new risk-model version.",
+    "Coverage denominators include changed tests; no assertion-quality or unchanged-region retention proof.",
+    "Self ownership remains unknown because the current correctness artifact is partial; successful test execution is not promoted to complete ownership evidence.",
+    "Schema CLI contracts and typed consumers tested; no independent JSON Schema validator was available."
+  ]
+}

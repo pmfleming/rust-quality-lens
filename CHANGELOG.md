@@ -6,6 +6,8 @@ All notable changes to this project will be documented here. The format follows 
 
 ### Added
 
+- Opt-in `[testing_policy]` manifests for primary behavior ownership, distinct-risk support, reviewed consolidation and explicit compatibility retirement. `test-quality` now separates declarations, exact owner resolution, fresh execution and advisory value judgments; schemas and policy/SARIF retain evidence scope. Optional `rust.testing.required-owner` enforcement and fingerprint-bound imported fault experiments never automate deletion or change existing scores/coverage gates. `measure all` runs correctness before ownership review.
+
 - Opt-in `profiles` command and versioned `quality_profiles.json`: executed MSRV/toolchain/target/feature compatibility rows, isolated cold/warm build timings and artifact sizes, command workload timing, Linux GNU-time peak RSS, fresh instrumented allocation/instruction counters and per-observation resource budgets. Skipped configurations retain their declared denominator; missing tools/results remain partial.
 
 - Relationship-based structural cohesion for same-file inherent receiver methods: shared-field pairs, internal-call connectivity and responsibility clusters, with null scores for unsupported or inapplicable source patterns. Declaration diversity remains separate and calibrated scores are unchanged.

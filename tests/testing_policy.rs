@@ -76,15 +76,34 @@ tests = [{package = "ownership_fixture", target = "journey", path = "tests/journ
 fn ownership_review_uses_real_execution_and_rejects_stale_claims() -> Result<()> {
     let root = tempfile::tempdir()?;
     setup(root.path())?;
-    run(root.path(), &["measure", "test-quality"])?;
-    let before = document(root.path(), "test_quality.json")?;
+    ownership_execution(root.path())?;
+    invalid_owner_declarations(root.path())?;
+    consolidation_and_reporters(root.path())?;
+    low_value_and_retirement(root.path())
+}
+
+#[test]
+fn required_ownership_gate_is_fail_closed() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    required_owner_policy(root.path())
+}
+
+#[test]
+fn fault_reports_preserve_scoped_sensitivity() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    fault_sensitivity(root.path())
+}
+
+fn ownership_execution(root: &Path) -> Result<()> {
+    run(root, &["measure", "test-quality"])?;
+    let before = document(root, "test_quality.json")?;
     assert_eq!(
         before["data"]["testing_policy"]["behaviors"][0]["status"],
         "unknown"
     );
-    run(root.path(), &["measure", "correctness-run"])?;
-    run(root.path(), &["measure", "test-quality"])?;
-    let after = document(root.path(), "test_quality.json")?;
+    run(root, &["measure", "correctness-run"])?;
+    run(root, &["measure", "test-quality"])?;
+    let after = document(root, "test_quality.json")?;
     let policy = &after["data"]["testing_policy"];
     assert_eq!(
         policy["behaviors"][0]["status"], "observed_pass",
@@ -101,11 +120,11 @@ fn ownership_review_uses_real_execution_and_rejects_stale_claims() -> Result<()>
 
     // Non-Rust policy input changes invalidate execution; no inferred re-pass.
     fs::write(
-        root.path().join("testing.toml"),
+        root.join("testing.toml"),
         format!("{}\n# reviewed anew\n", manifest()),
     )?;
-    run(root.path(), &["measure", "test-quality"])?;
-    let stale = document(root.path(), "test_quality.json")?;
+    run(root, &["measure", "test-quality"])?;
+    let stale = document(root, "test_quality.json")?;
     assert_ne!(
         after["input_fingerprint"]["digest"],
         stale["input_fingerprint"]["digest"]
@@ -119,28 +138,27 @@ fn ownership_review_uses_real_execution_and_rejects_stale_claims() -> Result<()>
         "unknown"
     );
 
+    Ok(())
+}
+
+fn invalid_owner_declarations(root: &Path) -> Result<()> {
     // Exact target selection: the same test name cannot satisfy another target.
     fs::write(
-        root.path().join("testing.toml"),
+        root.join("testing.toml"),
         manifest().replace("target = \"journey\"", "target = \"other\""),
     )?;
-    run(root.path(), &["measure", "test-quality"])?;
+    run(root, &["measure", "test-quality"])?;
     assert_eq!(
-        document(root.path(), "test_quality.json")?["data"]["testing_policy"]["behaviors"][0]["status"],
+        document(root, "test_quality.json")?["data"]["testing_policy"]["behaviors"][0]["status"],
         "unresolved"
     );
 
-    fs::write(
-        root.path().join("testing.toml"),
-        "version = 999\nbehaviors = []\n",
-    )?;
-    run(root.path(), &["measure", "test-quality"])?;
-    let invalid = document(root.path(), "test_quality.json")?;
+    fs::write(root.join("testing.toml"), "version = 999\nbehaviors = []\n")?;
+    run(root, &["measure", "test-quality"])?;
+    let invalid = document(root, "test_quality.json")?;
     assert_eq!(invalid["data"]["testing_policy"]["status"], "unavailable");
     assert_eq!(invalid["measurement_confidence"]["complete"], false);
-    consolidation_and_reporters(root.path())?;
-    required_owner_policy(root.path())?;
-    fault_sensitivity(root.path())
+    Ok(())
 }
 
 fn disposition(action: &str) -> String {
@@ -178,6 +196,12 @@ fn consolidation_and_reporters(root: &Path) -> Result<()> {
     run(root, &["measure", "correctness-run"])?;
     assert_eq!(candidate_status(root)?, "value_review_candidate");
     run(root, &["check"])?;
+    assert_reporter_agreement(root, "rust.testing.consolidation-review")?;
+    assert_eq!(document(root, "policy_report.json")?["passed"], true);
+    Ok(())
+}
+
+fn assert_reporter_agreement(root: &Path, rule: &str) -> Result<()> {
     run(root, &["sarif"])?;
     let policy = document(root, "policy_report.json")?;
     let sarif: Value = serde_json::from_str(&fs::read_to_string(
@@ -187,17 +211,19 @@ fn consolidation_and_reporters(root: &Path) -> Result<()> {
         .as_array()
         .context("warnings")?
         .iter()
-        .find(|row| row["rule_id"] == "rust.testing.consolidation-review")
+        .find(|row| row["rule_id"] == rule)
         .context("candidate warning")?;
     let exported = sarif["runs"][0]["results"]
         .as_array()
         .context("results")?
         .iter()
-        .find(|row| row["ruleId"] == "rust.testing.consolidation-review")
+        .find(|row| row["ruleId"] == rule)
         .context("SARIF candidate")?;
     assert_eq!(exported["properties"]["rqlens_finding"], *warning);
-    assert_eq!(policy["passed"], true);
+    Ok(())
+}
 
+fn low_value_and_retirement(root: &Path) -> Result<()> {
     // Low-value uniqueness does not require replacement execution.
     fs::write(
         root.join("testing.toml"),
@@ -215,6 +241,10 @@ fn consolidation_and_reporters(root: &Path) -> Result<()> {
     )?;
     assert_eq!(candidate_status(root)?, "distinct_risk_review_required");
 
+    compatibility_retirement(root)
+}
+
+fn compatibility_retirement(root: &Path) -> Result<()> {
     let retirement = format!("{}{}", manifest(), disposition("retire_compatibility"));
     fs::write(root.join("testing.toml"), &retirement)?;
     assert_eq!(candidate_status(root)?, "support_review_required");

@@ -126,7 +126,7 @@ pub(super) fn resolve(selector: &TestSelector, tests: &[Value]) -> &'static str 
         .filter(|test| {
             test["package_name"] == selector.package
                 && test["target_name"] == selector.target
-                && test["path"] == selector.path
+                && test["relative_path"] == selector.path
                 && test["qualified_name"] == selector.name
         })
         .count()

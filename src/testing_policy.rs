@@ -45,6 +45,8 @@ pub(crate) struct Review {
     status: String,
     manifest: Option<String>,
     execution_evidence: String,
+    #[serde(default)]
+    execution_context: Value,
     behaviors: Vec<BehaviorReview>,
     #[serde(default)]
     candidates: Vec<Value>,
@@ -67,6 +69,7 @@ pub(crate) fn review(
         status: "not_configured".into(),
         manifest: None,
         execution_evidence: "not_requested".into(),
+        execution_context: Value::Null,
         behaviors: Vec::new(),
         candidates: Vec::new(),
         contextual_evidence: Vec::new(),
@@ -83,6 +86,13 @@ pub(crate) fn review(
             Ok(manifest) => {
                 let execution = ownership::Execution::load(config, fingerprint);
                 review.execution_evidence = execution.status.clone();
+                review.execution_context = json!({
+                    "artifact": "correctness_review.json",
+                    "configured_command": std::iter::once("cargo".to_string())
+                        .chain(config.verification.cargo_test_arguments()).collect::<Vec<_>>(),
+                    "verification_scope": config.verification,
+                    "limitation": "Configured context, not certification of every environment named in the manifest. Execution availability is reported separately.",
+                });
                 review.status = "reviewed".into();
                 for behavior in manifest.behaviors {
                     review.behaviors.push(ownership::review_behavior(

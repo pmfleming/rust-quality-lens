@@ -22,6 +22,7 @@ pub(crate) fn report_schema() -> Value {
             "status": {"enum": ["not_configured", "unavailable", "reviewed"]},
             "manifest": {"type": ["string", "null"]},
             "execution_evidence": {"type": "string"},
+            "execution_context": {"type": ["object", "null"]},
             "limitations": strings(),
             "candidates": {"type": "array", "items": {"type": "object", "required": ["candidate_id", "candidate_status", "declared"], "properties": {"declared": disposition_schema()}}},
             "contextual_evidence": {"type": "array", "items": {"type": "object"}},

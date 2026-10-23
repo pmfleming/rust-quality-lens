@@ -13,6 +13,7 @@ pub(super) fn required_owner_policy(root: &Path) -> Result<()> {
     run(root, &["measure", "correctness-run"])?;
     run(root, &["measure", "test-quality"])?;
     assert_eq!(evaluation(root)?["status"], "passed");
+    required_sources_allow_a_complete_gate(root)?;
 
     fs::write(
         root.join("testing.toml"),
@@ -22,25 +23,14 @@ pub(super) fn required_owner_policy(root: &Path) -> Result<()> {
     let evaluation = evaluation(root)?;
     assert_eq!(evaluation["status"], "exceeded");
     assert_eq!(evaluation["observed"], 1);
-    run(root, &["sarif"])?;
-    let policy = document(root, "policy_report.json")?;
-    let sarif: Value = serde_json::from_str(&fs::read_to_string(
-        root.join("target/analysis/rqlens.sarif"),
-    )?)?;
-    let finding = policy["test_quality_warnings"]
-        .as_array()
-        .context("required-owner findings")?
-        .iter()
-        .find(|row| row["rule_id"] == "rust.testing.required-owner")
-        .context("required owner")?;
-    let exported = sarif["runs"][0]["results"]
-        .as_array()
-        .context("SARIF")?
-        .iter()
-        .find(|row| row["ruleId"] == "rust.testing.required-owner")
-        .context("exported required owner")?;
-    assert_eq!(exported["properties"]["rqlens_finding"], *finding);
+    measure_policy_sources(root)?;
+    let failed = invoke(root, &["check"])?;
+    assert!(!failed.status.success());
+    assert_reporter_agreement(root, "rust.testing.required-owner")?;
+    reject_contradictory_owner_report(root)
+}
 
+fn reject_contradictory_owner_report(root: &Path) -> Result<()> {
     // A contradictory complete artifact must not manufacture verified zero.
     let mut forged = document(root, "test_quality.json")?;
     forged["data"]["findings"] = json!([]);
@@ -53,12 +43,23 @@ pub(super) fn required_owner_policy(root: &Path) -> Result<()> {
 }
 
 fn evaluation(root: &Path) -> Result<Value> {
-    let output = invoke(root, &["check"])?;
-    // Other configured-rule sources are intentionally absent in this bounded
-    // workflow: assert this rule's evaluation, not a whole-project green gate.
-    assert!(!output.status.success());
+    let _output = invoke(root, &["check"])?;
     let policy = document(root, "policy_report.json")?;
     Ok(policy["policy_rule_evaluations"][0].clone())
+}
+
+fn measure_policy_sources(root: &Path) -> Result<()> {
+    for tool in ["practices", "reliability", "architecture-rules"] {
+        run(root, &["measure", tool])?;
+    }
+    Ok(())
+}
+
+fn required_sources_allow_a_complete_gate(root: &Path) -> Result<()> {
+    measure_policy_sources(root)?;
+    run(root, &["check"])?;
+    assert_eq!(document(root, "policy_report.json")?["passed"], true);
+    Ok(())
 }
 
 fn experiment_run(root: &Path, status: &str) -> Result<Value> {
@@ -81,7 +82,7 @@ fn experiment_run(root: &Path, status: &str) -> Result<Value> {
     )
 }
 
-pub(super) fn fault_sensitivity(root: &Path) -> Result<()> {
+fn capture_fault_evidence(root: &Path) -> Result<Value> {
     setup(root)?;
     fs::write(
         root.join("rqlens.toml"),
@@ -97,13 +98,17 @@ pub(super) fn fault_sensitivity(root: &Path) -> Result<()> {
     let injected = experiment_run(root, "assertion_failed")?;
     fs::write(root.join("src/lib.rs"), "pub fn value() -> u8 { 42 }\n")?;
     let restored = experiment_run(root, "passed")?;
-    let mut evidence = json!({"version": 1, "input_fingerprint": fingerprint,
+    Ok(json!({"version": 1, "input_fingerprint": fingerprint,
         "producer": "rqlens-cli-fixture", "producer_version": "1",
         "records": [{"id": "wrong-answer", "behavior": "answer",
             "owner": {"package": "ownership_fixture", "target": "journey", "path": "tests/journey.rs", "name": "journey"},
             "fault": "return the wrong answer", "fault_path": "src/lib.rs", "expected_failure": "answer assertion fails",
             "baseline": baseline, "injected": injected, "restored": restored}]
-    });
+    }))
+}
+
+pub(super) fn fault_sensitivity(root: &Path) -> Result<()> {
+    let mut evidence = capture_fault_evidence(root)?;
     fs::write(root.join("faults.json"), serde_json::to_vec(&evidence)?)?;
     run(root, &["measure", "correctness-run"])?;
     run(root, &["measure", "test-quality"])?;
@@ -117,6 +122,15 @@ pub(super) fn fault_sensitivity(root: &Path) -> Result<()> {
         "observed_pass"
     );
 
+    compile_failure_is_not_detection(root, &mut evidence, &detected)?;
+    stale_fault_subject(root)
+}
+
+fn compile_failure_is_not_detection(
+    root: &Path,
+    evidence: &mut Value,
+    detected: &Value,
+) -> Result<()> {
     fs::write(root.join("src/lib.rs"), "this does not compile\n")?;
     evidence["records"][0]["injected"] = experiment_run(root, "compile_failed")?;
     fs::write(root.join("src/lib.rs"), "pub fn value() -> u8 { 42 }\n")?;
@@ -137,6 +151,10 @@ pub(super) fn fault_sensitivity(root: &Path) -> Result<()> {
         inconclusive["input_fingerprint"]["digest"]
     );
 
+    Ok(())
+}
+
+fn stale_fault_subject(root: &Path) -> Result<()> {
     fs::write(root.join("src/lib.rs"), "pub fn value() -> u8 { 41 }\n")?;
     run(root, &["measure", "test-quality"])?;
     let stale = document(root, "test_quality.json")?;

@@ -217,6 +217,23 @@ expires = "2026-12-31"
 Waivable findings accepted by active waivers remain visible in `policy_report.json`
 and in SARIF as accepted suppressions. Expired waivers no longer suppress findings.
 
+### Review testing value
+
+Opt into behavior ownership and test-value review without changing coverage scores:
+
+```toml
+[testing_policy]
+manifest = "rqlens-testing.toml"
+```
+
+Run `rqlens measure correctness-run` followed by `rqlens measure test-quality`
+(or `measure all`). The report distinguishes declared primary owners, observed
+execution, distinct-risk supporting tests and reviewed consolidation candidates.
+It never deletes tests or counts mocks as coverage of replaced implementations.
+Explicit required-owner gates and imported fault evidence are optional. See the
+[testing policy and configuration](docs/testing-policy.md) and
+[self-pilot results](docs/testing-policy-implementation.md).
+
 ### Export SARIF
 
 ```bash
