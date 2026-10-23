@@ -67,7 +67,7 @@ Test retirement is based on ownership, not a count target:
 | --- | --- |
 | `calibration_project_specs_are_validated_and_normalized` | Native calibration CLI journey; keep hand-counted distribution/threshold tests for numerical edge cases |
 | `required_mode_rejects_an_unavailable_analyzer` | Native trust journey now requires failure and preservation of published output; keep live resolver/cache and protocol tests |
-| `run_context_reuses_inventory_graph_and_artifact_fingerprint` | Snapshot mid-run-edit test and CLI publication-integrity journey; existing contract tests reject contradictory confidence; remove pointer identity / schema implementation assertions |
+| `run_context_reuses_inventory_graph_and_artifact_fingerprint` | Snapshot mid-run-edit test and CLI publication-integrity journey; the artifact contract test owns both producer and consumer rejection of contradictory confidence; remove pointer identity / schema implementation assertions |
 
 The overlapping source/correctness inventory test retains its distinct scope
 checks, but no longer constrains its implementation to specific `Arc` identities.
@@ -77,3 +77,9 @@ Workspace tests, strict Clippy, formatting and bundled-helper parity pass at thi
 checkpoint. Numerical comparisons and final gate results follow below. Do not
 interpret a test-count reduction as evidence of adequacy; the new native journey
 executes previously uncovered calibration production paths.
+
+A byte-identical-file coverage comparison caught one lost producer error-path line
+(`src/contracts.rs:41`). The confidence-rejection assertion was retained at the
+artifact contract boundary rather than restoring the mixed snapshot/cache/schema
+test. This is a distinct producer obligation, not covered merely by testing a
+consumer's rejection of malformed reports.

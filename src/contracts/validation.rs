@@ -412,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn artifact_validation_accepts_static_evidence_but_rejects_invalid_envelopes() {
+    fn artifact_validation_accepts_static_evidence_but_rejects_invalid_envelopes() -> Result<()> {
         let document = json!({
             "schema_version": 3, "risk_model_version": MODEL_VERSION, "tool": "correctness",
             "measurement_confidence": {"complete": true, "partial": false},
@@ -444,5 +444,18 @@ mod tests {
                 "{key}"
             );
         }
+        // Producers must reject contradictory confidence too, before publication.
+        let (_root, config) = crate::test_support::source_project(Some("pub fn value() {}"))?;
+        let context = crate::facts::RunContext::new(&config, &[])?;
+        assert!(
+            super::super::artifact_document(
+                &crate::tool::MeasureTool::Coverage,
+                &config,
+                &context,
+                json!({"measurement_confidence": {"complete": true, "partial": true}})
+            )
+            .is_err()
+        );
+        Ok(())
     }
 }
