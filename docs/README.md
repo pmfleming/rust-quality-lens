@@ -9,6 +9,7 @@ This directory contains the design and interpretation notes for rust-quality-len
 - [Testing policy](testing-policy.md): behavior ownership, value-based removal and verification
 - [Testing policy plan](testing-policy-plan.md): staged implementation and acceptance criteria
 - [Testing policy implementation](testing-policy-implementation.md): self-pilot, actual fault detection, justified removals and remaining limits
+- [Self-review 6](self-review-6.md): measurement corrections, refactoring, coverage with fewer tests, and unmet budgets
 - [Extended metrics](extended-metrics.md): behavioral, maintenance, cohesion and profile evidence
 - [Measurement design and upgrades](measurement-upgrades.md): artifact, extraction, confidence, and scoring design
 - [Compiler inventory](compiler-inventory.md): opt-in macro-expanded, cfg-selected type-health with compiler ownership, source attribution, and per-context deduplication
