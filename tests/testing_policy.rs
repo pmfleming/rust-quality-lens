@@ -1,5 +1,8 @@
 //! Primary public-workflow owner: real CLI, manifest, Cargo execution and artifacts.
+#[path = "testing_policy/campaign.rs"]
+mod campaign;
 use anyhow::{Context, Result};
+use campaign::{fault_sensitivity, required_owner_policy};
 use serde_json::Value;
 use std::{fs, path::Path, process::Command};
 
@@ -8,7 +11,7 @@ fn invoke(root: &Path, args: &[&str]) -> Result<std::process::Output> {
         .args(args)
         .arg("--config")
         .arg(root.join("rqlens.toml"))
-        .current_dir(root)
+        .current_dir(root.parent().context("fixture parent")?)
         .output()?;
     Ok(output)
 }
@@ -92,7 +95,8 @@ fn ownership_review_uses_real_execution_and_rejects_stale_claims() -> Result<()>
         after["data"]["findings"]
             .as_array()
             .context("findings")?
-            .is_empty()
+            .iter()
+            .all(|row| row["rule_id"] == "rust.testing.sensitivity-review")
     );
 
     // Non-Rust policy input changes invalidate execution; no inferred re-pass.
@@ -134,7 +138,9 @@ fn ownership_review_uses_real_execution_and_rejects_stale_claims() -> Result<()>
     let invalid = document(root.path(), "test_quality.json")?;
     assert_eq!(invalid["data"]["testing_policy"]["status"], "unavailable");
     assert_eq!(invalid["measurement_confidence"]["complete"], false);
-    consolidation_and_reporters(root.path())
+    consolidation_and_reporters(root.path())?;
+    required_owner_policy(root.path())?;
+    fault_sensitivity(root.path())
 }
 
 fn disposition(action: &str) -> String {

@@ -115,6 +115,11 @@ impl Inputs {
         if self.status[file].status != InputStatus::Available {
             return Some(format!("{file}: {:?}", self.status[file].status));
         }
+        if rule == crate::testing_policy::REQUIRED_OWNER_RULE {
+            return crate::testing_policy::required_owner_unavailability(
+                &self.documents[file]["data"],
+            );
+        }
         if file == "rust_practices.json" {
             let matching = self.documents[file]["data"]["checks"]
                 .as_array()

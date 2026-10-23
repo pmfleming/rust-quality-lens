@@ -33,3 +33,20 @@ The primary CLI journey now exercises replacement prerequisites, low-value cases
 protected owners, explicit support withdrawal and exact policy/SARIF finding
 agreement. Focused CLI tests, strict Clippy, formatting, diff checks and a self
 `measure test-quality` run passed. Broad validation is repeated in the self-pilot.
+
+## Stage 4 — sensitivity and explicit requirements
+
+Added opt-in, fingerprint-bound imported fault experiments with baseline/injected/
+restored outcomes and explicit imported authority. Compile failures are not defect
+detection. The CLI never executes imported commands. Existing mutation evidence
+remains aggregate context. Added `rust.testing.required-owner` with documented
+prerequisites, positive/negative/unavailable evaluation and fail-closed report
+validation; value and sensitivity recommendations remain non-blocking.
+
+The primary CLI fixture actually changes a library result, observes its owner's
+assertion failure, restores and reruns, then distinguishes a real compile failure
+and stale source evidence. It also verifies required-owner evaluations, SARIF
+agreement and rejection of contradictory missing findings. Commands now run from
+outside the fixture root, catching and fixing relative policy-input fingerprinting.
+Workspace tests and strict workspace/all-target Clippy passed, as did formatting
+and diff checks. No score formula, baseline rule or default gate changed.

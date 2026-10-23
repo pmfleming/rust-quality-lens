@@ -14,6 +14,7 @@
     "rust.test.ignored": "test-quality",
     "rust.test.no-assertion": "test-quality",
     "rust.test.no-sut-call": "test-quality",
+    "rust.testing.required-owner": "testing-ownership",
     "rust.official.rustfmt": "practices",
     "rust.official.cargo-check": "practices",
     "rust.official.clippy": "practices",
@@ -63,6 +64,16 @@
       "limitations": ["Indirect assertions and custom harnesses can escape syntax recognition", "No exhaustive per-rule positive/negative/unavailable certification"],
       "cases": {"positive": [], "negative": [], "unavailable": []},
       "case_coverage": "Pending per-rule cases"
+    },
+    "testing-ownership": {
+      "artifact": "test_quality.json",
+      "prerequisites": ["Current validated complete artifact", "Valid configured testing manifest", "At least one explicitly required behavior", "Resolved owners need attributable current execution"],
+      "applicability": "Only manifest behaviors with required = true and an explicit configured rule limit; test-value advice is never enforced.",
+      "scope": "Exact package/target/path/qualified-name selectors in the recorded Cargo scope; not all environments declared in prose.",
+      "rationale": "Enforce explicit retained-owner obligations without rewarding test counts or inferred value.",
+      "limitations": ["Declarations do not prove behavioral adequacy or boundary realism", "Duplicate execution names and skipped/stale/unexecuted owners abstain", "External harnesses are unresolved; deletion and sensitivity advice remain non-blocking"],
+      "cases": {"positive": ["tests/testing_policy.rs#required_owner_policy"], "negative": ["tests/testing_policy.rs#required_owner_policy"], "unavailable": ["tests/testing_policy.rs#required_owner_policy"]},
+      "case_coverage": "Scoped real CLI ownership and reporter journey; not global detector certification"
     },
     "practices": {
       "artifact": "rust_practices.json",

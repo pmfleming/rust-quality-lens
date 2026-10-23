@@ -151,4 +151,59 @@ coverage artifact references are contextual only, never proof of equivalence.
 Findings share existing review, policy and SARIF projection. Review-only rule IDs
 are not supported as blocking deletion rules.
 
+## Explicit owner gate
+
+```toml
+[policy.rules."rust.testing.required-owner"]
+level = "error"
+max = 0
+```
+
+Only `required = true` behaviors participate. Unresolved owners or observed owner
+failures exceed the limit. Unknown, skipped, stale, ambiguous execution, no required
+behaviors, an unconfigured policy or incomplete inputs make evaluation unavailable,
+not passed. The gate checks resolution/execution in the actual Cargo scope, not the
+truth of prose requirements. Existing configured-rule prerequisites still require
+fresh practices, reliability, architecture and test-quality artifacts. Waivers and
+exclusions remain visible under existing policy semantics. No deletion, count,
+coverage or sensitivity score is enforced.
+
+## Optional fault evidence
+
+Set `testing_policy.fault_evidence = "target/testing-faults.json"` to import bounded
+experiments performed by a trusted maintainer/harness. The lens does **not** execute
+commands in this file, inject faults or modify code. Perform experiments only in
+disposable worktrees/fixtures with explicit resource/time limits, no live destructive
+operations or unintended external effects. Restore sources and rerun after failure.
+
+First run `measure test-quality` and copy its
+`data.testing_policy.sensitivity.subject_fingerprint` into the report. A missing
+configured report is initially unavailable. This subject includes source, manifest,
+configuration, toolchain, helper and Git context **excluding the fault report itself**;
+the ordinary artifact fingerprint includes the report too. Do not also put the
+report or its parent in `evidence_inputs` or `fingerprint_inputs` (circular evidence).
+After writing the report, rerun correctness and test-quality for fresh owner status.
+
+The version-1 JSON report contains `version`, `input_fingerprint`, `producer`,
+`producer_version`, and `records`. Each record has:
+
+- `id`, `behavior`, exact primary `owner` selector;
+- `fault`, project-relative `fault_path`, `expected_failure`;
+- `baseline`, `injected`, `restored`: each with a nonempty command array, output
+  text, and status (`passed`, `assertion_failed`, `compile_failed`, `timed_out`,
+  `not_run`, `inconclusive`).
+
+See `config-schema` → `properties.testing_policy.x-fault-evidence-schema` for the
+wire shape. Claims are labeled `imported_observations_not_independently_verified`.
+Only passing baseline/restoration plus an intended assertion failure yields
+`reported_detected`; compilation failures/timeouts are inconclusive, an injected
+pass is `survived`, and an unexecuted injection is `not_run`. Stale/malformed input
+makes the configured measurement partial. This does not certify that the imported
+commands/logs are truthful or that all important defects are detected.
+
+Required behaviors without bounded detection evidence receive non-blocking advice
+to try a representative controlled failure where practical. Existing cargo-mutants
+results are linked through `rust_practices.json` / `rust.tests.mutation`; aggregate
+results are never automatically credited to a particular owner.
+
 See [the implementation plan](testing-policy-plan.md) for acceptance criteria.

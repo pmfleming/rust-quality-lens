@@ -549,8 +549,12 @@ impl LensConfig {
         }
         let mut extra_inputs = self.fingerprint_inputs.clone();
         if let Some(policy) = &self.testing_policy {
-            extra_inputs.push(policy.manifest.clone());
-            extra_inputs.extend(policy.evidence_inputs.iter().cloned());
+            extra_inputs.extend(
+                std::iter::once(&policy.manifest)
+                    .chain(&policy.evidence_inputs)
+                    .chain(&policy.fault_evidence)
+                    .map(|path| self.project_root.join(path).to_string_lossy().into_owned()),
+            );
         }
         extra_inputs.push(self.helper_manifest.to_string_lossy().into_owned());
         extra_inputs.extend(local_workspace_inputs(&local_roots));
@@ -664,6 +668,14 @@ impl LensConfig {
         policy.validate()?;
         if let Some(testing) = &raw.testing_policy {
             testing.validate()?;
+            if let Some(fault) = &testing.fault_evidence {
+                anyhow::ensure!(
+                    !fingerprint_inputs
+                        .iter()
+                        .any(|input| project_root.join(fault).starts_with(input)),
+                    "fault evidence cannot also be a fingerprint_input (circular fingerprint)"
+                );
+            }
         }
         let project_name = raw.project_name.unwrap_or_else(|| {
             project_root

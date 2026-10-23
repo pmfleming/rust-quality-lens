@@ -4,9 +4,11 @@ pub(crate) fn config_schema() -> Value {
     json!({
         "type": "object", "additionalProperties": false, "required": ["manifest"],
         "x-manifest-schema": manifest_schema(),
+        "x-fault-evidence-schema": fault_schema(),
         "properties": {
             "manifest": {"type": "string", "minLength": 1, "description": "Project-relative version-1 testing policy TOML; automatically fingerprinted."},
-            "evidence_inputs": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": [], "description": "Project-relative requirement/support documents and non-Rust fixtures to fingerprint. Missing inputs make evidence partial."}
+            "evidence_inputs": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": [], "description": "Project-relative requirement/support documents and non-Rust fixtures to fingerprint. Missing inputs make evidence partial."},
+            "fault_evidence": {"type": "string", "minLength": 1, "description": "Opt-in project-relative JSON report of isolated targeted failures. Imported observations, not independently executed commands."}
         }
     })
 }
@@ -23,6 +25,7 @@ pub(crate) fn report_schema() -> Value {
             "limitations": strings(),
             "candidates": {"type": "array", "items": {"type": "object", "required": ["candidate_id", "candidate_status", "declared"], "properties": {"declared": disposition_schema()}}},
             "contextual_evidence": {"type": "array", "items": {"type": "object"}},
+            "sensitivity": {"type": ["object", "null"], "properties": {"status": {"enum": ["not_configured", "unavailable", "current_import"]}, "records": {"type": "array", "items": {"type": "object"}}}},
             "behaviors": {"type": "array", "items": {
                 "type": "object", "additionalProperties": false,
                 "required": ["declared", "observed", "status"],
@@ -34,6 +37,29 @@ pub(crate) fn report_schema() -> Value {
                         "required": ["test", "resolution", "execution"],
                         "properties": {"test": selector_schema(), "resolution": {"enum": ["unresolved", "resolved", "ambiguous"]}, "execution": {"type": "string"}}
                     }}
+                }
+            }}
+        }
+    })
+}
+
+fn fault_schema() -> Value {
+    let run = json!({"type": "object", "additionalProperties": false, "required": ["command", "status", "output"],
+        "properties": {"command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "status": {"enum": ["passed", "assertion_failed", "compile_failed", "timed_out", "not_run", "inconclusive"]},
+            "output": {"type": "string", "minLength": 1}}
+    });
+    json!({"type": "object", "additionalProperties": false,
+        "required": ["version", "input_fingerprint", "producer", "producer_version", "records"],
+        "properties": {
+            "version": {"const": 1}, "input_fingerprint": {"type": "object"},
+            "producer": {"type": "string", "minLength": 1}, "producer_version": {"type": "string", "minLength": 1},
+            "records": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+                "required": ["id", "behavior", "owner", "fault", "fault_path", "expected_failure", "baseline", "injected", "restored"],
+                "properties": {
+                    "id": {"type": "string", "minLength": 1}, "behavior": {"type": "string", "minLength": 1}, "owner": selector_schema(),
+                    "fault": {"type": "string", "minLength": 1}, "fault_path": {"type": "string", "minLength": 1},
+                    "expected_failure": {"type": "string", "minLength": 1}, "baseline": run, "injected": run, "restored": run
                 }
             }}
         }

@@ -137,7 +137,7 @@ pub(super) fn resolve(selector: &TestSelector, tests: &[Value]) -> &'static str 
     }
 }
 
-fn owner_status(observed: &[Observation], run: &str) -> &'static str {
+pub(super) fn owner_status(observed: &[Observation], run: &str) -> &'static str {
     if observed.is_empty() || observed.iter().any(|row| row.resolution != "resolved") {
         "unresolved"
     } else if observed.iter().any(|row| row.execution == "failed") {

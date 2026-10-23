@@ -2,7 +2,15 @@
 mod disposition;
 mod model;
 mod ownership;
+mod requirements;
 mod schema;
+mod sensitivity;
+mod validation;
+
+pub(crate) use requirements::{
+    RULE as REQUIRED_OWNER_RULE, unavailability as required_owner_unavailability,
+};
+pub(crate) use validation::validate_report;
 
 use anyhow::{Context, Result};
 pub(crate) use model::Config;
@@ -42,6 +50,8 @@ pub(crate) struct Review {
     candidates: Vec<Value>,
     #[serde(default)]
     contextual_evidence: Vec<Value>,
+    #[serde(default)]
+    sensitivity: Value,
     limitations: Vec<String>,
 }
 
@@ -60,6 +70,7 @@ pub(crate) fn review(
         behaviors: Vec::new(),
         candidates: Vec::new(),
         contextual_evidence: Vec::new(),
+        sensitivity: json!({"status": "not_configured", "records": [], "subject_fingerprint": null}),
         limitations: vec![
             "Declarations are reviewed claims, not proof of behavior or boundary coverage.".into(),
             "Aggregate coverage and syntax cannot establish test-specific protection or redundancy.".into(),
@@ -91,6 +102,16 @@ pub(crate) fn review(
                     findings,
                 );
                 review.contextual_evidence = contextual_evidence(config, fingerprint);
+                review.sensitivity = sensitivity::review(config, &review.behaviors, confidence);
+                findings.extend(sensitivity::advice(
+                    &settings.manifest,
+                    &review.behaviors,
+                    &review.sensitivity,
+                ));
+                findings.extend(requirements::findings(
+                    &settings.manifest,
+                    &review.behaviors,
+                ));
             }
             Err(error) => {
                 review.status = "unavailable".into();
@@ -133,6 +154,10 @@ fn contextual_evidence(config: &LensConfig, fingerprint: &Value) -> Vec<Value> {
             "coverage.json",
             "Aggregate execution reach does not identify owners or assertion sensitivity.",
         ),
+        (
+            "rust_practices.json",
+            "rust.tests.mutation metrics are bounded aggregate observations, not owner-specific sensitivity.",
+        ),
     ]
     .into_iter()
     .map(|(file, limitation)| {
@@ -149,27 +174,4 @@ fn contextual_evidence(config: &LensConfig, fingerprint: &Value) -> Vec<Value> {
         json!({"artifact": file, "status": status, "limitation": limitation})
     })
     .collect()
-}
-
-pub(crate) fn validate_report(value: &Value) -> Result<()> {
-    // Old artifacts without this optional extension remain valid, not evaluated.
-    if let Some(value) = value.get("testing_policy") {
-        let report: Review = serde_json::from_value(value.clone())?;
-        anyhow::ensure!(report.version == 1, "unsupported testing policy report");
-        anyhow::ensure!(
-            ["not_configured", "unavailable", "reviewed"].contains(&report.status.as_str()),
-            "invalid testing policy status"
-        );
-        let manifest = Manifest {
-            version: 1,
-            behaviors: report
-                .behaviors
-                .into_iter()
-                .map(|row| row.declared)
-                .collect(),
-            dispositions: Vec::new(),
-        };
-        manifest.validate()?;
-    }
-    Ok(())
 }

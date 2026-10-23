@@ -9,12 +9,30 @@ pub(crate) struct Config {
     pub(crate) manifest: String,
     #[serde(default)]
     pub(crate) evidence_inputs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) fault_evidence: Option<String>,
 }
 
 impl Config {
     pub(crate) fn validate(&self) -> Result<()> {
-        for path in std::iter::once(&self.manifest).chain(&self.evidence_inputs) {
+        for path in std::iter::once(&self.manifest)
+            .chain(&self.evidence_inputs)
+            .chain(&self.fault_evidence)
+        {
             relative_path(path)?;
+        }
+        if let Some(fault) = &self.fault_evidence {
+            ensure!(
+                fault.ends_with(".json"),
+                "fault evidence must be a JSON file"
+            );
+            ensure!(
+                !self
+                    .evidence_inputs
+                    .iter()
+                    .any(|input| std::path::Path::new(fault).starts_with(input)),
+                "fault evidence cannot also be an evidence input (circular fingerprint)"
+            );
         }
         Ok(())
     }
