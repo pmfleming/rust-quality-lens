@@ -1,3 +1,4 @@
+use super::disposition::Disposition;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -41,7 +42,7 @@ pub(crate) struct TestSelector {
 }
 
 impl TestSelector {
-    fn validate(&self) -> Result<()> {
+    pub(super) fn validate(&self) -> Result<()> {
         relative_path(&self.path)?;
         for value in [&self.package, &self.target, &self.name] {
             text(value)?;
@@ -102,6 +103,8 @@ pub(crate) struct Behavior {
 pub(crate) struct Manifest {
     pub(crate) version: u32,
     pub(crate) behaviors: Vec<Behavior>,
+    #[serde(default)]
+    pub(crate) dispositions: Vec<Disposition>,
 }
 
 impl Manifest {
@@ -115,6 +118,20 @@ impl Manifest {
                 behavior.id
             );
             behavior.validate()?;
+        }
+        let mut dispositions = BTreeSet::new();
+        for disposition in &self.dispositions {
+            ensure!(
+                dispositions.insert(&disposition.id),
+                "duplicate disposition {}",
+                disposition.id
+            );
+            ensure!(
+                ids.contains(&disposition.behavior),
+                "unknown disposition behavior {}",
+                disposition.behavior
+            );
+            disposition.validate()?;
         }
         Ok(())
     }

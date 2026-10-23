@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 pub(crate) fn config_schema() -> Value {
     json!({
         "type": "object", "additionalProperties": false, "required": ["manifest"],
+        "x-manifest-schema": manifest_schema(),
         "properties": {
             "manifest": {"type": "string", "minLength": 1, "description": "Project-relative version-1 testing policy TOML; automatically fingerprinted."},
             "evidence_inputs": {"type": "array", "items": {"type": "string", "minLength": 1}, "default": [], "description": "Project-relative requirement/support documents and non-Rust fixtures to fingerprint. Missing inputs make evidence partial."}
@@ -20,6 +21,8 @@ pub(crate) fn report_schema() -> Value {
             "manifest": {"type": ["string", "null"]},
             "execution_evidence": {"type": "string"},
             "limitations": strings(),
+            "candidates": {"type": "array", "items": {"type": "object", "required": ["candidate_id", "candidate_status", "declared"], "properties": {"declared": disposition_schema()}}},
+            "contextual_evidence": {"type": "array", "items": {"type": "object"}},
             "behaviors": {"type": "array", "items": {
                 "type": "object", "additionalProperties": false,
                 "required": ["declared", "observed", "status"],
@@ -45,6 +48,32 @@ fn selector_schema() -> Value {
     json!({"type": "object", "additionalProperties": false,
         "required": ["package", "target", "path", "name"],
         "properties": {"package": {"type": "string", "minLength": 1}, "target": {"type": "string", "minLength": 1}, "path": {"type": "string", "minLength": 1}, "name": {"type": "string", "minLength": 1}}
+    })
+}
+
+fn manifest_schema() -> Value {
+    json!({"type": "object", "additionalProperties": false, "required": ["version", "behaviors"],
+        "properties": {"version": {"const": 1}, "behaviors": {"type": "array", "items": behavior_schema()},
+            "dispositions": {"type": "array", "items": disposition_schema()}}
+    })
+}
+
+fn disposition_schema() -> Value {
+    json!({"type": "object", "additionalProperties": false,
+        "required": ["id", "behavior", "action", "tests", "reason", "reviewer", "review_revision", "preserved_risks", "estimated_effort_hours"],
+        "properties": {
+            "id": {"type": "string", "minLength": 1}, "behavior": {"type": "string", "minLength": 1},
+            "action": {"enum": ["consolidate", "low_value", "reduce_matrix", "retire_compatibility"]},
+            "tests": {"type": "array", "minItems": 1, "items": selector_schema()},
+            "reason": {"type": "string", "minLength": 1}, "reviewer": {"type": "string", "minLength": 1},
+            "review_revision": {"type": "string", "minLength": 1}, "preserved_risks": strings(),
+            "estimated_effort_hours": {"type": "number", "exclusiveMinimum": 0},
+            "support_decision": {"type": ["object", "null"], "additionalProperties": false,
+                "required": ["withdrawn", "document", "effective", "approved_by"],
+                "properties": {"withdrawn": {"type": "boolean"}, "document": {"type": "string", "minLength": 1},
+                    "effective": {"type": "string", "minLength": 1}, "approved_by": {"type": "string", "minLength": 1}}
+            }
+        }
     })
 }
 

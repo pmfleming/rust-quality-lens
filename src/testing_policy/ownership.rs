@@ -77,24 +77,11 @@ pub(super) fn review_behavior(
         .tests
         .iter()
         .map(|selector| {
-            let matches = tests
-                .iter()
-                .filter(|test| {
-                    test["package_name"] == selector.package
-                        && test["target_name"] == selector.target
-                        && test["path"] == selector.path
-                        && test["qualified_name"] == selector.name
-                })
-                .count();
+            let resolution = resolve(selector, tests);
             Observation {
                 test: selector.clone(),
-                resolution: match matches {
-                    0 => "unresolved",
-                    1 => "resolved",
-                    _ => "ambiguous",
-                }
-                .into(),
-                execution: if matches == 1 {
+                resolution: resolution.into(),
+                execution: if resolution == "resolved" {
                     execution.status_for(selector)
                 } else {
                     "unknown".into()
@@ -130,6 +117,23 @@ pub(super) fn review_behavior(
         declared: behavior,
         observed,
         status: status.into(),
+    }
+}
+
+pub(super) fn resolve(selector: &TestSelector, tests: &[Value]) -> &'static str {
+    match tests
+        .iter()
+        .filter(|test| {
+            test["package_name"] == selector.package
+                && test["target_name"] == selector.target
+                && test["path"] == selector.path
+                && test["qualified_name"] == selector.name
+        })
+        .count()
+    {
+        0 => "unresolved",
+        1 => "resolved",
+        _ => "ambiguous",
     }
 }
 

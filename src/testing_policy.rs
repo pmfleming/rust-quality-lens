@@ -1,4 +1,5 @@
 //! Declared risk ownership is separate from observed execution and inferred value.
+mod disposition;
 mod model;
 mod ownership;
 mod schema;
@@ -37,6 +38,10 @@ pub(crate) struct Review {
     manifest: Option<String>,
     execution_evidence: String,
     behaviors: Vec<BehaviorReview>,
+    #[serde(default)]
+    candidates: Vec<Value>,
+    #[serde(default)]
+    contextual_evidence: Vec<Value>,
     limitations: Vec<String>,
 }
 
@@ -53,6 +58,8 @@ pub(crate) fn review(
         manifest: None,
         execution_evidence: "not_requested".into(),
         behaviors: Vec::new(),
+        candidates: Vec::new(),
+        contextual_evidence: Vec::new(),
         limitations: vec![
             "Declarations are reviewed claims, not proof of behavior or boundary coverage.".into(),
             "Aggregate coverage and syntax cannot establish test-specific protection or redundancy.".into(),
@@ -75,6 +82,15 @@ pub(crate) fn review(
                         findings,
                     ));
                 }
+                review.candidates = disposition::candidates(
+                    config,
+                    settings,
+                    manifest.dispositions,
+                    &review.behaviors,
+                    tests,
+                    findings,
+                );
+                review.contextual_evidence = contextual_evidence(config, fingerprint);
             }
             Err(error) => {
                 review.status = "unavailable".into();
@@ -107,6 +123,34 @@ pub(super) fn finding(manifest: &str, behavior: &Behavior, rule: &str, message: 
     })
 }
 
+fn contextual_evidence(config: &LensConfig, fingerprint: &Value) -> Vec<Value> {
+    [
+        (
+            "clones.json",
+            "Text/AST similarity is not equivalent behavioral protection.",
+        ),
+        (
+            "coverage.json",
+            "Aggregate execution reach does not identify owners or assertion sensitivity.",
+        ),
+    ]
+    .into_iter()
+    .map(|(file, limitation)| {
+        let status = match crate::contracts::read_current(
+            &config.output_dir.join(file),
+            file,
+            fingerprint,
+        ) {
+            Ok(artifact) if artifact.current && artifact.complete => "current",
+            Ok(artifact) if !artifact.current => "stale",
+            Ok(_) => "partial",
+            Err(_) => "unavailable",
+        };
+        json!({"artifact": file, "status": status, "limitation": limitation})
+    })
+    .collect()
+}
+
 pub(crate) fn validate_report(value: &Value) -> Result<()> {
     // Old artifacts without this optional extension remain valid, not evaluated.
     if let Some(value) = value.get("testing_policy") {
@@ -123,6 +167,7 @@ pub(crate) fn validate_report(value: &Value) -> Result<()> {
                 .into_iter()
                 .map(|row| row.declared)
                 .collect(),
+            dispositions: Vec::new(),
         };
         manifest.validate()?;
     }

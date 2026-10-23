@@ -108,5 +108,47 @@ produce an unavailable/partial review; absent configuration preserves old behavi
 The manifest and `evidence_inputs` are automatically fingerprinted. Paths must be
 project-relative, without `..`; references in prose are not automatically fetched.
 
-Schemas are exposed by `config-schema` and `artifact-schema`. See
-[the implementation plan](testing-policy-plan.md) for delivery and acceptance criteria.
+Schemas are exposed by `config-schema` (including the `testing_policy` property's
+`x-manifest-schema`) and `artifact-schema`.
+
+## Consolidation and compatibility review
+
+Add explicit reviewed families to the manifest; syntax alone cannot nominate safe
+deletions. Each disposition names a behavior and exact tests, a reason, reviewer,
+review revision, preserved risks and estimated effort:
+
+```toml
+[[dispositions]]
+id = "checkout-overlap"
+behavior = "checkout"
+action = "consolidate"
+tests = [{package = "shop", target = "shop", path = "src/cart.rs", name = "tests::duplicate_checkout"}]
+reason = "The retained journey protects this same public behavior"
+reviewer = "checkout-maintainers"
+review_revision = "requirements-v1"
+preserved_risks = ["Focused transaction rollback test remains"]
+estimated_effort_hours = 2.0
+```
+
+Actions: `consolidate`, `low_value`, `reduce_matrix`, `retire_compatibility`.
+Low-value cases need no replacement; consolidation/matrix candidates require
+observed replacement execution. A declared primary owner or distinct-risk support
+cannot be recommended for removal without further risk review. Unknown selectors
+remain unresolved. Candidates are review-required even after prerequisites pass.
+
+Retirement also requires `[dispositions.support_decision]` with `withdrawn = true`,
+`document`, `effective` (support version/date) and `approved_by`. The document must
+exist in configured `evidence_inputs`. This is a maintainer declaration, not an
+independent interpretation of the decision or its effective version. Shared tests
+protecting another retained behavior still require distinct-risk review. No code
+or test is automatically changed.
+
+`data.testing_policy.candidates` lists replacement owners, prerequisites, declared
+removals and estimates. Within the consolidation queue, estimated registrations
+removed per hour prioritizes substantial families; protection gaps come first.
+Estimates are not observed deletions, a quality score or a quota. Fresh clone and
+coverage artifact references are contextual only, never proof of equivalence.
+Findings share existing review, policy and SARIF projection. Review-only rule IDs
+are not supported as blocking deletion rules.
+
+See [the implementation plan](testing-policy-plan.md) for acceptance criteria.

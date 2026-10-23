@@ -59,7 +59,8 @@ pub(crate) fn run_review(
     let (full_measurements, finding_snapshot) = measure_snapshot(&config, &context)?;
     let baseline_comparison =
         comparison::compare_file(&finding_snapshot, baseline_review.as_deref());
-    let measured_file_keys = measured_files.iter().map(path_key).collect();
+    // Include non-Rust policy/requirement changes in review output as well.
+    let measured_file_keys = changed_files.iter().map(path_key).collect();
     let measurements =
         scoped_measurements(&config.project_root, full_measurements, &measured_file_keys);
     let entrypoints = review_entrypoints(
@@ -113,7 +114,10 @@ fn measure_snapshot(
             && context.type_confidence()["complete"] == true
             && context.correctness_confidence()["complete"] == true
             && context.identity_resolution.complete
-            && context.snapshot.fingerprint["complete"] == true,
+            && context.snapshot.fingerprint["complete"] == true
+            && measurements
+                .iter()
+                .all(|payload| payload["measurement_confidence"]["complete"] != false),
     );
     Ok((measurements, snapshot))
 }

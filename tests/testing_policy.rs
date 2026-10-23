@@ -134,5 +134,98 @@ fn ownership_review_uses_real_execution_and_rejects_stale_claims() -> Result<()>
     let invalid = document(root.path(), "test_quality.json")?;
     assert_eq!(invalid["data"]["testing_policy"]["status"], "unavailable");
     assert_eq!(invalid["measurement_confidence"]["complete"], false);
+    consolidation_and_reporters(root.path())
+}
+
+fn disposition(action: &str) -> String {
+    format!(
+        r#"
+[[dispositions]]
+id = "redundant-family"
+behavior = "answer"
+action = "{action}"
+tests = [{{package = "ownership_fixture", target = "journey", path = "tests/journey.rs", name = "redundant"}}]
+reason = "Same public answer, no distinct risk"
+reviewer = "fixture-maintainer"
+review_revision = "fixture-v1"
+preserved_risks = ["Public contract remains owned by journey"]
+estimated_effort_hours = 0.5
+"#
+    )
+}
+
+fn candidate_status(root: &Path) -> Result<Value> {
+    run(root, &["measure", "test-quality"])?;
+    Ok(document(root, "test_quality.json")?["data"]["testing_policy"]["candidates"][0]["candidate_status"].clone())
+}
+
+fn consolidation_and_reporters(root: &Path) -> Result<()> {
+    fs::write(
+        root.join("tests/journey.rs"),
+        "#[test]\nfn journey() { assert_eq!(ownership_fixture::value(), 42); }\n#[test]\nfn redundant() { assert_eq!(ownership_fixture::value(), 42); }\n",
+    )?;
+    fs::write(
+        root.join("testing.toml"),
+        format!("{}{}", manifest(), disposition("consolidate")),
+    )?;
+    assert_eq!(candidate_status(root)?, "replacement_evidence_required");
+    run(root, &["measure", "correctness-run"])?;
+    assert_eq!(candidate_status(root)?, "value_review_candidate");
+    run(root, &["check"])?;
+    run(root, &["sarif"])?;
+    let policy = document(root, "policy_report.json")?;
+    let sarif: Value = serde_json::from_str(&fs::read_to_string(
+        root.join("target/analysis/rqlens.sarif"),
+    )?)?;
+    let warning = policy["test_quality_warnings"]
+        .as_array()
+        .context("warnings")?
+        .iter()
+        .find(|row| row["rule_id"] == "rust.testing.consolidation-review")
+        .context("candidate warning")?;
+    let exported = sarif["runs"][0]["results"]
+        .as_array()
+        .context("results")?
+        .iter()
+        .find(|row| row["ruleId"] == "rust.testing.consolidation-review")
+        .context("SARIF candidate")?;
+    assert_eq!(exported["properties"]["rqlens_finding"], *warning);
+    assert_eq!(policy["passed"], true);
+
+    // Low-value uniqueness does not require replacement execution.
+    fs::write(
+        root.join("testing.toml"),
+        format!("{}{}", manifest(), disposition("low_value")),
+    )?;
+    assert_eq!(candidate_status(root)?, "value_review_candidate");
+    // A primary owner is not safe to delete just because a disposition says so.
+    fs::write(
+        root.join("testing.toml"),
+        format!(
+            "{}{}",
+            manifest(),
+            disposition("low_value").replace("name = \"redundant\"", "name = \"journey\"")
+        ),
+    )?;
+    assert_eq!(candidate_status(root)?, "distinct_risk_review_required");
+
+    let retirement = format!("{}{}", manifest(), disposition("retire_compatibility"));
+    fs::write(root.join("testing.toml"), &retirement)?;
+    assert_eq!(candidate_status(root)?, "support_review_required");
+    fs::write(
+        root.join("support.md"),
+        "Fixture support withdrawn at fixture-v2 by fixture-maintainer.\n",
+    )?;
+    fs::write(
+        root.join("rqlens.toml"),
+        "[rust]\nidentity_resolution = 'disabled'\n[testing_policy]\nmanifest = 'testing.toml'\nevidence_inputs = ['support.md']\n",
+    )?;
+    fs::write(
+        root.join("testing.toml"),
+        format!(
+            "{retirement}\n[dispositions.support_decision]\nwithdrawn = true\ndocument = 'support.md'\neffective = 'fixture-v2'\napproved_by = 'fixture-maintainer'\n"
+        ),
+    )?;
+    assert_eq!(candidate_status(root)?, "retirement_review");
     Ok(())
 }

@@ -20,3 +20,16 @@ run is unconfigured at this stage; it does not certify behavior ownership.
 Limits: legacy execution cannot attribute duplicate qualified names across targets;
 ownership explicitly abstains. Manifest scope remains a declaration, not automatic
 cross-platform certification. Full self-pilot and fault sensitivity follow later.
+
+## Stage 3 — reviewed consolidation
+
+Added explicit value/matrix/consolidation/retirement dispositions, conservative
+protection of other declared owners, support-decision inputs, contextual clone/
+coverage references and deterministic estimate-based ordering within the review
+queue. Non-Rust manifest changes now retain measurements in changed-code review.
+No semantic duplicate detector or automatic deletion was introduced.
+
+The primary CLI journey now exercises replacement prerequisites, low-value cases,
+protected owners, explicit support withdrawal and exact policy/SARIF finding
+agreement. Focused CLI tests, strict Clippy, formatting, diff checks and a self
+`measure test-quality` run passed. Broad validation is repeated in the self-pilot.
