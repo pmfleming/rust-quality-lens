@@ -61,6 +61,15 @@ Fuzzing, Miri, and sanitizers add behavioral reachability evidence. Their
 reports identify the target or sanitizer that ran; they do not prove that all
 unsafe code is sound.
 
+### Testing value
+
+Follow the [testing policy](testing-policy.md): assign important behavior a primary
+owner, retain distinct-risk protections, and review low-value or overlapping tests
+for removal. More tests or coverage is not inherently better. Higher-level tests
+do not cover implementations replaced by doubles. Compatibility retirement needs
+an explicit support decision. Existing risk formulas and coverage gates remain
+unchanged; intentional coverage loss requires review, not silent suppression.
+
 ### Heuristic and contextual evidence
 
 - Coverage is aggregate execution evidence from `cargo-llvm-cov`. It does not

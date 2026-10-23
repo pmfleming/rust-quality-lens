@@ -139,7 +139,7 @@ fn task_definitions() -> Vec<TaskDefinition> {
             category: "correctness",
             subcategory: "tests",
             title: "Test Quality",
-            description: "Reports assertion, system-under-test call, and ignored-test evidence.",
+            description: "Reviews test evidence and declared behavior ownership; syntax hints and coverage do not establish test value.",
         },
         TaskDefinition {
             tool: MeasureTool::ApiHealth,
