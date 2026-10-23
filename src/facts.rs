@@ -369,22 +369,7 @@ impl RunContext {
         } else {
             helpers::rust_facts_for_files(config, &correctness_files, &targets)?.into()
         };
-        let explicit_inventory = tools.contains(&MeasureTool::CompilerInventory);
-        let compiler_requested = explicit_inventory
-            || (config.compiler_inventory_driver.is_some()
-                && tools.contains(&MeasureTool::TypeHealth));
-        let architecture_requested = tools
-            .iter()
-            .any(|tool| config.compiler_architecture_for(tool));
-        let capture_architecture = architecture_requested || explicit_inventory;
-        let inventory = (compiler_requested || architecture_requested).then(|| {
-            Arc::new(crate::compiler_inventory::Inventory::collect(
-                config,
-                capture_architecture,
-            ))
-        });
-        let compiler_inventory = inventory.as_ref().filter(|_| compiler_requested).cloned();
-        let compiler_architecture = inventory.filter(|_| architecture_requested);
+        let (compiler_inventory, compiler_architecture) = compiler_inventories(config, tools);
         Ok(Self {
             snapshot,
             source_files,
@@ -399,6 +384,30 @@ impl RunContext {
             compiler_architecture,
         })
     }
+}
+
+type CompilerInventory = Option<Arc<crate::compiler_inventory::Inventory>>;
+
+fn compiler_inventories(
+    config: &LensConfig,
+    tools: &[MeasureTool],
+) -> (CompilerInventory, CompilerInventory) {
+    let explicit = tools.contains(&MeasureTool::CompilerInventory);
+    let types = explicit
+        || (config.compiler_inventory_driver.is_some() && tools.contains(&MeasureTool::TypeHealth));
+    let architecture = tools
+        .iter()
+        .any(|tool| config.compiler_architecture_for(tool));
+    let inventory = (types || architecture).then(|| {
+        Arc::new(crate::compiler_inventory::Inventory::collect(
+            config,
+            architecture || explicit,
+        ))
+    });
+    (
+        inventory.as_ref().filter(|_| types).cloned(),
+        inventory.filter(|_| architecture),
+    )
 }
 
 fn resolve_identities(

@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::{collections::BTreeMap, fs, path::Path, process::Command};
+use std::{collections::BTreeMap, fs, path::Path};
+mod support;
+use support::measure;
 
 #[path = "compiler_architecture/cross_crate.rs"]
 mod cross_crate;
@@ -73,21 +75,6 @@ fn configure(root: &Path, driver: &Path) -> Result<()> {
         ),
     )?;
     Ok(())
-}
-
-fn measure(root: &Path, tool: &str, artifact: &str) -> Result<Value> {
-    let output = Command::new(env!("CARGO_BIN_EXE_rqlens"))
-        .args(["measure", tool, "--config"])
-        .arg(root.join("rqlens.toml"))
-        .output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(serde_json::from_slice(&fs::read(
-        root.join("target/analysis").join(artifact),
-    )?)?)
 }
 
 fn observed_edges(capture: &Value) -> Result<Vec<(String, String, bool)>> {

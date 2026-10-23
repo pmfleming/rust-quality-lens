@@ -609,6 +609,39 @@ impl LensConfig {
 
     pub(crate) fn load(path: Option<PathBuf>) -> Result<Self> {
         let (raw, config_dir) = read_config(path)?;
+        Self::from_raw(raw, config_dir)
+    }
+
+    /// Calibration deliberately uses defaults, not a project's local policy.
+    /// Share normal path/metadata preparation so its snapshot has the same guarantees.
+    pub(crate) fn for_sources(
+        name: &str,
+        root: PathBuf,
+        sources: Vec<PathBuf>,
+        output: PathBuf,
+        helper: &Path,
+    ) -> Result<Self> {
+        let raw = RawConfig {
+            project_name: Some(name.into()),
+            project_root: Some(root.clone()),
+            source_roots: Some(
+                sources
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect(),
+            ),
+            output_dir: Some(absolutize(output)),
+            rust: Some(RawRustConfig {
+                helper_manifest: Some(helper.to_path_buf()),
+                identity_timeout_seconds: Some(90),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        Self::from_raw(raw, root)
+    }
+
+    fn from_raw(raw: RawConfig, config_dir: PathBuf) -> Result<Self> {
         let project_root =
             resolve_config_path(raw.project_root.unwrap_or_else(|| ".".into()), &config_dir);
         let project_root = fs::canonicalize(&project_root).unwrap_or(project_root);

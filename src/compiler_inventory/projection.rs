@@ -1,9 +1,9 @@
-use super::{CompilerContext, ImplRecord, Inventory, Origin, Profile, TypeRecord, definition};
+use super::{CompilerContext, ImplRecord, Origin, Profile, TypeRecord, definition};
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
-impl Inventory {
+impl super::Inventory {
     /// Replace the syntax-only type projection, never append it: a compiler
     /// definition is the unit of identity, not an authored name or macro name.
     pub(crate) fn type_rows(&self, fingerprint_complete: bool) -> Value {

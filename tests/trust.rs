@@ -268,6 +268,22 @@ fn requested_but_disabled_or_missing_semantics_are_partial() -> anyhow::Result<(
                 .any(|reason| reason.as_str().unwrap_or_default().contains("semantic"))
         );
     }
+    let artifact = root.path().join("analysis/locality_metrics.json");
+    let previous = fs::read(&artifact)?;
+    fs::write(
+        root.path().join("rqlens.toml"),
+        "source_roots=['src']\noutput_dir='analysis'\n[rust]\nidentity_resolution='required'\nrust_analyzer='/rqlens-missing-test-analyzer'\n",
+    )?;
+    assert!(
+        !invoke(root.path(), &["measure", "locality"])?
+            .status
+            .success()
+    );
+    assert_eq!(
+        fs::read(artifact)?,
+        previous,
+        "failed required analysis must not replace published evidence"
+    );
     Ok(())
 }
 

@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path};
+mod support;
+use support::measure;
 
 fn fixture(driver: Option<&Path>) -> Result<tempfile::TempDir> {
     let root = tempfile::tempdir()?;
@@ -29,21 +31,6 @@ fn configure(root: &Path, driver: Option<&Path>, feature: bool) -> Result<()> {
         ),
     )?;
     Ok(())
-}
-
-fn measure(root: &Path, tool: &str, artifact: &str) -> Result<Value> {
-    let output = Command::new(env!("CARGO_BIN_EXE_rqlens"))
-        .args(["measure", tool, "--config"])
-        .arg(root.join("rqlens.toml"))
-        .output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(serde_json::from_slice(&fs::read(
-        root.join("target/analysis").join(artifact),
-    )?)?)
 }
 
 #[test]

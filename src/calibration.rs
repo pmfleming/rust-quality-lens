@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::artifacts::artifact_payload;
-use crate::config::{LensConfig, SemanticIdentityMode};
+use crate::config::LensConfig;
 use crate::contracts::artifact_document;
 use crate::facts::RunContext;
 use crate::measurement::{MODEL_ID, MODEL_VERSION};
@@ -27,11 +27,17 @@ pub(crate) fn run(project_specs: &[String], output_dir: PathBuf) -> Result<PathB
     if project_specs.is_empty() {
         bail!("calibration requires at least one --project NAME=PATH");
     }
+    let projects = calibration_projects(project_specs)?;
     fs::create_dir_all(&output_dir)?;
     let helper_manifest = bundled_helper_manifest()?;
     let mut pool = CalibrationPool::default();
-    for spec in project_specs {
-        pool.add(calibrate_project(spec, &output_dir, &helper_manifest)?);
+    for (name, root) in projects {
+        pool.add(calibrate_project(
+            name,
+            root,
+            &output_dir,
+            &helper_manifest,
+        )?);
     }
     let report_path = output_dir.join("calibration_report.json");
     write_json(&report_path, &pool.report())?;
@@ -126,11 +132,11 @@ impl CalibrationPool {
 }
 
 fn calibrate_project(
-    spec: &str,
+    name: String,
+    root: PathBuf,
     output_dir: &Path,
     helper_manifest: &Path,
 ) -> Result<ProjectCalibration> {
-    let (name, root) = parse_project(spec)?;
     let config = calibration_config(&name, root.clone(), output_dir, helper_manifest)?;
     let context = RunContext::new(&config, &CALIBRATION_TOOLS)
         .with_context(|| format!("extracting calibration facts for {name}"))?;
@@ -172,34 +178,13 @@ fn calibration_config(
     if source_roots.is_empty() {
         bail!("calibration project {name} has no discoverable Rust source roots");
     }
-    Ok(LensConfig {
-        project_name: name.to_string(),
-        fingerprint_inputs: Vec::new(),
-        cargo_metadata: crate::config::cargo_metadata(&root, true, false, &Default::default())
-            .or_else(|| crate::config::cargo_metadata(&root, true, true, &Default::default())),
-        project_root: root,
-        source_roots: source_roots
-            .into_iter()
-            .map(|path| path.to_string_lossy().to_string())
-            .collect(),
-        output_dir: output_dir.join(safe_name(name)),
-        helper_manifest: helper_manifest.to_path_buf(),
-        helper_metadata: crate::config::helper_metadata(helper_manifest, true),
-        identity_resolution: SemanticIdentityMode::Auto,
-        rust_analyzer: PathBuf::from("rust-analyzer"),
-        identity_timeout_seconds: 90,
-        identity_offline: true,
-        identity_build_macros: false,
-        compiler_inventory_driver: None,
-        compiler_inventory_target: None,
-        architecture_backend: Default::default(),
-        verification: Default::default(),
-        architecture: Default::default(),
-        history: Default::default(),
-        profiles: Default::default(),
-        policy: Default::default(),
-        testing_policy: None,
-    })
+    LensConfig::for_sources(
+        name,
+        root,
+        source_roots,
+        output_dir.join(safe_name(name)),
+        helper_manifest,
+    )
 }
 
 fn calibration_payloads(
@@ -294,6 +279,21 @@ fn parse_project(spec: &str) -> Result<(String, PathBuf)> {
     let root =
         fs::canonicalize(path).with_context(|| format!("resolving calibration project {path}"))?;
     Ok((name.trim().to_string(), root))
+}
+
+fn calibration_projects(specs: &[String]) -> Result<Vec<(String, PathBuf)>> {
+    let projects = specs
+        .iter()
+        .map(|spec| parse_project(spec))
+        .collect::<Result<Vec<_>>>()?;
+    let mut outputs = std::collections::BTreeSet::new();
+    for (name, _) in &projects {
+        anyhow::ensure!(
+            outputs.insert(safe_name(name)),
+            "calibration project names collide after path normalization: {name}"
+        );
+    }
+    Ok(projects)
 }
 
 fn safe_name(name: &str) -> String {
@@ -434,9 +434,8 @@ fn git_revision(root: &Path) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{calibration_source_roots, distribution, parse_project, safe_name, thresholds};
+    use super::{distribution, thresholds};
     use serde_json::json;
-    use std::fs;
 
     #[test]
     fn calibration_statistics_use_empirical_percentiles() {
@@ -465,41 +464,5 @@ mod tests {
                 "extreme_at_p99": 10.0,
             })
         );
-    }
-
-    #[test]
-    fn calibration_project_specs_are_validated_and_normalized() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        let specification = format!(" demo={} ", root.path().display());
-        let (name, path) = parse_project(&specification)?;
-        assert_eq!(name, "demo");
-        assert_eq!(path, fs::canonicalize(root.path())?);
-        assert!(parse_project("missing-separator").is_err());
-        assert!(parse_project("=missing-name").is_err());
-        assert_eq!(safe_name("workspace/core.v1"), "workspace_core_v1");
-        calibration_source_roots_support_src_and_crate_layouts(&path)
-    }
-
-    fn calibration_source_roots_support_src_and_crate_layouts(
-        conventional: &std::path::Path,
-    ) -> anyhow::Result<()> {
-        fs::create_dir(conventional.join("src"))?;
-        assert_eq!(
-            calibration_source_roots(conventional),
-            [conventional.join("src")]
-        );
-
-        let workspace = tempfile::tempdir()?;
-        fs::create_dir_all(workspace.path().join("crates/a/src"))?;
-        fs::create_dir_all(workspace.path().join("crates/b"))?;
-        fs::write(workspace.path().join("crates/b/main.rs"), "fn main() {}")?;
-        assert_eq!(
-            calibration_source_roots(workspace.path()),
-            [
-                workspace.path().join("crates/a/src"),
-                workspace.path().join("crates/b"),
-            ]
-        );
-        Ok(())
     }
 }

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::{fs, process::Command};
+mod support;
 
 fn measure(source: &str) -> Result<Value> {
     let root = tempfile::tempdir()?;
@@ -24,30 +25,8 @@ fn measure(source: &str) -> Result<Value> {
         &config,
         "source_roots=['src']\n[rust]\nidentity_resolution='disabled'\n",
     )?;
-    let output = Command::new(env!("CARGO_BIN_EXE_rqlens"))
-        .args(["measure", "type-health", "--config"])
-        .arg(&config)
-        .output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let document = serde_json::from_slice(&fs::read(
-        root.path().join("target/analysis/type_health.json"),
-    )?)?;
-    let output = Command::new(env!("CARGO_BIN_EXE_rqlens"))
-        .args(["measure", "hotspots", "--config"])
-        .arg(&config)
-        .output()?;
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let syntax: Value = serde_json::from_slice(&fs::read(
-        root.path().join("target/analysis/hotspots.json"),
-    )?)?;
+    let document = support::measure(root.path(), "type-health", "type_health.json")?;
+    let syntax = support::measure(root.path(), "hotspots", "hotspots.json")?;
     // Owner uncertainty belongs to type evidence, not successfully parsed bodies.
     assert_eq!(syntax["measurement_confidence"]["complete"], true);
     Ok(document)

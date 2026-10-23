@@ -67,7 +67,13 @@ fn fixture_root(name: &str) -> anyhow::Result<PathBuf> {
 fn write_files(root: &Path, files: &[(&str, &str)]) -> anyhow::Result<()> {
     files
         .iter()
-        .try_for_each(|(path, text)| fs::write(root.join(path), text))
+        .try_for_each(|(path, text)| {
+            let path = root.join(path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(path, text)
+        })
         .context("fixture files should be written")?;
 
     Ok(())
@@ -369,6 +375,93 @@ fn node_data<'a>(payload: &'a Value, id: &str) -> anyhow::Result<&'a Value> {
         .map(|node| &node["data"])
         .find(|data| data["id"] == id || data["module_key"] == id)
         .context("node should exist")
+}
+
+#[test]
+fn calibration_publishes_real_corpus_evidence_without_overwriting_colliding_projects()
+-> anyhow::Result<()> {
+    let root = fixture_root("calibration-journey")?;
+    write_files(
+        &root,
+        &[
+            (
+                "single/Cargo.toml",
+                "[package]\nname='single'\nversion='0.1.0'\nedition='2024'\n[workspace]\n",
+            ),
+            (
+                "single/src/lib.rs",
+                "pub fn value(n: u8) -> u8 { if n > 0 { n } else { 1 } }",
+            ),
+            (
+                "workspace/Cargo.toml",
+                "[workspace]\nmembers=['crates/a','crates/b']\nresolver='3'\n",
+            ),
+            (
+                "workspace/crates/a/Cargo.toml",
+                "[package]\nname='a'\nversion='0.1.0'\nedition='2024'\n",
+            ),
+            (
+                "workspace/crates/a/src/lib.rs",
+                "pub fn value() -> u8 { 1 }",
+            ),
+            (
+                "workspace/crates/b/Cargo.toml",
+                "[package]\nname='b'\nversion='0.1.0'\nedition='2024'\n[[bin]]\nname='b'\npath='main.rs'\n",
+            ),
+            ("workspace/crates/b/main.rs", "fn main() {}"),
+        ],
+    )?;
+    let output = root.join("reports");
+    let output_arg = output.to_str().context("output path")?;
+    let single = format!(" single={} ", root.join("single").display());
+    let workspace = format!("workspace/core.v1={}", root.join("workspace").display());
+    run(&[
+        "calibrate",
+        "--project",
+        &single,
+        "--project",
+        &workspace,
+        "--output-dir",
+        output_arg,
+    ])?;
+    let report = read_document(output.join("calibration_report.json"))?;
+    assert_eq!(report["project_count"], 2);
+    assert_eq!(
+        report["pooled_distributions"]["function_hotspot_score"]["count"],
+        3
+    );
+    assert_eq!(report["risk_model_v5_candidate"]["status"], "deferred");
+    for name in ["single", "workspace_core_v1"] {
+        let measured = read_document(output.join(name).join("hotspots.json"))?;
+        assert_eq!(measured["measurement_confidence"]["complete"], true);
+    }
+    rejected_calibration_preserves_report(&root, output_arg, &report)
+}
+
+fn rejected_calibration_preserves_report(
+    root: &Path,
+    output: &str,
+    report: &Value,
+) -> anyhow::Result<()> {
+    for specs in [
+        vec!["missing-separator".to_string()],
+        vec![
+            format!("one/a={}", root.join("single").display()),
+            format!("one_a={}", root.join("workspace").display()),
+        ],
+    ] {
+        let mut command = Command::new(rqlens());
+        command.args(["calibrate", "--output-dir", output]);
+        for spec in specs {
+            command.args(["--project", &spec]);
+        }
+        assert!(!command.output()?.status.success());
+        assert_eq!(
+            read_document(Path::new(output).join("calibration_report.json"))?,
+            *report
+        );
+    }
+    Ok(())
 }
 
 #[test]

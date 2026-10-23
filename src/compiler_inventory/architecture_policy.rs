@@ -1,4 +1,4 @@
-use super::{Inventory, architecture_graph::Graph, capture, validate_report};
+use super::{architecture_graph::Graph, capture, validate_report};
 use crate::{
     architecture::dependency_violation,
     config::{ArchitectureConfig, PolicyRuleLevel},
@@ -6,7 +6,7 @@ use crate::{
 use anyhow::{Result, ensure};
 use serde_json::{Value, json};
 
-impl Inventory {
+impl super::Inventory {
     pub(crate) fn architecture_policy(
         &self,
         rules: &ArchitectureConfig,
@@ -99,7 +99,7 @@ pub(crate) fn validate_architecture_policy(
     );
     let wire = &value["compiler_inventory"];
     validate_report(wire)?;
-    let inventory = Inventory {
+    let inventory = super::Inventory {
         profiles: serde_json::from_value(wire["profiles"].clone())?,
         expected_contexts: serde_json::from_value(wire["expected_contexts"].clone())?,
         reasons: serde_json::from_value(wire["capture_failures"].clone())?,

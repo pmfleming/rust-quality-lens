@@ -6,7 +6,7 @@ source_roots = [
     "tests/cli.rs", "tests/compiler_inventory.rs", "tests/source_expansion.rs",
     "tests/trust.rs", "tests/profiles.rs", "tests/lexical_ownership.rs",
     "tests/compiler_architecture.rs", "tests/compiler_architecture",
-    "tests/testing_policy.rs", "tests/testing_policy",
+    "tests/testing_policy.rs", "tests/testing_policy", "tests/support",
 ]
 output_dir = "target/analysis"
 

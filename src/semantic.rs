@@ -17,7 +17,7 @@ mod definitions;
 pub(crate) mod expansion;
 use definitions::{DefinitionIndex, resolved_definitions};
 
-const CACHE_VERSION: u64 = 16;
+const CACHE_VERSION: u64 = 17;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct IdentityResolutionSummary {
@@ -919,11 +919,6 @@ fn detached_rust_project(config: &LensConfig, facts: &[FileFacts]) -> Result<Opt
     } else {
         roots
     };
-    let dependency_roots = roots
-        .iter()
-        .enumerate()
-        .map(|(index, fact)| (index, fact.package_name.clone(), fact.target_kind.clone()))
-        .collect::<Vec<_>>();
     let target_cfgs = rustc_cfgs(&config.project_root);
     let crates = roots
         .iter()
@@ -931,16 +926,13 @@ fn detached_rust_project(config: &LensConfig, facts: &[FileFacts]) -> Result<Opt
         .map(|(index, fact)| {
             let mut cfgs = target_cfgs.clone();
             cfgs.extend(feature_cfgs(config, &fact.path));
-            let mut seen_packages = std::collections::BTreeSet::new();
-            let deps = dependency_roots
-                .iter()
-                .filter(|(candidate, _, _)| *candidate != index)
-                .filter(|(_, package, kind)| {
-                    package != &fact.package_name || (fact.target_kind != "lib" && kind == "lib")
-                })
-                .filter(|(_, package, _)| seen_packages.insert(package.clone()))
-                .map(|(candidate, package, _)| {
-                    json!({"crate": candidate, "name": package.replace('-', "_")})
+            // Executables are not library dependencies. Use the declared library
+            // target name; Cargo packages can override their default crate name.
+            let deps = roots
+                .iter().enumerate()
+                .filter(|(candidate, root)| *candidate != index && root.target_kind == "lib")
+                .map(|(candidate, root)| {
+                    json!({"crate": candidate, "name": root.target_name.replace('-', "_")})
                 })
                 .collect::<Vec<_>>();
             json!({
@@ -1368,29 +1360,6 @@ mod tests {
     }
 
     #[test]
-    fn required_mode_rejects_an_unavailable_analyzer() -> anyhow::Result<()> {
-        let root = tempfile::tempdir()?;
-        let mut config = required_config(root.path(), "semantic-test")?;
-        config.rust_analyzer = root.path().join("missing-rust-analyzer");
-        config.identity_timeout_seconds = 1;
-        let source_path = root.path().join("src/lib.rs").to_string_lossy().to_string();
-        let mut fact = FileFacts::test_fact(&source_path, "lib");
-        fact.graph
-            .dependency_references
-            .push(DependencyReferenceFact {
-                raw_path: "crate::domain".to_string(),
-                line: 1,
-                column: 0,
-            });
-        let error = match resolve(&config, &mut [fact]) {
-            Ok(_) => panic!("required mode must fail"),
-            Err(error) => error,
-        };
-        assert!(error.to_string().contains("required but incomplete"));
-        Ok(())
-    }
-
-    #[test]
     fn detached_project_resolves_and_caches_local_definitions() -> anyhow::Result<()> {
         if crate::command_runner::checked_output(
             Command::new("rust-analyzer").arg("--version"),
@@ -1412,8 +1381,8 @@ mod tests {
         let library_path = root.path().join("src/lib.rs").to_string_lossy().to_string();
         let mut library = FileFacts::test_fact(&library_path, "lib");
         library.package_name = "semantic-fixture".to_string();
-        library.target_name = "semantic_fixture".to_string();
-        library.module_id = "semantic-fixture::semantic_fixture::lib".to_string();
+        library.target_name = "public_api".to_string();
+        library.module_id = "semantic-fixture::public_api::lib".to_string();
         library.target_kind = "lib".to_string();
         library
             .graph
@@ -1430,9 +1399,9 @@ mod tests {
             .to_string();
         let mut domain = FileFacts::test_fact(&domain_path, "domain");
         domain.package_name = "semantic-fixture".to_string();
-        domain.target_name = "semantic_fixture".to_string();
-        domain.module_id = "semantic-fixture::semantic_fixture::domain".to_string();
-        let body = "fn main() { semantic_fixture::run(); }\n";
+        domain.target_name = "public_api".to_string();
+        domain.module_id = "semantic-fixture::public_api::domain".to_string();
+        let body = "fn main() { public_api::run(); }\n";
         let main_path = root.path().join("src/main.rs");
         fs::write(&main_path, body)?;
         let mut binary = FileFacts::test_fact(&main_path.to_string_lossy(), "main");
@@ -1444,7 +1413,7 @@ mod tests {
             .graph
             .dependency_references
             .push(DependencyReferenceFact {
-                raw_path: "semantic_fixture::run".into(),
+                raw_path: "public_api::run".into(),
                 line: 1,
                 column: body.find("run").context("call position")?,
             });
@@ -1457,13 +1426,13 @@ mod tests {
             facts[0].graph.resolved_dependencies[0]
                 .symbol_identity
                 .as_deref(),
-            Some("semantic-fixture::semantic_fixture::domain::go")
+            Some("semantic-fixture::public_api::domain::go")
         );
         assert_eq!(
             facts[2].graph.resolved_dependencies[0]
                 .target_module_id
                 .as_deref(),
-            Some("semantic-fixture::semantic_fixture::lib")
+            Some("semantic-fixture::public_api::lib")
         );
         let second = resolve(&config, &mut facts)?;
         assert!(second.cache_hit);

@@ -83,33 +83,22 @@ pub(crate) fn run_check(
         })
         .filter(|evaluation| evaluation["level"] == "error")
         .count();
-    let mut waived_findings = practices.waived;
-    waived_findings.extend(reliability.waived);
-    waived_findings.extend(architecture.waived);
-    waived_findings.extend(test_quality.waived);
-    waived_findings.extend(external.waived);
+    let waived_findings = classified
+        .iter()
+        .flat_map(|group| &group.waived)
+        .collect::<Vec<_>>();
     let expired_waivers = config.policy.expired_waivers();
     let current_map = documents.get("map.json").map(artifact_payload);
     let threshold_violations = current_map
         .map(|map| threshold_violations(map, max_total_score))
         .unwrap_or_default();
-    let regression = if inputs.status["map.json"].status == InputStatus::Available {
-        match regression_evidence(
-            config,
-            documents,
-            current_map,
-            baseline.as_deref(),
-            max_regression,
-        ) {
-            Ok(evidence) => evidence,
-            Err(error) => {
-                input_failures.push(json!({"policy": "regression", "artifact": "baseline", "status": "incompatible", "reason": format!("{error:#}")}));
-                RegressionEvidence::default()
-            }
-        }
-    } else {
-        RegressionEvidence::default()
-    };
+    let regression = checked_regression(
+        config,
+        &inputs,
+        baseline.as_deref(),
+        max_regression,
+        &mut input_failures,
+    );
 
     if fail_on.contains(&FailPolicy::Regression) {
         input_failures.extend(regression.evidence_deltas.iter()
@@ -153,17 +142,17 @@ pub(crate) fn run_check(
         "artifact_status": inputs.status,
         "input_failures": input_failures,
         "test_failures": test_failures,
+        "practice_evidence": practice_projection.evidence,
         "practice_failures": practices.errors,
         "practice_warnings": practices.warnings,
-        "practice_evidence": practice_projection.evidence,
         "reliability_findings": reliability.errors,
         "reliability_warnings": reliability.warnings,
-        "reliability_out_of_scope": reliability.out_of_scope,
-        "source_evidence": crate::findings::SOURCE_FILES.iter().map(|(file, _)| (*file, documents.get(*file))).collect::<BTreeMap<_, _>>(),
         "architecture_violations": architecture.errors,
         "architecture_warnings": architecture.warnings,
         "test_quality_findings": test_quality.errors,
         "test_quality_warnings": test_quality.warnings,
+        "reliability_out_of_scope": reliability.out_of_scope,
+        "source_evidence": crate::findings::SOURCE_FILES.iter().map(|(file, _)| (*file, documents.get(*file))).collect::<BTreeMap<_, _>>(),
         "operational_failures": operational_failures,
         "external_findings": external.active,
         "external_evidence_reasons": external_evidence.reasons,
@@ -188,6 +177,32 @@ pub(crate) fn run_check(
         );
     }
     Ok(())
+}
+
+fn checked_regression(
+    config: &LensConfig,
+    inputs: &inputs::Inputs,
+    baseline: Option<&Path>,
+    maximum: f64,
+    failures: &mut Vec<Value>,
+) -> RegressionEvidence {
+    if inputs.status["map.json"].status != InputStatus::Available {
+        return RegressionEvidence::default();
+    }
+    let documents = &inputs.documents;
+    match regression_evidence(
+        config,
+        documents,
+        documents.get("map.json").map(artifact_payload),
+        baseline,
+        maximum,
+    ) {
+        Ok(evidence) => evidence,
+        Err(error) => {
+            failures.push(json!({"policy": "regression", "artifact": "baseline", "status": "incompatible", "reason": format!("{error:#}")}));
+            RegressionEvidence::default()
+        }
+    }
 }
 
 fn external_input_failures(config: &LensConfig, reasons: &[String]) -> Vec<Value> {
