@@ -200,6 +200,10 @@ fn definition<'a>(ids: &mut BTreeSet<&'a str>, id: &'a str, origin: &Origin) -> 
         !id.is_empty() && ids.insert(id),
         "duplicate or empty compiler definition identity"
     );
+    validate_origin(origin)
+}
+
+fn validate_origin(origin: &Origin) -> Result<()> {
     if let Some(location) = &origin.location {
         ensure!(
             location.path.is_absolute()

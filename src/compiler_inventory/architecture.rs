@@ -1,5 +1,5 @@
 //! Versioned compiler architecture observations, distinct from type inventory.
-use super::{Origin, definition};
+use super::{Origin, definition, validate_origin};
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -91,6 +91,21 @@ impl Capture {
                 )),
             "unknown compiler infrastructure exclusion"
         );
+        let modules = self.validate_module_tree()?;
+        let declarations = self.validate_declarations(&modules)?;
+        for reference in &self.references {
+            reference.validate(&declarations, &self.crate_id)?;
+        }
+        ensure!(
+            self.covered_categories
+                .iter()
+                .all(|kind| CATEGORIES.contains(&kind.as_str())),
+            "unknown architecture traversal category"
+        );
+        Ok(())
+    }
+
+    fn validate_module_tree(&self) -> Result<BTreeSet<&str>> {
         let mut ids = BTreeSet::new();
         for module in &self.modules {
             definition(&mut ids, &module.id, &module.origin)?;
@@ -120,7 +135,10 @@ impl Capture {
                 cursor = parents[id];
             }
         }
-        let modules = ids;
+        Ok(ids)
+    }
+
+    fn validate_declarations(&self, modules: &BTreeSet<&str>) -> Result<BTreeSet<&str>> {
         let mut declarations = BTreeSet::new();
         for declaration in &self.declarations {
             definition(&mut declarations, &declaration.id, &declaration.origin)?;
@@ -129,43 +147,7 @@ impl Capture {
                 "declaration has no module owner"
             );
         }
-        for reference in &self.references {
-            ensure!(
-                declarations.contains(reference.source_id.as_str()),
-                "reference has no source declaration"
-            );
-            definition(&mut BTreeSet::new(), "reference", &reference.origin)?;
-            match &reference.target {
-                Target::Local { declaration_id } => ensure!(
-                    declarations.contains(declaration_id.as_str()),
-                    "dangling local reference target"
-                ),
-                Target::External {
-                    crate_id,
-                    crate_name,
-                    definition_id,
-                    module_id,
-                    ..
-                } => ensure!(
-                    !crate_id.is_empty()
-                        && !crate_name.is_empty()
-                        && !definition_id.is_empty()
-                        && !module_id.is_empty()
-                        && crate_id != &self.crate_id,
-                    "invalid external reference identity"
-                ),
-                Target::Unknown { reason } => {
-                    ensure!(!reason.is_empty(), "unknown reference needs a reason")
-                }
-            }
-        }
-        ensure!(
-            self.covered_categories
-                .iter()
-                .all(|kind| CATEGORIES.contains(&kind.as_str())),
-            "unknown architecture traversal category"
-        );
-        Ok(())
+        Ok(declarations)
     }
 
     pub(crate) fn missing_evidence(&self) -> Vec<String> {
@@ -195,6 +177,40 @@ impl Capture {
     }
 }
 
+impl Reference {
+    fn validate(&self, declarations: &BTreeSet<&str>, owner_crate: &str) -> Result<()> {
+        ensure!(
+            declarations.contains(self.source_id.as_str()),
+            "reference has no source declaration"
+        );
+        validate_origin(&self.origin)?;
+        match &self.target {
+            Target::Local { declaration_id } => ensure!(
+                declarations.contains(declaration_id.as_str()),
+                "dangling local reference target"
+            ),
+            Target::External {
+                crate_id,
+                crate_name,
+                definition_id,
+                module_id,
+                ..
+            } => ensure!(
+                !crate_id.is_empty()
+                    && !crate_name.is_empty()
+                    && !definition_id.is_empty()
+                    && !module_id.is_empty()
+                    && crate_id != owner_crate,
+                "invalid external reference identity"
+            ),
+            Target::Unknown { reason } => {
+                ensure!(!reason.is_empty(), "unknown reference needs a reason")
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Capture;
@@ -215,21 +231,63 @@ mod tests {
         let capture: Capture = serde_json::from_value(fixture())?;
         capture.validate()?;
         assert!(capture.missing_evidence().is_empty());
+        let mut tree = fixture();
+        let origin = tree["modules"][0]["origin"].clone();
+        tree["modules"].as_array_mut().ok_or_else(|| anyhow::anyhow!("modules"))?.extend([
+            json!({"id": "branch", "path": "branch", "parent_id": "root", "origin": origin}),
+            json!({"id": "leaf", "path": "branch::leaf", "parent_id": "branch", "origin": origin}),
+        ]);
+        serde_json::from_value::<Capture>(tree.clone())?.validate()?;
+        let mut reversed: Capture = serde_json::from_value(tree.clone())?;
+        reversed.modules.reverse();
+        reversed.validate()?;
+        let declaration = tree["declarations"][0].clone();
         for (pointer, value) in [
             ("/model_version", json!(2)),
+            ("/crate_id", json!("")),
+            ("/covered_categories", json!(["imaginary"])),
+            ("/excluded_compiler_infrastructure", json!(["everything"])),
+            ("/modules", json!([])),
+            (
+                "/modules",
+                json!([
+                    {"id": "root", "path": "", "parent_id": null, "origin": origin},
+                    {"id": "other", "path": "", "parent_id": null, "origin": origin}
+                ]),
+            ),
             ("/modules/0/parent_id", json!("root")),
+            ("/modules/1/id", json!("root")),
+            ("/modules/1/path", json!("")),
+            ("/modules/1/parent_id", json!("leaf")),
+            ("/modules/2/parent_id", json!("missing")),
+            ("/modules/0/origin/location/line", json!(0)),
+            ("/declarations", json!([declaration, declaration])),
+            ("/declarations/0/id", json!("")),
             ("/declarations/0/module_id", json!("missing")),
+            ("/declarations/0/kind", json!("")),
+            ("/declarations/0/origin/location/line", json!(0)),
             ("/references/0/source_id", json!("missing")),
+            ("/references/0/origin/location/line", json!(0)),
             ("/references/0/target/declaration_id", json!("missing")),
+            (
+                "/references/0/target",
+                json!({"status": "external", "crate_id": "crate-A", "crate_name": "self", "definition_id": "item", "module_id": "root", "module_path": ""}),
+            ),
+            (
+                "/references/0/target",
+                json!({"status": "unknown", "reason": ""}),
+            ),
         ] {
-            let mut wire = fixture();
+            let mut wire = tree.clone();
+            if pointer == "/excluded_compiler_infrastructure" {
+                wire["excluded_compiler_infrastructure"] = json!([]);
+            }
             *wire
                 .pointer_mut(pointer)
                 .ok_or_else(|| anyhow::anyhow!("fixture pointer"))? = value;
-            assert!(
-                serde_json::from_value::<Capture>(wire)?.validate().is_err(),
-                "{pointer}"
-            );
+            let result = serde_json::from_value::<Capture>(wire)?.validate();
+            eprintln!("capture-case {pointer}: {result:?}");
+            assert!(result.is_err(), "{pointer}");
         }
         Ok(())
     }

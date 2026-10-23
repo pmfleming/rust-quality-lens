@@ -70,3 +70,34 @@ Validation:
 - Workspace tests, strict Clippy and self `measure all` pass; stage artifacts are
   under `step2/`. This correction enables bounded consumer workflows; it does not
   claim that the self project's remaining macro/type limitations disappeared.
+
+## 3. Compiler capture validation
+
+**Necessity:** `Capture::validate` was a production hotspot at **80.86**, with
+cyclomatic complexity 12, cognitive complexity 8 and function effort 106,010.
+Its single body mixed capture identity, module-tree integrity, declaration
+ownership, reference targets and traversal coverage.
+
+Separated module-tree, declaration and reference validation while preserving
+validation order and error diagnostics. Origin validation is now shared directly:
+references no longer allocate a one-element identity set for the dummy name
+`reference` merely to validate their source origin.
+
+Validation:
+- Expanded the existing local ownership-contract test before changing production
+  code. **22 invalid capture cases have identical decisions and diagnostics** on
+  old and new implementations: identity, exclusions, roots, cycles, dangling
+  parents, duplicates, declaration ownership, origins and reference targets.
+- Valid one-module, multi-level and reverse-ordered trees pass both implementations.
+  Existing unknown-target/incomplete-category abstention coverage remains.
+  Logs: `step3-before-contract.log`, `step3-after-contract.log`.
+- `Capture::validate` hotspot **80.86→20.78**, cyclomatic **12→5**, cognitive **8→1**.
+  The largest extracted validation method is **30.80** (`validate_module_tree`),
+  not an unreported relocated hotspot. Helpers remain in the measured scope.
+- This is a behavior-preserving refactor, not a claim that the old validator
+  accepted an invalid capture. The bounded differential cases are not a proof
+  over all possible inputs. Per-function complexity drops are not a claim that
+  summing cyclomatic complexity across more functions must drop.
+- Workspace tests and strict Clippy pass. Self `measure all` succeeds; line
+  coverage changes **90.24%→90.32%**, with changed denominators. Stage artifacts:
+  `step3/`. Regression cases extend an existing test rather than stack new suites.
