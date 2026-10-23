@@ -37,6 +37,7 @@ mod semantic;
 mod telemetry;
 #[cfg(test)]
 mod test_support;
+mod testing_policy;
 mod tool;
 mod toolchain;
 mod util;

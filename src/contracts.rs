@@ -325,7 +325,11 @@ fn other_payload_schema(tool: &MeasureTool) -> Value {
                 "then": {"required": ["compiler_inventory", "rules", "architecture_model_version"]}}]);
             schema
         }
-        MeasureTool::TestQuality => summary_arrays_schema(tool, &["tests", "findings"]),
+        MeasureTool::TestQuality => {
+            let mut schema = summary_arrays_schema(tool, &["tests", "findings"]);
+            schema["properties"]["testing_policy"] = crate::testing_policy::report_schema();
+            schema
+        }
         MeasureTool::ApiHealth => array_schema(
             "api_health.json",
             "module_key path public_item_count documented_public_item_count documentation_percent",

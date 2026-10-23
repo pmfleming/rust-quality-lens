@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use crate::config::LensConfig;
 use crate::facts::{FileFacts, RunContext, TestFact};
 
-pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Value> {
+pub(super) fn produce(config: &LensConfig, context: &RunContext) -> Result<Value> {
     let facts = selected_facts(context);
     let confidence = if context.correctness_paths.is_empty() {
         context.source_confidence()
@@ -16,11 +16,27 @@ pub(super) fn produce(_config: &LensConfig, context: &RunContext) -> Result<Valu
     let tests = facts
         .iter()
         .flat_map(|fact| fact.items.tests.iter().map(move |test| (fact, test)))
-        .filter(|(_, test)| seen.insert((&test.path, &test.qualified_name)))
-        .map(|(fact, test)| test_row(fact, test))
+        .filter(|(fact, test)| {
+            seen.insert((
+                &fact.package_name,
+                &fact.target_name,
+                &test.path,
+                &test.qualified_name,
+            ))
+        })
+        .map(|(fact, test)| test_row(config, fact, test))
         .collect::<Vec<_>>();
-    let findings = tests.iter().flat_map(test_findings).collect::<Vec<_>>();
+    let mut findings = tests.iter().flat_map(test_findings).collect::<Vec<_>>();
+    let mut confidence = serde_json::from_value(confidence)?;
+    let testing_policy = crate::testing_policy::review(
+        config,
+        &context.snapshot.fingerprint,
+        &tests,
+        &mut confidence,
+        &mut findings,
+    )?;
     Ok(json!({
+        "testing_policy": testing_policy,
         "summary": {
             "test_count": tests.len(),
             "finding_count": findings.len(),
@@ -41,13 +57,13 @@ fn selected_facts(context: &RunContext) -> &[FileFacts] {
     }
 }
 
-fn test_row(fact: &FileFacts, test: &TestFact) -> Value {
+fn test_row(config: &LensConfig, fact: &FileFacts, test: &TestFact) -> Value {
     super::with_fact_identity(
         fact,
         json!({
             "name": test.name,
             "qualified_name": test.qualified_name,
-            "path": test.path,
+            "path": crate::util::project_relative_path(&config.project_root, &test.path),
             "line": test.line,
             "module_key": test.module_key,
             "assertion_count": test.assertion_count,

@@ -111,7 +111,10 @@ fn validate_policy_payload(
             }
             each(&payload["violations"], finding)
         }
-        "test_quality.json" => each(&payload["findings"], finding),
+        "test_quality.json" => {
+            crate::testing_policy::validate_report(payload)?;
+            each(&payload["findings"], finding)
+        }
         "map.json" => each(&payload["graph"]["nodes"], map_node),
         "compiler_inventory.json" => {
             ensure!(

@@ -23,6 +23,7 @@ struct RawConfig {
     history: Option<HistoryConfig>,
     profiles: Option<crate::profiles::ProfileConfig>,
     policy: Option<PolicyConfig>,
+    testing_policy: Option<crate::testing_policy::Config>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -490,6 +491,8 @@ pub(crate) struct LensConfig {
     pub(crate) history: HistoryConfig,
     pub(crate) profiles: crate::profiles::ProfileConfig,
     pub(crate) policy: PolicyConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) testing_policy: Option<crate::testing_policy::Config>,
 }
 
 impl LensConfig {
@@ -523,6 +526,7 @@ impl LensConfig {
             history: Default::default(),
             profiles: Default::default(),
             policy: Default::default(),
+            testing_policy: None,
         }
     }
 
@@ -544,6 +548,10 @@ impl LensConfig {
             roots.push(parent.to_string_lossy().into_owned());
         }
         let mut extra_inputs = self.fingerprint_inputs.clone();
+        if let Some(policy) = &self.testing_policy {
+            extra_inputs.push(policy.manifest.clone());
+            extra_inputs.extend(policy.evidence_inputs.iter().cloned());
+        }
         extra_inputs.push(self.helper_manifest.to_string_lossy().into_owned());
         extra_inputs.extend(local_workspace_inputs(&local_roots));
         let mut fingerprint = crate::util::quality_input_fingerprint(
@@ -654,6 +662,9 @@ impl LensConfig {
         profiles.validate()?;
         let policy = raw.policy.unwrap_or_default();
         policy.validate()?;
+        if let Some(testing) = &raw.testing_policy {
+            testing.validate()?;
+        }
         let project_name = raw.project_name.unwrap_or_else(|| {
             project_root
                 .file_name()
@@ -685,6 +696,7 @@ impl LensConfig {
             history,
             profiles,
             policy,
+            testing_policy: raw.testing_policy,
         })
     }
 }
@@ -940,6 +952,11 @@ fuzz_seconds = 30
 sanitizers = [] # address, leak, memory, or thread
 miri = false
 
+# Optional behavior ownership and test-value review (does not execute tests):
+# [testing_policy]
+# manifest = "rqlens-testing.toml"
+# evidence_inputs = ["docs/testing-requirements.md"]
+
 # Optional Cargo-qualified architecture constraints:
 # [[architecture.rules]]
 # id = "domain-does-not-use-infrastructure"
@@ -1039,6 +1056,7 @@ pub(crate) fn config_schema() -> Value {
                     "miri": {"type": "boolean", "default": false}
                 }
             },
+            "testing_policy": crate::testing_policy::config_schema(),
             "profiles": crate::profiles::config::schema(),
             "history": {
                 "type": "object", "additionalProperties": false,

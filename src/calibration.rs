@@ -198,6 +198,7 @@ fn calibration_config(
         history: Default::default(),
         profiles: Default::default(),
         policy: Default::default(),
+        testing_policy: None,
     })
 }
 
