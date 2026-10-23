@@ -7,6 +7,14 @@ use std::{fs, path::Path, process::Command};
 pub(super) fn required_owner_policy(root: &Path) -> Result<()> {
     setup(root)?;
     fs::write(
+        root.join("src/lib.rs"),
+        "mod internal; pub fn value() -> u8 { internal::value() }\n",
+    )?;
+    fs::write(
+        root.join("src/internal.rs"),
+        "pub fn value() -> u8 { 42 }\n",
+    )?;
+    fs::write(
         root.join("rqlens.toml"),
         "[rust]\nidentity_resolution = 'disabled'\n[testing_policy]\nmanifest = 'testing.toml'\n[policy.rules.\"rust.testing.required-owner\"]\nlevel = 'error'\nmax = 0\n",
     )?;
@@ -15,7 +23,7 @@ pub(super) fn required_owner_policy(root: &Path) -> Result<()> {
     run(root, &["measure", "correctness-run"])?;
     run(root, &["measure", "test-quality"])?;
     assert_eq!(evaluation(root)?["status"], "passed");
-    required_sources_allow_a_complete_gate(root)?;
+    only_required_sources_allow_a_complete_gate(root)?;
 
     fs::write(
         root.join("testing.toml"),
@@ -45,9 +53,15 @@ fn reject_contradictory_owner_report(root: &Path) -> Result<()> {
 }
 
 fn evaluation(root: &Path) -> Result<Value> {
-    let _output = invoke(root, &["check"])?;
+    let output = invoke(root, &["check"])?;
     let policy = document(root, "policy_report.json")?;
-    Ok(policy["policy_rule_evaluations"][0].clone())
+    let evaluation = policy["policy_rule_evaluations"][0].clone();
+    assert_eq!(
+        output.status.success(),
+        evaluation["status"] == "passed",
+        "{policy}"
+    );
+    Ok(evaluation)
 }
 
 fn measure_policy_sources(root: &Path) -> Result<()> {
@@ -57,10 +71,59 @@ fn measure_policy_sources(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn required_sources_allow_a_complete_gate(root: &Path) -> Result<()> {
-    measure_policy_sources(root)?;
+fn only_required_sources_allow_a_complete_gate(root: &Path) -> Result<()> {
+    assert!(!root.join("target/analysis/rust_practices.json").exists());
     run(root, &["check"])?;
     assert_eq!(document(root, "policy_report.json")?["passed"], true);
+    // An unrelated partial producer is diagnostic, not this rule's prerequisite.
+    run(root, &["measure", "architecture-rules"])?;
+    assert_eq!(
+        document(root, "architecture_rules.json")?["measurement_confidence"]["complete"],
+        false
+    );
+    run(root, &["check"])?;
+    assert!(
+        !invoke(root, &["check", "--fail-on", "partial"])?
+            .status
+            .success()
+    );
+    assert_eq!(
+        document(root, "policy_report.json")?["failed_policies"],
+        json!(["partial"])
+    );
+    reject_unavailable_required_report(root)?;
+    let config = root.join("rqlens.toml");
+    let original = fs::read_to_string(&config)?;
+    fs::write(
+        &config,
+        original.replace("rust.testing.required-owner", "rust.unknown.review"),
+    )?;
+    let unknown = evaluation(root)?;
+    assert_eq!(unknown["status"], "incomplete");
+    assert!(
+        unknown["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("No supported per-rule")
+    );
+    fs::write(config, original)?;
+    Ok(())
+}
+
+fn reject_unavailable_required_report(root: &Path) -> Result<()> {
+    let path = root.join("target/analysis/test_quality.json");
+    let original = fs::read(&path)?;
+    fs::remove_file(&path)?;
+    assert_eq!(evaluation(root)?["status"], "incomplete");
+    let mut stale: Value = serde_json::from_slice(&original)?;
+    stale["input_fingerprint"]["digest"] = json!("0000000000000000");
+    fs::write(&path, serde_json::to_vec(&stale)?)?;
+    assert_eq!(evaluation(root)?["status"], "incomplete");
+    assert_eq!(
+        document(root, "policy_report.json")?["artifact_status"]["test_quality.json"]["status"],
+        "stale"
+    );
+    fs::write(path, original)?;
     Ok(())
 }
 

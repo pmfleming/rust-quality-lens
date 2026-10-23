@@ -41,3 +41,32 @@ adapter builds or that macro/type inventory is complete. No rustc-private build
 was substituted with the host toolchain. Compiler inventory still requires its
 separately documented pinned driver. The native fixture validates separate Cargo
 contexts; it does not certify every possible cross-toolchain installation.
+
+## 2. Rule-specific policy prerequisites
+
+**Necessity:** the retained required-owner CLI journey was strengthened to request
+only correctness execution and test-quality evidence. Its rule evaluation passed,
+but `check` still failed because three unrelated producers had not run. This new
+assertion failed before the correction (`step2-red.log`, exit 101).
+
+Removed the blanket four-producer requirement. The existing explicit contract
+mapping in `rule_unavailability` is now the sole configured-rule prerequisite
+resolver; this is not prefix guessing or a new permissive fallback. The published
+blocking contract and testing-policy documentation now state this obligation.
+Architecture error rules retain their independent prerequisite and unknown IDs
+still evaluate incomplete. `--fail-on partial` retains the global completeness gate.
+
+Validation:
+- The same native journey passes without unrelated artifacts and with an actually
+  partial architecture artifact (semantic analysis deliberately disabled).
+- The explicit global partial check still fails, without falsely attributing that
+  failure to configured rules. Missing, stale and contradictory required reports,
+  unknown rules, unknown execution and observed owner failures still fail closed.
+- No new test registration: these are phases of the existing primary owner-gate
+  test. `step2-green.log` records its passing run.
+- All **28 existing adversarial policy-ingestion cases** pass, including disabled,
+  warning, unsupported, unavailable, collision, stale and malformed cases. These
+  synthetic ingestion cases do not certify detector implementations.
+- Workspace tests, strict Clippy and self `measure all` pass; stage artifacts are
+  under `step2/`. This correction enables bounded consumer workflows; it does not
+  claim that the self project's remaining macro/type limitations disappeared.

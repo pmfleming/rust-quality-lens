@@ -164,9 +164,12 @@ Only `required = true` behaviors participate. Unresolved owners or observed owne
 failures exceed the limit. Unknown, skipped, stale, ambiguous execution, no required
 behaviors, an unconfigured policy or incomplete inputs make evaluation unavailable,
 not passed. The gate checks resolution/execution in the actual Cargo scope, not the
-truth of prose requirements. Existing configured-rule prerequisites still require
-fresh practices, reliability, architecture and test-quality artifacts. Waivers and
-exclusions remain visible under existing policy semantics. No deletion, count,
+truth of prose requirements. Configured-rule prerequisites follow the explicit
+rule-to-family contract: this rule requires fresh, complete test-quality evidence,
+including its current execution attribution, not unrelated practices, reliability
+or architecture artifacts. Unknown rule IDs still abstain. Use `--fail-on partial`
+to additionally require global evidence completeness. Waivers and exclusions
+remain visible under existing policy semantics. No deletion, count,
 coverage or sensitivity score is enforced.
 
 ## Optional fault evidence

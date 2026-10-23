@@ -68,22 +68,8 @@ impl Inputs {
                 &mut failures,
             );
         }
-        // Custom rule IDs need every finding source, not a guessed producer prefix.
-        if config
-            .policy
-            .rules
-            .values()
-            .any(|rule| rule.level == PolicyRuleLevel::Error)
-        {
-            for file in [
-                "rust_practices.json",
-                "reliability_findings.json",
-                "architecture_rules.json",
-                "test_quality.json",
-            ] {
-                self.require("configured-rules", file, &mut failures);
-            }
-        }
+        // Configured rules use rule_unavailability's explicit contract mapping.
+        // Unknown IDs abstain there; --fail-on partial remains the global gate.
         failures
     }
 
