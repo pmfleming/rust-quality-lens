@@ -17,7 +17,7 @@ mod definitions;
 pub(crate) mod expansion;
 use definitions::{DefinitionIndex, resolved_definitions};
 
-const CACHE_VERSION: u64 = 17;
+const CACHE_VERSION: u64 = 18;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct IdentityResolutionSummary {
@@ -477,7 +477,9 @@ fn is_semantic_candidate(raw: &str, source: &FileFacts, facts: &[FileFacts]) -> 
     let workspace_library = facts.iter().any(|fact| {
         fact.target_kind == "lib"
             && fact.target_name.replace('-', "_") == first
-            && (fact.package_name != source.package_name || fact.target_name != source.target_name)
+            && (fact.package_name != source.package_name
+                || fact.target_name != source.target_name
+                || fact.target_kind != source.target_kind)
     });
     // A declared child may be physically shared across targets and therefore
     // have a different inventory module key. Ask the resolver, never guess its edge.
@@ -1406,9 +1408,9 @@ mod tests {
         fs::write(&main_path, body)?;
         let mut binary = FileFacts::test_fact(&main_path.to_string_lossy(), "main");
         binary.package_name = library.package_name.clone();
-        binary.target_name = "tool".into();
+        binary.target_name = library.target_name.clone();
         binary.target_kind = "bin".into();
-        binary.module_id = "semantic-fixture::tool::main".into();
+        binary.module_id = "semantic-fixture::public_api::main".into();
         binary
             .graph
             .dependency_references
