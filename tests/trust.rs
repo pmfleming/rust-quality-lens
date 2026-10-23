@@ -288,6 +288,67 @@ fn requested_but_disabled_or_missing_semantics_are_partial() -> anyhow::Result<(
 }
 
 #[test]
+#[ignore = "requires an installed rust-analyzer; run explicitly for semantic integration"]
+fn independent_cargo_projects_resolve_without_cross_project_guesses() -> anyhow::Result<()> {
+    let root = fixture("mod other; pub fn call() { other::go(); }\n")?;
+    fs::write(root.path().join("src/other.rs"), "pub fn go() {}\n")?;
+    let independent = root.path().join("independent");
+    fs::create_dir_all(independent.join("src"))?;
+    fs::write(
+        independent.join("Cargo.toml"),
+        "[package]\nname='independent'\nversion='0.1.0'\nedition='2024'\n[workspace]\n",
+    )?;
+    fs::write(
+        independent.join("src/lib.rs"),
+        "mod other; pub fn call() { other::go(); }\n",
+    )?;
+    fs::write(independent.join("src/other.rs"), "pub fn go() {}\n")?;
+    compile_fixture(root.path())?;
+    compile_fixture(&independent)?;
+    fs::write(
+        root.path().join("rqlens.toml"),
+        "source_roots=['src','independent/src']\noutput_dir='analysis'\n[rust]\nidentity_resolution='required'\nidentity_timeout_seconds=30\n",
+    )?;
+    let first = measure(root.path(), "locality", "locality_metrics.json")?;
+    assert_eq!(first["measurement_confidence"]["complete"], true);
+    let callers = first["records"]
+        .as_array()
+        .context("records")?
+        .iter()
+        .filter(|row| row["outbound_dependencies"] == 1)
+        .map(|row| row["package_name"].as_str().context("package"))
+        .collect::<anyhow::Result<std::collections::BTreeSet<_>>>()?;
+    assert_eq!(
+        callers,
+        ["independent", "trust-fixture"].into_iter().collect(),
+        "{first:#}"
+    );
+    let second = measure(root.path(), "locality", "locality_metrics.json")?;
+    assert_eq!(without_timestamps(first), without_timestamps(second));
+    let artifact = root.path().join("analysis/locality_metrics.json");
+    let previous = fs::read(&artifact)?;
+    let manifest = independent.join("Cargo.toml");
+    fs::write(
+        &manifest,
+        format!(
+            "{}\n[dependencies]\nmissing={{path='absent'}}\n",
+            fs::read_to_string(&manifest)?
+        ),
+    )?;
+    assert!(
+        !invoke(root.path(), &["measure", "locality"])?
+            .status
+            .success()
+    );
+    assert_eq!(
+        fs::read(artifact)?,
+        previous,
+        "unloadable projects must not publish or reuse complete evidence"
+    );
+    Ok(())
+}
+
+#[test]
 fn virtual_workspace_correctness_is_repeatable_without_a_root_package() -> anyhow::Result<()> {
     let root = fixture("")?;
     fs::create_dir_all(root.path().join("member/src"))?;

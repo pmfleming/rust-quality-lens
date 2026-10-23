@@ -474,6 +474,8 @@ pub(crate) struct LensConfig {
     #[serde(skip)]
     pub(crate) cargo_metadata: Option<Value>,
     #[serde(skip)]
+    pub(crate) source_metadata: Vec<Value>,
+    #[serde(skip)]
     pub(crate) helper_metadata: Option<Value>,
     #[serde(skip)]
     pub(crate) output_dir: PathBuf,
@@ -510,6 +512,7 @@ impl LensConfig {
             source_roots: vec![root.join("src").to_string_lossy().into_owned()],
             fingerprint_inputs: Vec::new(),
             cargo_metadata: None,
+            source_metadata: Vec::new(),
             helper_metadata: None,
             output_dir: root.join("target/analysis"),
             helper_manifest: PathBuf::from("unused"),
@@ -540,6 +543,7 @@ impl LensConfig {
         let local_roots = local_package_roots(
             self.cargo_metadata
                 .iter()
+                .chain(self.source_metadata.iter())
                 .chain(self.helper_metadata.iter()),
         );
         let mut roots = self.source_roots.clone();
@@ -595,6 +599,7 @@ impl LensConfig {
             || self
                 .cargo_metadata
                 .iter()
+                .chain(self.source_metadata.iter())
                 .chain(self.helper_metadata.iter())
                 .any(unresolved_paths)
     }
@@ -666,6 +671,12 @@ impl LensConfig {
                     .collect()
             },
         );
+        let source_metadata = source_project_metadata(
+            &source_roots,
+            cargo_metadata.as_ref(),
+            identity_offline,
+            verification.locked,
+        );
         let fingerprint_inputs = raw
             .fingerprint_inputs
             .unwrap_or_default()
@@ -715,6 +726,7 @@ impl LensConfig {
             source_roots,
             fingerprint_inputs,
             cargo_metadata,
+            source_metadata,
             helper_metadata,
             output_dir,
             helper_manifest,
@@ -736,6 +748,58 @@ impl LensConfig {
             testing_policy: raw.testing_policy,
         })
     }
+}
+
+/// Nearest manifest is an ownership boundary, even if its Cargo metadata fails.
+pub(crate) fn nearest_manifest(source: &Path) -> Option<PathBuf> {
+    source
+        .ancestors()
+        .skip(1)
+        .map(|parent| parent.join("Cargo.toml"))
+        .find(|manifest| manifest.is_file())
+}
+
+fn source_project_metadata(
+    roots: &[String],
+    primary: Option<&Value>,
+    offline: bool,
+    locked: bool,
+) -> Vec<Value> {
+    let mut known = primary
+        .into_iter()
+        .flat_map(|metadata| metadata["packages"].as_array().into_iter().flatten())
+        .filter_map(|package| package["manifest_path"].as_str())
+        .map(PathBuf::from)
+        .collect::<BTreeSet<_>>();
+    let manifests = crate::util::iter_rust_files(roots)
+        .iter()
+        .filter_map(|path| nearest_manifest(path))
+        .collect::<BTreeSet<_>>();
+    // Independent projects do not inherit the primary workspace's feature names.
+    let verification = VerificationConfig {
+        locked,
+        ..Default::default()
+    };
+    manifests
+        .into_iter()
+        .filter_map(|manifest| {
+            if !known.insert(manifest.clone()) {
+                return None;
+            }
+            let root = manifest.parent()?;
+            let metadata = cargo_metadata(root, offline, false, &verification)
+                .or_else(|| cargo_metadata(root, offline, true, &verification))?;
+            known.extend(
+                metadata["packages"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|package| package["manifest_path"].as_str())
+                    .map(PathBuf::from),
+            );
+            Some(metadata)
+        })
+        .collect()
 }
 
 fn local_package_roots<'a>(metadata: impl Iterator<Item = &'a Value>) -> BTreeSet<String> {

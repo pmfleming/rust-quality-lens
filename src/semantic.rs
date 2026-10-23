@@ -17,7 +17,7 @@ mod definitions;
 pub(crate) mod expansion;
 use definitions::{DefinitionIndex, resolved_definitions};
 
-const CACHE_VERSION: u64 = 18;
+const CACHE_VERSION: u64 = 19;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct IdentityResolutionSummary {
@@ -150,7 +150,7 @@ fn resolve_inner(
     let started = Instant::now();
     let deadline = started + Duration::from_secs(config.identity_timeout_seconds);
     let linked_project = detached_rust_project(config, facts)?;
-    let mut client = match LspClient::start(config, linked_project.as_deref(), deadline) {
+    let mut client = match LspClient::start(config, facts, linked_project.as_deref(), deadline) {
         Ok(client) => client,
         Err(error) => {
             return unavailable_summary(config, reference_count, analyzer_version, error);
@@ -568,6 +568,37 @@ fn lsp_transport(config: &LensConfig) -> Result<LspTransport> {
     Ok((child, stdin, receiver))
 }
 
+// Link actual Cargo projects for measured files, not just the enclosing workspace.
+// Cargo/rust-analyzer retain each manifest's workspace and toolchain configuration.
+fn cargo_projects(config: &LensConfig, facts: &[FileFacts]) -> std::collections::BTreeSet<String> {
+    let mut workspaces = BTreeMap::new();
+    for metadata in config.cargo_metadata.iter().chain(&config.source_metadata) {
+        let Some(root) = metadata["workspace_root"].as_str() else {
+            continue;
+        };
+        let workspace = canonical_key(Path::new(root).join("Cargo.toml"));
+        let members = metadata["workspace_members"].as_array();
+        for package in metadata["packages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|package| members.is_some_and(|ids| ids.contains(&package["id"])))
+        {
+            if let Some(manifest) = package["manifest_path"].as_str() {
+                workspaces.insert(canonical_key(manifest), workspace.clone());
+            }
+        }
+    }
+    facts
+        .iter()
+        .filter_map(|fact| crate::config::nearest_manifest(&absolute_path(config, &fact.path)))
+        .map(|manifest| {
+            let key = canonical_key(&manifest);
+            workspaces.get(&key).cloned().unwrap_or(key)
+        })
+        .collect()
+}
+
 fn analyzer_configuration(config: &LensConfig, linked_project: Option<&Path>) -> Value {
     let extra_args = if config.identity_offline {
         json!(["--offline"])
@@ -593,14 +624,15 @@ fn analyzer_configuration(config: &LensConfig, linked_project: Option<&Path>) ->
 impl LspClient {
     fn start(
         config: &LensConfig,
+        facts: &[FileFacts],
         linked_project: Option<&Path>,
         deadline: Instant,
     ) -> Result<Self> {
-        Self::start_configured(
-            config,
-            analyzer_configuration(config, linked_project),
-            deadline,
-        )
+        let mut configuration = analyzer_configuration(config, linked_project);
+        if linked_project.is_none() {
+            configuration["linkedProjects"] = json!(cargo_projects(config, facts));
+        }
+        Self::start_configured(config, configuration, deadline)
     }
 
     fn start_configured(

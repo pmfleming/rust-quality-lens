@@ -172,6 +172,7 @@ struct TargetMetadata {
     identity_backend: String,
 }
 
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct CargoTarget {
     src_path: PathBuf,
     manifest_dir: PathBuf,
@@ -186,23 +187,22 @@ fn target_metadata(
     path: &str,
     cargo_targets: &[CargoTarget],
 ) -> TargetMetadata {
-    let absolute = path_key(resolve_project_path(
+    let absolute_path = canonical_or_original(&resolve_project_path(
         PathBuf::from(path),
         &config.project_root,
     ));
+    let absolute = path_key(&absolute_path);
     if let Some(target) = cargo_targets
         .iter()
         .find(|target| path_key(&target.src_path) == absolute)
     {
         return target_metadata_for_target(target, &target.kind);
     }
-    let absolute_path = canonical_or_original(&resolve_project_path(
-        PathBuf::from(path),
-        &config.project_root,
-    ));
+    let owner = crate::config::nearest_manifest(&absolute_path)
+        .and_then(|manifest| manifest.parent().map(canonical_or_original));
     if let Some(package) = cargo_targets
         .iter()
-        .filter(|target| absolute_path.starts_with(&target.manifest_dir))
+        .filter(|target| owner.as_ref() == Some(&target.manifest_dir))
         .max_by_key(|target| target.manifest_dir.components().count())
     {
         let candidate_targets = cargo_targets
@@ -266,13 +266,14 @@ fn target_metadata_for_target(target: &CargoTarget, kind: &str) -> TargetMetadat
 }
 
 pub(super) fn cargo_targets(config: &LensConfig) -> Vec<CargoTarget> {
-    let Some(metadata) = &config.cargo_metadata else {
+    if config.cargo_metadata.is_none() && config.source_metadata.is_empty() {
         return manifest_targets(config);
-    };
-    metadata["packages"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    }
+    let mut targets = config
+        .cargo_metadata
+        .iter()
+        .chain(&config.source_metadata)
+        .flat_map(|metadata| metadata["packages"].as_array().into_iter().flatten())
         .flat_map(|package| {
             let package_name = package["name"].as_str().unwrap_or("unknown").to_string();
             let manifest_dir = package["manifest_path"]
@@ -295,7 +296,10 @@ pub(super) fn cargo_targets(config: &LensConfig) -> Vec<CargoTarget> {
                     })
                 })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    targets.sort();
+    targets.dedup();
+    targets
 }
 
 fn manifest_targets(config: &LensConfig) -> Vec<CargoTarget> {
