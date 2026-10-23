@@ -445,6 +445,7 @@ fn rejected_calibration_preserves_report(
 ) -> anyhow::Result<()> {
     for specs in [
         vec!["missing-separator".to_string()],
+        vec![format!("={}", root.join("single").display())],
         vec![
             format!("one/a={}", root.join("single").display()),
             format!("one_a={}", root.join("workspace").display()),
